@@ -1,0 +1,92 @@
+package cmd
+
+import (
+	"log/slog"
+	"os"
+
+	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/git-mgr/internal/state"
+)
+
+// CLI defines the top-level command structure.
+type CLI struct {
+	// Global flags
+	Config  string `help:"Config file path." default:"~/.config/git-mgr/config.yaml" env:"GIT_MGR_CONFIG" type:"path"`
+	State   string `help:"State file path." default:"~/.local/share/git-mgr/state.yaml" env:"GIT_MGR_STATE" type:"path"`
+	Verbose bool   `help:"Verbose output." short:"v"`
+	Quiet   bool   `help:"Suppress non-error output." short:"q"`
+	Jobs    int    `help:"Max concurrent git operations." short:"j" default:"8"`
+
+	// Commands
+	Version    VersionCmd    `cmd:"" help:"Print version information."`
+	Init       InitCmd       `cmd:"" help:"Create a config file with sensible defaults."`
+	Discover   DiscoverCmd   `cmd:"" help:"Discover repos from configured providers."`
+	Sync       SyncCmd       `cmd:"" help:"Fetch all tracked repos and backup uncommitted changes."`
+	Backup     BackupCmd     `cmd:"" help:"Backup uncommitted changes."`
+	Status     StatusCmd     `cmd:"" help:"Show state of all managed repos."`
+	Clone      CloneCmd      `cmd:"" help:"Manually clone and track a repo."`
+	Adopt      AdoptCmd      `cmd:"" help:"Import existing local repos into management."`
+	Remove     RemoveCmd     `cmd:"" help:"Stop tracking repos."`
+	RemoteSync RemoteSyncCmd `cmd:"" name:"remote-sync" help:"Push backup refs to remotes."`
+	ConfigShow ConfigCmd     `cmd:"" name:"config" help:"Print resolved configuration."`
+}
+
+// Context is passed to all command Run methods.
+type Context struct {
+	Config     string
+	State      string
+	Verbose    bool
+	Quiet      bool
+	Jobs       int
+	VersionStr string
+
+	// Lazily loaded
+	cfg    *config.Config
+	st     *state.State
+	logger *slog.Logger
+}
+
+// LoadConfig loads and validates the config file.
+func (c *Context) LoadConfig() (*config.Config, error) {
+	if c.cfg != nil {
+		return c.cfg, nil
+	}
+	cfg, err := config.Load(c.Config)
+	if err != nil {
+		return nil, err
+	}
+	if c.Jobs > 0 {
+		cfg.Concurrency = c.Jobs
+	}
+	c.cfg = cfg
+	return cfg, nil
+}
+
+// LoadState loads the state file, creating it if it doesn't exist.
+func (c *Context) LoadState() (*state.State, error) {
+	if c.st != nil {
+		return c.st, nil
+	}
+	st, err := state.Load(c.State)
+	if err != nil {
+		return nil, err
+	}
+	c.st = st
+	return st, nil
+}
+
+// Logger returns a configured slog.Logger.
+func (c *Context) Logger() *slog.Logger {
+	if c.logger != nil {
+		return c.logger
+	}
+	level := slog.LevelInfo
+	if c.Verbose {
+		level = slog.LevelDebug
+	}
+	if c.Quiet {
+		level = slog.LevelError
+	}
+	c.logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	return c.logger
+}
