@@ -1,0 +1,246 @@
+# git-mgr configuration
+# Copy to ~/.config/git-mgr/config.yaml
+
+# Where to clone repos. Supports ~ expansion.
+base_dir: "~/repos"
+
+# Directory template under base_dir. Available fields:
+#   {{.Host}}     - github.com, gitlab.com, ghes.company.com
+#   {{.Owner}}    - user or org name
+#   {{.Name}}     - repo name
+#   {{.FullName}} - owner/name
+path_template: "{{.Host}}/{{.Owner}}/{{.Name}}"
+
+# Max concurrent git operations (clone, fetch, backup).
+concurrency: 8
+
+# =============================================================================
+# Provider Instances
+# =============================================================================
+# Named provider instances. Each discovery rule references one by name.
+# You can have multiple instances of the same type (e.g., github.com + GHE).
+
+providers:
+  # Public GitHub
+  - name: "github.com"
+    type: "github"
+    # Token resolution order: token > token_env > token_command
+    # For public repos, token is optional but increases rate limits.
+    token_command: "gh auth token"
+
+  # GitHub Enterprise example
+  # - name: "ghes.company.com"
+  #   type: "github"
+  #   url: "https://ghes.company.com"      # Required for GHE
+  #   token_env: "GHES_TOKEN"              # Custom env var name
+  #   token_command: "gh auth token -h ghes.company.com"
+  #   ssh_key: "~/.ssh/id_work"            # Default SSH key for all repos from this provider
+
+  # Self-hosted GitLab example
+  # - name: "gitlab.company.com"
+  #   type: "gitlab"
+  #   url: "https://gitlab.company.com"
+  #   token_env: "GITLAB_COMPANY_TOKEN"
+  #   ssh_key: "~/.ssh/id_work"
+
+  # Public GitLab
+  # - name: "gitlab.com"
+  #   type: "gitlab"
+  #   token_command: "glab auth token"
+
+# =============================================================================
+# Discovery Rules
+# =============================================================================
+# Each rule discovers repos from a provider. Repos matching ANY rule are included.
+
+discovery:
+  # All repos for a GitHub user
+  - name: "my-repos"
+    provider: "github.com"
+    user: "your-login"                       # Your GitHub username
+    include_forks: false
+    include_archived: false
+    tags: ["personal"]                      # Tags for filtering (git-mgr status --tag personal)
+
+  # All repos in a GitHub org
+  # - name: "work-org"
+  #   provider: "github.com"
+  #   org: "my-company"
+  #   include_forks: false
+  #   include_archived: false
+  #   tags: ["work"]
+  #   ssh_key: "~/.ssh/id_work"            # Override SSH key for this rule
+
+  # Filter by name pattern (regex)
+  # - name: "work-services"
+  #   provider: "ghes.company.com"
+  #   org: "platform"
+  #   name_pattern: "^svc-"                # Only repos starting with "svc-"
+  #   tags: ["work", "services"]
+
+  # Filter by topic
+  # - name: "go-projects"
+  #   provider: "github.com"
+  #   user: "your-login"
+  #   topics: ["go"]                       # Repo must have ALL listed topics
+  #   languages: ["Go"]                    # Filter by primary language
+  #   tags: ["go"]
+
+  # GitLab group
+  # - name: "gitlab-team"
+  #   provider: "gitlab.company.com"
+  #   group: "my-team/backend"             # Includes subgroups
+  #   tags: ["work", "backend"]
+
+# =============================================================================
+# Manual Repos
+# =============================================================================
+# Individual repos to manage without discovery rules.
+# Useful for one-off repos that don't fit any discovery pattern.
+
+repos: []
+  # - url: "git@github.com:someone/useful-fork.git"
+  #   tags: ["libs"]
+  #   ssh_key: "~/.ssh/id_personal"
+  #
+  # - url: "git@gitlab.com:other-org/special-project.git"
+  #   tags: ["work"]
+
+# =============================================================================
+# Exclude Rules
+# =============================================================================
+# Repos matching ANY exclude rule are skipped, even if a discovery rule found them.
+
+exclude: []
+  # Regex on repo name
+  # - name_pattern: "^deprecated-"
+  #
+  # Explicit repo list (owner/name)
+  # - repos:
+  #   - "my-company/legacy-monolith"
+  #   - "my-company/old-frontend"
+
+# =============================================================================
+# Per-Repo Overrides
+# =============================================================================
+# Override settings for specific repos. Matched by full key (host/owner/name)
+# or glob pattern. Later entries take precedence.
+
+overrides: []
+  # Override by glob - all company repos
+  # - repos: ["ghes.company.com/*"]
+  #   ssh_key: "~/.ssh/id_work"
+  #   backup:
+  #     strategy: "patch"                   # No custom refs in company repos
+  #   remote_sync:
+  #     enabled: false
+  #
+  # Override by exact repo
+  # - repos: ["github.com/company/huge-monorepo"]
+  #   sync:
+  #     timeout_per_repo: "15m"
+  #   backup:
+  #     include_untracked: false            # Too many generated files
+  #
+  # Custom path for dotfiles
+  # - repos: ["github.com/your-login/dotfiles"]
+  #   path_template: "{{.Name}}"           # Clone to ~/repos/dotfiles
+
+# =============================================================================
+# Sync Settings
+# =============================================================================
+
+sync:
+  # Run discovery before every sync (auto-clone new repos).
+  auto_discover: true
+
+  # Minimum time between fetches for the same repo.
+  # Frequent cron runs skip recently-fetched repos.
+  min_fetch_interval: "10m"
+
+  # Timeout for a single fetch operation.
+  timeout_per_repo: "5m"
+
+  # Retries on transient network failures (per repo).
+  retries: 2
+
+  # Retry backoff base. Actual delay: base * 2^attempt.
+  retry_backoff: "2s"
+
+# =============================================================================
+# Cleanup Policy (Stale Repos)
+# =============================================================================
+
+cleanup:
+  # What happens when a repo is no longer found by discovery:
+  #   mark_stale       - Set status to "stale" (visible in `git-mgr status --stale`)
+  #   remove           - Remove from state after grace_period (keep files on disk)
+  #   remove_and_delete - Remove from state AND delete from disk after grace_period
+  #   ignore           - Never mark stale. Manual cleanup only.
+  policy: "mark_stale"
+
+  # Grace period before remove/remove_and_delete takes effect.
+  grace_period: "720h"    # 30 days
+
+  # Never auto-cleanup manually-added repos (clone/adopt).
+  protect_manual: true
+
+# =============================================================================
+# Backup Settings
+# =============================================================================
+
+backup:
+  # Enable transparent backup of uncommitted changes during sync.
+  enabled: true
+
+  # Strategy:
+  #   stash-ref - git stash create + custom ref. Fast, atomic. Tracked files only.
+  #   patch     - Generates patch files + tar of untracked. Captures everything.
+  #   both      - Both strategies. Maximum safety.
+  strategy: "both"
+
+  # Include untracked files in patch backups.
+  include_untracked: true
+
+  # Max backups per repo. Oldest pruned first. 0 = unlimited.
+  max_per_repo: 10
+
+  # Patch file storage directory.
+  # Default: ~/.local/share/git-mgr/patches/
+  patch_dir: ""
+
+# =============================================================================
+# Remote Sync
+# =============================================================================
+
+remote_sync:
+  # Push backup refs (refs/git-mgr/*) to remotes.
+  enabled: false
+
+  # Which remote to push to.
+  remote_name: "origin"
+
+  # Only push for repos matching this glob. Empty = all.
+  repos_glob: ""
+
+# =============================================================================
+# Notifications
+# =============================================================================
+
+notify:
+  # Native OS notifications (macOS Notification Center / Linux notify-send).
+  # Silently ignored in Docker/headless.
+  enabled: false
+  on_error: true           # Notify when repos fail to sync
+  on_completion: false     # Notify on every sync (noisy for cron)
+  on_stale: true           # Notify when new stale repos detected
+
+# =============================================================================
+# Logging
+# =============================================================================
+
+log:
+  level: "info"            # debug, info, warn, error
+  format: "json"           # json or text
+  file: ""                 # Log to file in addition to stderr
+                           # e.g., "~/.local/share/git-mgr/git-mgr.log"
