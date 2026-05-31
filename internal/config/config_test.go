@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"gopkg.in/yaml.v3"
@@ -137,6 +138,82 @@ func TestYAMLMarshal_SnakeCase(t *testing.T) {
 	}
 	if !contains(s, "auto_discover:") {
 		t.Errorf("expected auto_discover in YAML output, got:\n%s", s)
+	}
+}
+
+// A backup override that sets only one field must not silently disable
+// backups (regression test for the override-merge bug).
+func TestResolveForRepo_BackupOverrideKeepsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	content := `
+base_dir: /tmp/repos
+providers:
+  - name: github.com
+    type: github
+    token_command: echo t
+overrides:
+  - repos: ["github.com/company/*"]
+    backup:
+      strategy: patch
+    sync:
+      timeout_per_repo: 30s
+`
+	if err := os.WriteFile(cfgPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	r := cfg.ResolveForRepo("github.com/company/api")
+	if !r.Backup.Enabled {
+		t.Error("backup must stay enabled when override only sets strategy")
+	}
+	if r.Backup.Strategy != "patch" {
+		t.Errorf("strategy: got %q, want patch", r.Backup.Strategy)
+	}
+	if !r.Backup.IncludeUntracked {
+		t.Error("include_untracked must stay true (default) when not overridden")
+	}
+	if r.Backup.MaxPerRepo != 10 {
+		t.Errorf("max_per_repo: got %d, want default 10", r.Backup.MaxPerRepo)
+	}
+	if r.Sync.TimeoutPerRepo != 30*time.Second {
+		t.Errorf("timeout_per_repo: got %v, want 30s", r.Sync.TimeoutPerRepo)
+	}
+	// A non-matching repo keeps the global defaults.
+	other := cfg.ResolveForRepo("github.com/other/repo")
+	if other.Backup.Strategy != "both" {
+		t.Errorf("non-matching strategy: got %q, want both", other.Backup.Strategy)
+	}
+}
+
+// An explicit enabled:false in an override must still disable backups.
+func TestResolveForRepo_BackupCanDisable(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	content := `
+base_dir: /tmp/repos
+providers:
+  - name: github.com
+    type: github
+    token_command: echo t
+overrides:
+  - repos: ["github.com/company/*"]
+    backup:
+      enabled: false
+`
+	if err := os.WriteFile(cfgPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	r := cfg.ResolveForRepo("github.com/company/api")
+	if r.Backup.Enabled {
+		t.Error("backup should be disabled when override sets enabled: false")
 	}
 }
 
