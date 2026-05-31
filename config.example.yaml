@@ -244,3 +244,34 @@ log:
   format: "json"           # json or text
   file: ""                 # Log to file in addition to stderr
                            # e.g., "~/.local/share/git-mgr/git-mgr.log"
+
+# =============================================================================
+# Workgroups
+# =============================================================================
+# A workgroup is a parent directory of N member working directories operated on
+# as a unit -- either N worktrees of one source repo (kind: worktree) or N
+# independent clones (kind: clone). Create with `git-mgr wg create <name>`,
+# reconcile with `git-mgr wg ensure`, open a tmux layout with `git-mgr wg open`.
+
+# Parent directory for all workgroups (each lives at <workgroup_base_dir>/<name>).
+workgroup_base_dir: "~/workgroups"
+
+workgroups:
+  # N worktrees of one repo -- one isolated checkout per parallel agent.
+  - name: "feature-x"
+    kind: "worktree"
+    source: "github.com/your-login/myapp"  # tracked repo key, or a local path
+    base_ref: "origin/main"                # fork point (optional; default = source HEAD)
+    members:
+      - { name: "agent-1" }                # branch defaults to the member name
+      - { name: "agent-2" }
+      - { name: "agent-3" }
+
+  # A multi-repo bundle worked on together.
+  - name: "platform"
+    kind: "clone"
+    from_tag: "platform"                   # members = tracked repos carrying this tag
+    # Or list repos explicitly instead of from_tag:
+    # members:
+    #   - { repo: "git@github.com:org/api.git" }
+    #   - { repo: "git@github.com:org/web.git", name: "web" }

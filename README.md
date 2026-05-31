@@ -59,6 +59,7 @@ git-mgr status
 | `git-mgr remote-sync` | Push backup refs to remotes |
 | `git-mgr config` | Print resolved config. `--validate`, `--edit`, `--for-repo <key>` |
 | `git-mgr version` | Print version info |
+| `git-mgr workgroup` (`wg`) | Manage [workgroups](#workgroups): parallel worktrees or multi-repo bundles |
 
 ## Configuration
 
@@ -214,6 +215,79 @@ git-mgr adopt --scan ~/projects --tag legacy
 
 # Dry-run first
 git-mgr adopt --scan ~/projects --dry-run
+```
+
+## Workgroups
+
+A **workgroup** is a parent directory holding *N* member working directories you operate on as a unit — built for running several agents (or yourself) in parallel without them stepping on each other. Two kinds:
+
+- **`worktree`** — N git worktrees of a *single* source repo, each on its own branch (shared `.git`, cheap). Run N agents on one project in isolation.
+- **`clone`** — N independent repos checked out side by side (e.g. microservices you work on together). Group commands fan out across them.
+
+Members are operated on identically; only creation and "in sync" semantics differ by kind.
+
+### Declare in config
+
+```yaml
+workgroup_base_dir: "~/workgroups"           # parent for all workgroups
+
+workgroups:
+  - name: "feature-x"                        # -> ~/workgroups/feature-x/{agent-1,agent-2,agent-3}
+    kind: "worktree"
+    source: "github.com/your-login/myapp"    # a tracked repo key, or a local path
+    base_ref: "origin/main"                  # fork point (optional)
+    members:
+      - { name: "agent-1" }                  # branch defaults to the member name
+      - { name: "agent-2" }
+      - { name: "agent-3" }
+
+  - name: "platform"                         # a multi-repo bundle
+    kind: "clone"
+    from_tag: "platform"                     # members = all tracked repos with this tag
+```
+
+### Commands
+
+| Command | Description |
+|---|---|
+| `wg create <name>` | Materialise a configured workgroup (create its members) |
+| `wg ensure [name]` | Reconcile workgroup(s) to config — recreate missing members; idempotent |
+| `wg adopt <name> <dir>` | Register an existing directory of repos as a workgroup |
+| `wg ls` | List workgroups |
+| `wg status <name>` | Per-member table: branch, state, upstream, ahead/behind, notes |
+| `wg check <name>` | Assert set up + in sync; **non-zero exit** and flags on drift |
+| `wg fetch/commit/pull/push <name>` | Group git operations across all members (concurrent) |
+| `wg exec <name> -- <cmd>` | Run a command in each member directory |
+| `wg open <name>` (`wg tmux`) | Open/attach a tmux session, one pane per member |
+| `wg rm <name>` | Tear down (worktrees detached); `--delete` also removes directories |
+
+`commit` skips clean members and stages tracked changes by default (`--add-all` for untracked); `pull` is `--ff-only` by default (`--rebase` to rebase); `push` takes `--set-upstream`.
+
+### Escape hatch
+
+When agents get stuck, drive every member at once:
+
+```bash
+git-mgr wg status feature-x                    # who's dirty / behind / mid-rebase?
+git-mgr wg commit feature-x -m wip --add-all   # commit everyone's WIP
+git-mgr wg exec feature-x -- git rebase --abort
+```
+
+### Terminal layout (tmux + iTerm)
+
+`wg open` builds a tmux session `wg-<name>` with one pane per member, each `cd`'d into its directory and running `wg check` on startup so drift is flagged the moment you open it:
+
+```bash
+git-mgr wg open feature-x          # create-or-attach; --recreate to rebuild
+git-mgr wg open feature-x --print  # print the tmux script instead of running it
+```
+
+Under **iTerm** it uses tmux control mode (`tmux -CC`), so panes render as native iTerm splits while the tmux session survives disconnects. After a Mac restart the tmux server is gone — just run the same command again and the identical layout is rebuilt deterministically. Make it one keystroke with an alias, or auto-build at login:
+
+```bash
+alias wgx='git-mgr wg open feature-x'
+# or, in a login script / launchd agent, build it detached:
+#   git-mgr wg open feature-x --no-attach
 ```
 
 ## Docker
