@@ -20,7 +20,7 @@
 
 ## Non-Goals
 
-- Never `git pull` or `git merge` -- this tool is read-only with respect to working tree and branches
+- The discover/sync/backup subsystem is read-only with respect to your working tree and branches -- it never `git pull`s, merges, or commits. (The opt-in **workgroup** subsystem is separate and *does* mutate on request; see [Workgroups](#workgroups).)
 - Not a replacement for git workflows (no branch management, no PR creation)
 - Not a monorepo/subrepo tool (no manifest-based dependency linking)
 
@@ -1415,3 +1415,53 @@ The tool is cron-safe because:
 5. **Config file permissions** -- created with 0600 (may reference key paths)
 6. **Patch dir permissions** -- created with 0700 (contains code diffs)
 7. **No secrets in state** -- tokens resolved at runtime, never persisted
+
+---
+
+## Workgroups
+
+The workgroup subsystem manages a parent directory of *N* member working
+directories operated on as a unit. Unlike discover/sync/backup (read-only with
+respect to the working tree), workgroup commands **deliberately mutate** on
+request — creating worktrees/clones and running commit/pull/push. It is a
+distinct, opt-in subsystem with its own command family (`workgroup`, alias `wg`).
+
+### Kinds
+
+- **worktree** — N `git worktree`s of a single source repo, each on its own
+  branch (shared object store; cheap). For running N agents on one project in
+  isolation. "In sync" = present, on the expected branch, not behind base.
+- **clone** — N independent clones (distinct repos), e.g. a microservice
+  bundle. Members are listed explicitly or selected from tracked repos via
+  `from_tag`. "In sync" = present, on a branch, not behind upstream.
+
+A *member* is the unifying abstraction: a working directory with a path,
+branch, and optional upstream. Group operations (status/check/fetch/commit/
+pull/push/exec) treat members identically; only creation and the "in sync"
+predicate differ by kind.
+
+### Desired state vs observed state
+
+- **config** declares workgroups (`workgroups:` + `workgroup_base_dir`) — the
+  reproducible, machine-portable source of truth.
+- **state** records what has been materialised (the `workgroups:` map) — the
+  operational source of truth for group commands.
+- `workgroup ensure` reconciles disk to the declared state (creating missing
+  members, pruning stale worktree registrations); `workgroup check` asserts
+  health and exits non-zero on drift. Together they make a machine restart a
+  non-event: re-running `ensure` + `open` deterministically rebuilds everything.
+
+### Health / "in sync"
+
+`workgroup check` flags (and exits non-zero on) hard problems that need a human:
+missing members, wrong branch (worktree), an in-progress rebase/merge/cherry-pick,
+a present git lock, or being behind upstream/base. Uncommitted/untracked work is
+reported but not treated as failure — agents are expected to have WIP.
+
+### Terminal integration
+
+`workgroup open` builds a tmux session `wg-<name>` (one pane per member, each
+running `wg check` on startup). Under iTerm it attaches via control mode
+(`tmux -CC`) so panes are native iTerm splits backed by a restart-surviving tmux
+session; `--print` emits the script, `--recreate` rebuilds, `--no-attach` builds
+detached (useful from a login agent).
