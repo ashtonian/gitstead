@@ -60,6 +60,7 @@ git-mgr status
 | `git-mgr config` | Print resolved config. `--validate`, `--edit`, `--for-repo <key>` |
 | `git-mgr version` | Print version info |
 | `git-mgr workgroup` (`wg`) | Manage [workgroups](#workgroups): parallel worktrees or multi-repo bundles |
+| `git-mgr install-agent` | Install/remove a periodic sync agent (launchd/systemd/cron) |
 
 ## Configuration
 
@@ -178,13 +179,26 @@ git apply ~/.local/share/git-mgr/patches/.../staged.patch --cached
 git apply ~/.local/share/git-mgr/patches/.../unstaged.patch
 ```
 
-## Cron Setup
+## Scheduling periodic sync
+
+Let git-mgr install a native scheduler for you (recommended):
+
+```bash
+git-mgr install-agent                 # launchd (macOS) / systemd timer (Linux) / cron fallback
+git-mgr install-agent --interval 30m  # custom cadence
+git-mgr install-agent --print         # show the unit file + actions without applying
+git-mgr install-agent --uninstall     # remove it
+```
+
+It schedules `git-mgr sync --quiet` using your platform's native scheduler (a launchd user agent on macOS, a systemd **user** timer on Linux, or a crontab entry otherwise; force one with `--kind`).
+
+Prefer to wire it yourself? A crontab line works too:
 
 ```cron
 */15 * * * * /usr/local/bin/git-mgr sync --quiet 2>> ~/.local/share/git-mgr/git-mgr.log
 ```
 
-Why this is safe:
+Why periodic sync is safe to run unattended:
 - **flock** prevents concurrent runs (overlapping cron exits cleanly)
 - **min_fetch_interval** skips recently-fetched repos
 - **auto_discover** picks up new repos without a separate command

@@ -30,6 +30,8 @@ type CLI struct {
 	RemoteSync RemoteSyncCmd `cmd:"" name:"remote-sync" help:"Push backup refs to remotes."`
 	ConfigShow ConfigCmd     `cmd:"" name:"config" help:"Print resolved configuration."`
 	Workgroup  WorkgroupCmd  `cmd:"" aliases:"wg" help:"Manage workgroups: parallel worktrees or multi-repo bundles."`
+
+	InstallAgent InstallAgentCmd `cmd:"" name:"install-agent" help:"Install/remove a periodic sync agent (launchd/systemd/cron)."`
 }
 
 // Context is passed to all command Run methods.
