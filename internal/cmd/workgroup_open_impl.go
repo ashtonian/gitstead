@@ -7,6 +7,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/ashtonian/git-mgr/internal/shellutil"
 	"github.com/ashtonian/git-mgr/internal/workgroup"
 )
 
@@ -113,14 +114,14 @@ func (c *WGOpenCmd) useITerm() bool {
 // then hand the pane to an interactive shell. Paths are shell-quoted for the
 // pane's shell.
 func paneCommand(selfBin, cfgPath, statePath, wgName, member string) string {
-	parts := []string{shq(selfBin)}
+	parts := []string{shellutil.Quote(selfBin)}
 	if cfgPath != "" {
-		parts = append(parts, "--config", shq(cfgPath))
+		parts = append(parts, "--config", shellutil.Quote(cfgPath))
 	}
 	if statePath != "" {
-		parts = append(parts, "--state", shq(statePath))
+		parts = append(parts, "--state", shellutil.Quote(statePath))
 	}
-	parts = append(parts, "wg", "check", shq(wgName), "--member", shq(member))
+	parts = append(parts, "wg", "check", shellutil.Quote(wgName), "--member", shellutil.Quote(member))
 	return strings.Join(parts, " ") + "; exec $SHELL"
 }
 
@@ -128,9 +129,9 @@ func printTmuxScript(session string, build [][]string, attach []string, recreate
 	fmt.Println("#!/bin/sh")
 	fmt.Printf("# tmux layout for git-mgr workgroup session %q\n", session)
 	if recreate {
-		fmt.Printf("tmux kill-session -t %s 2>/dev/null\n", shq(session))
+		fmt.Printf("tmux kill-session -t %s 2>/dev/null\n", shellutil.Quote(session))
 	}
-	fmt.Printf("if ! tmux has-session -t %s 2>/dev/null; then\n", shq(session))
+	fmt.Printf("if ! tmux has-session -t %s 2>/dev/null; then\n", shellutil.Quote(session))
 	for _, args := range build {
 		fmt.Printf("  tmux %s\n", shJoin(args))
 	}
@@ -145,15 +146,10 @@ func tmuxSession(name string) string {
 	return "wg-" + strings.NewReplacer(".", "-", ":", "-", " ", "-").Replace(name)
 }
 
-// shq single-quotes s for safe use as one shell word.
-func shq(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
 func shJoin(args []string) string {
 	q := make([]string, len(args))
 	for i, a := range args {
-		q[i] = shq(a)
+		q[i] = shellutil.Quote(a)
 	}
 	return strings.Join(q, " ")
 }
