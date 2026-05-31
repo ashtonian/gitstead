@@ -2,6 +2,7 @@ package gitops_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,6 +94,17 @@ func TestIsLocked(t *testing.T) {
 	}
 	if file != ".git/index.lock" {
 		t.Errorf("expected .git/index.lock, got %s", file)
+	}
+}
+
+func TestFetch_LockedReturnsErrLocked(t *testing.T) {
+	dir := setupTestRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, ".git", "index.lock"), []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := gitops.Fetch(context.Background(), dir, "")
+	if !errors.Is(err, gitops.ErrLocked) {
+		t.Errorf("expected ErrLocked, got %v", err)
 	}
 }
 

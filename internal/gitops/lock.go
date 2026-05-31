@@ -2,9 +2,15 @@ package gitops
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 )
+
+// ErrLocked indicates an operation was skipped because a git lock file
+// (e.g. .git/index.lock) was present, signalling another git process is
+// active on the repo. It is transient, not a failure.
+var ErrLocked = errors.New("repo locked")
 
 // Git lock files that indicate an operation is in progress.
 var gitLockFiles = []string{

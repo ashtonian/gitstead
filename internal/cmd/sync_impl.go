@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -135,15 +136,20 @@ func (c *SyncCmd) Run(ctx *Context) error {
 					sshKey := cfg.ResolveSSHKey(key, repo.DiscoveredBy)
 					err := fetchWithRetry(repoCtx, repo.LocalPath, sshKey, repoCfg.Sync)
 					mu.Lock()
-					if err != nil {
+					switch {
+					case err == nil:
+						result.fetched++
+						repo.LastFetch = time.Now()
+						repo.LastFetchError = ""
+					case errors.Is(err, gitops.ErrLocked):
+						// Transient: another git process holds a lock.
+						// Skip this round without flagging an error.
+						result.skippedLocked++
+					default:
 						result.failed++
 						result.errors = append(result.errors, syncError{repo: key, err: err})
 						repo.LastFetchError = err.Error()
 						repo.Status = "error"
-					} else {
-						result.fetched++
-						repo.LastFetch = time.Now()
-						repo.LastFetchError = ""
 					}
 					mu.Unlock()
 				}
@@ -227,6 +233,10 @@ func fetchWithRetry(ctx context.Context, repoPath, sshKey string, cfg config.Syn
 		lastErr = gitops.Fetch(ctx, repoPath, sshKey)
 		if lastErr == nil {
 			return nil
+		}
+		// A lock is transient; don't burn retries waiting on another process.
+		if errors.Is(lastErr, gitops.ErrLocked) {
+			return lastErr
 		}
 	}
 	return lastErr
