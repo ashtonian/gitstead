@@ -148,6 +148,21 @@ func (s *State) Save() error {
 	return nil
 }
 
+// Reload re-reads the state file from disk into s, preserving the file path and
+// any held lock. Call it after AcquireLock so a mutation works from the latest
+// on-disk data and cannot clobber a concurrent writer's changes.
+func (s *State) Reload() error {
+	fresh, err := Load(s.path)
+	if err != nil {
+		return err
+	}
+	s.Version = fresh.Version
+	s.LastSync = fresh.LastSync
+	s.Repos = fresh.Repos
+	s.Workgroups = fresh.Workgroups
+	return nil
+}
+
 // AcquireLock acquires an exclusive flock on the state file.
 // Returns an error if another instance is already running.
 func (s *State) AcquireLock() error {
