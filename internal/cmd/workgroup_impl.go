@@ -61,10 +61,11 @@ func (c *WGCreateCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	st, err := ctx.LoadState()
+	st, unlock, err := lockedState(ctx)
 	if err != nil {
 		return err
 	}
+	defer unlock()
 	if _, exists := st.Workgroups[c.Name]; exists {
 		return fmt.Errorf("workgroup %q already exists; use 'workgroup ensure %s' to reconcile", c.Name, c.Name)
 	}
@@ -95,10 +96,11 @@ func (c *WGEnsureCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	st, err := ctx.LoadState()
+	st, unlock, err := lockedState(ctx)
 	if err != nil {
 		return err
 	}
+	defer unlock()
 
 	var names []string
 	if c.Name != "" {
@@ -141,10 +143,11 @@ func (c *WGEnsureCmd) Run(ctx *Context) error {
 }
 
 func (c *WGAdoptCmd) Run(ctx *Context) error {
-	st, err := ctx.LoadState()
+	st, unlock, err := lockedState(ctx)
 	if err != nil {
 		return err
 	}
+	defer unlock()
 	if _, exists := st.Workgroups[c.Name]; exists {
 		return fmt.Errorf("workgroup %q already exists", c.Name)
 	}
@@ -209,10 +212,11 @@ func (c *WGListCmd) Run(ctx *Context) error {
 }
 
 func (c *WGRemoveCmd) Run(ctx *Context) error {
-	st, err := ctx.LoadState()
+	st, unlock, err := lockedState(ctx)
 	if err != nil {
 		return err
 	}
+	defer unlock()
 
 	var spec *workgroup.Spec
 	if ws, ok := st.Workgroups[c.Name]; ok {
@@ -271,6 +275,24 @@ func printEnsure(statuses []workgroup.MemberStatus, quiet bool) (created, failed
 		}
 	}
 	return created, failed
+}
+
+// lockedState loads the state file, takes the same exclusive flock that sync
+// uses, and re-reads the file under the lock so a mutation cannot clobber a
+// concurrent writer's changes. The returned func releases the lock.
+func lockedState(ctx *Context) (*state.State, func(), error) {
+	st, err := ctx.LoadState()
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := st.AcquireLock(); err != nil {
+		return nil, nil, fmt.Errorf("another git-mgr instance is running; try again")
+	}
+	if err := st.Reload(); err != nil {
+		st.ReleaseLock()
+		return nil, nil, err
+	}
+	return st, st.ReleaseLock, nil
 }
 
 // persistWorkgroup writes the spec into state, preserving the original CreatedAt.
