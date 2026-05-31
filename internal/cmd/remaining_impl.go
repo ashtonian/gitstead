@@ -6,10 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/pathutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -107,7 +107,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 	for _, key := range toRemove {
 		repo := st.Repos[key]
 		if c.Delete && repo.LocalPath != "" {
-			if err := safeRemoveAll(repo.LocalPath); err != nil {
+			if err := pathutil.SafeRemoveAll(repo.LocalPath); err != nil {
 				fmt.Printf("  Failed to delete %s: %v\n", repo.LocalPath, err)
 			} else {
 				fmt.Printf("  Deleted %s\n", repo.LocalPath)
@@ -208,17 +208,4 @@ func runShell(cmd string) error {
 
 func commandContext(cmd string) *exec.Cmd {
 	return exec.Command("sh", "-c", cmd)
-}
-
-// safeRemoveAll validates the path is reasonable before deleting.
-func safeRemoveAll(path string) error {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("resolving path: %w", err)
-	}
-	// Refuse to delete root, home, or paths with too few components
-	if abs == "/" || abs == os.Getenv("HOME") || strings.Count(abs, string(os.PathSeparator)) < 3 {
-		return fmt.Errorf("refusing to delete unsafe path: %s", abs)
-	}
-	return os.RemoveAll(abs)
 }

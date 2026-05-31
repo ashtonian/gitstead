@@ -16,6 +16,7 @@ import (
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/pathutil"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
@@ -248,7 +249,7 @@ func Remove(ctx context.Context, spec *Spec, deleteFiles bool) []string {
 			}
 		}
 		if deleteFiles {
-			if err := safeRemove(m.Path); err != nil {
+			if err := pathutil.SafeRemoveAll(m.Path); err != nil {
 				actions = append(actions, fmt.Sprintf("%s: delete failed: %v", m.Name, err))
 			} else {
 				actions = append(actions, fmt.Sprintf("%s: deleted %s", m.Name, m.Path))
@@ -289,16 +290,4 @@ func ScanAdopt(name, dir string) (*Spec, error) {
 		return nil, fmt.Errorf("no git repositories found under %s", abs)
 	}
 	return spec, nil
-}
-
-// safeRemove refuses to delete obviously dangerous paths.
-func safeRemove(path string) error {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return err
-	}
-	if abs == "/" || abs == os.Getenv("HOME") || strings.Count(abs, string(os.PathSeparator)) < 3 {
-		return fmt.Errorf("refusing to delete unsafe path: %s", abs)
-	}
-	return os.RemoveAll(abs)
 }

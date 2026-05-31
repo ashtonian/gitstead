@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/ashtonian/git-mgr/internal/shellutil"
 )
 
 // Git executes a git command in the given repo directory and returns stdout.
@@ -72,12 +74,6 @@ func GitClone(ctx context.Context, sshURL, destPath, sshKeyPath string) (string,
 func gitSSHCommandEnv(sshKeyPath string) string {
 	return fmt.Sprintf(
 		"GIT_SSH_COMMAND=ssh -i %s -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
-		shellQuote(sshKeyPath),
+		shellutil.Quote(sshKeyPath),
 	)
-}
-
-// shellQuote wraps s in single quotes for safe use inside a shell command,
-// escaping any embedded single quotes.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
