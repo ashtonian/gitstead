@@ -40,6 +40,9 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 	// Print summary
 	for _, r := range results {
 		fmt.Printf("  [%s] %s: found %d repos\n", r.Provider, r.Rule, r.Total)
+		for _, w := range r.Warnings {
+			fmt.Printf("      warning: %s\n", w)
+		}
 	}
 	fmt.Printf("\n%d new, %d existing\n", len(newRepos), existing)
 

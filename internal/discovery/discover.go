@@ -10,11 +10,13 @@ import (
 
 // ProviderForConfig creates the right Provider for a given provider config.
 func ProviderForConfig(cfg config.Provider) (Provider, error) {
-	switch cfg.Type {
+	switch config.NormalizeProviderType(cfg.Type) {
 	case "github":
 		return NewGitHubProvider(cfg)
 	case "gitlab":
 		return NewGitLabProvider(cfg)
+	case "gitea":
+		return NewGiteaProvider(cfg)
 	default:
 		return nil, fmt.Errorf("unknown provider type: %s", cfg.Type)
 	}
@@ -28,6 +30,7 @@ type DiscoverResult struct {
 	NewRepos   []Repo
 	Existing   int
 	StaleCount int
+	Warnings   []string // filters that could not be honored, etc.
 }
 
 // RunDiscovery runs all discovery rules (or a filtered set) and returns discovered repos.
@@ -60,12 +63,12 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 			return nil, nil, fmt.Errorf("creating provider %q: %w", provCfg.Name, err)
 		}
 
-		repos, err := provider.Discover(ctx, rule)
+		res, err := provider.Discover(ctx, rule)
 		if err != nil {
 			return nil, nil, fmt.Errorf("discovering from %q rule %q: %w", provCfg.Name, rule.Name, err)
 		}
 
-		filtered := FilterRepos(repos, rule, cfg.Exclude)
+		filtered, warnings := applyFilters(ctx, provider, res, rule, cfg.Exclude)
 
 		for i := range filtered {
 			r := filtered[i]
@@ -84,6 +87,7 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 			Rule:     rule.Name,
 			Provider: provCfg.Name,
 			Total:    len(filtered),
+			Warnings: warnings,
 		})
 	}
 
@@ -106,6 +110,54 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 	}
 
 	return results, discovered, nil
+}
+
+// applyFilters runs the client-side portion of discovery: it skips filters the
+// provider already enforced server-side, applies the cheap field-based filters,
+// then handles language (and, where needed, topics) via per-repo enrichment on
+// the survivors only. It returns the matching repos plus any warnings about
+// filters that could not be honored.
+func applyFilters(ctx context.Context, provider Provider, res ProviderResult, rule config.DiscoveryRule, excludes []config.ExcludeRule) ([]Repo, []string) {
+	var warnings []string
+	req := requestedFilters(rule)
+
+	// Filters to skip in the cheap client-side pass: those already applied
+	// server-side, plus the ones handled below via enrichment.
+	skip := FilterSet{}
+	for f := range res.Applied {
+		skip[f] = true
+	}
+	skip[FilterLanguage] = true // always handled here, never in FilterRepos
+	deferTopics := req.Has(FilterTopics) && !res.Applied.Has(FilterTopics) && res.Capabilities.CanEnrichTopics
+	if deferTopics {
+		skip[FilterTopics] = true
+	}
+
+	repos := FilterRepos(res.Repos, rule, excludes, skip)
+
+	// Language: enrich the survivors, then match (any requested language).
+	if req.Has(FilterLanguage) && !res.Applied.Has(FilterLanguage) {
+		if res.Capabilities.CanEnrichLanguages {
+			if err := provider.EnrichLanguages(ctx, repos); err != nil {
+				warnings = append(warnings, fmt.Sprintf("rule %q: language lookup failed (%v); 'languages' filter not applied", rule.Name, err))
+			} else {
+				repos = filterByLanguage(repos, rule.Languages)
+			}
+		} else {
+			warnings = append(warnings, fmt.Sprintf("rule %q: provider does not support the 'languages' filter; ignoring it", rule.Name))
+		}
+	}
+
+	// Topics via enrichment (providers that don't return them inline).
+	if deferTopics {
+		if err := provider.EnrichTopics(ctx, repos); err != nil {
+			warnings = append(warnings, fmt.Sprintf("rule %q: topic lookup failed (%v); 'topics' filter not applied", rule.Name, err))
+		} else {
+			repos = filterByTopics(repos, rule.Topics)
+		}
+	}
+
+	return repos, warnings
 }
 
 // parseManualRepo converts a ManualRepo config entry into a Repo.

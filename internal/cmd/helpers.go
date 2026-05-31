@@ -29,6 +29,6 @@ func addRepoToState(st *state.State, repo discovery.Repo, localPath string) {
 		Description:    repo.Description,
 		Status:         "clean",
 		FirstSeen:      now,
-		LastDiscovered:  now,
+		LastDiscovered: now,
 	}
 }

@@ -64,18 +64,18 @@ func (c *CloneCmd) Run(ctx *Context) error {
 
 	now := time.Now()
 	st.Repos[key] = &state.RepoState{
-		CloneURL:      identity.SSHURL,
-		Host:          identity.Host,
-		Owner:         identity.Owner,
-		Name:          identity.Name,
-		FullName:      identity.FullName,
-		Provider:      identity.Host,
-		LocalPath:     destPath,
-		Cloned:        true,
-		Tags:          tags,
-		Status:        "clean",
-		ManuallyAdded: true,
-		FirstSeen:     now,
+		CloneURL:       identity.SSHURL,
+		Host:           identity.Host,
+		Owner:          identity.Owner,
+		Name:           identity.Name,
+		FullName:       identity.FullName,
+		Provider:       identity.Host,
+		LocalPath:      destPath,
+		Cloned:         true,
+		Tags:           tags,
+		Status:         "clean",
+		ManuallyAdded:  true,
+		FirstSeen:      now,
 		LastDiscovered: now,
 	}
 
@@ -89,4 +89,3 @@ func (c *CloneCmd) Run(ctx *Context) error {
 	}
 	return nil
 }
-

@@ -192,7 +192,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		})
 	}
 
-	g.Wait()
+	_ = g.Wait()
 
 	// Notifications
 	if cfg.Notify.Enabled && len(result.errors) > 0 && cfg.Notify.OnError {

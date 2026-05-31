@@ -10,9 +10,9 @@ import (
 func Send(title, msg string) {
 	switch runtime.GOOS {
 	case "darwin":
-		exec.Command("osascript", "-e",
+		_ = exec.Command("osascript", "-e",
 			fmt.Sprintf(`display notification %q with title %q`, msg, title)).Run()
 	case "linux":
-		exec.Command("notify-send", title, msg).Run()
+		_ = exec.Command("notify-send", title, msg).Run()
 	}
 }

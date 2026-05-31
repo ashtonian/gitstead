@@ -1,0 +1,28 @@
+version: "2"
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  settings:
+    errcheck:
+      # Conventionally-ignored returns: console/table writers and best-effort
+      # cleanup/close. Meaningful errors (fetch, save, clone, ...) are still checked.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintln
+        - fmt.Fprintf
+        - fmt.Scanln
+        - (*text/tabwriter.Writer).Flush
+        - os.Remove
+        - os.RemoveAll
+        - (*os.File).Close
+        - syscall.Flock
+  exclusions:
+    rules:
+      # Test helpers routinely ignore setup errors.
+      - path: _test\.go
+        linters:
+          - errcheck
+      # QF1003 is a style suggestion (tagged switch); not worth churn.
+      - linters:
+          - staticcheck
+        text: QF1003

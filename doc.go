@@ -1,5 +1,5 @@
 // git-mgr discovers, clones, syncs, and backs up git repositories
-// across multiple GitHub and GitLab instances into a structured
+// across multiple GitHub, GitLab, and Gitea/Forgejo instances into a structured
 // local directory layout.
 //
 // It is designed to run both interactively (bootstrapping a new machine)
@@ -7,7 +7,7 @@
 // of uncommitted work).
 //
 // Key features:
-//   - Multi-provider discovery (GitHub, GitHub Enterprise, GitLab)
+//   - Multi-provider discovery (GitHub, GitHub Enterprise, GitLab, Gitea/Forgejo)
 //   - Templated directory structure (e.g., github.com/owner/repo)
 //   - Transparent backup of uncommitted changes (stash refs + patch files)
 //   - Cron-safe concurrent sync with flock and lock detection
