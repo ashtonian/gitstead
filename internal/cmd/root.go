@@ -29,6 +29,7 @@ type CLI struct {
 	Remove     RemoveCmd     `cmd:"" help:"Stop tracking repos."`
 	RemoteSync RemoteSyncCmd `cmd:"" name:"remote-sync" help:"Push backup refs to remotes."`
 	ConfigShow ConfigCmd     `cmd:"" name:"config" help:"Print resolved configuration."`
+	Workgroup  WorkgroupCmd  `cmd:"" aliases:"wg" help:"Manage workgroups: parallel worktrees or multi-repo bundles."`
 }
 
 // Context is passed to all command Run methods.

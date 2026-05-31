@@ -14,9 +14,10 @@ import (
 
 // State is the top-level state structure persisted to disk.
 type State struct {
-	Version  int                  `yaml:"version"`
-	LastSync time.Time            `yaml:"last_sync"`
-	Repos    map[string]*RepoState `yaml:"repos"`
+	Version    int                        `yaml:"version"`
+	LastSync   time.Time                  `yaml:"last_sync"`
+	Repos      map[string]*RepoState      `yaml:"repos"`
+	Workgroups map[string]*WorkgroupState `yaml:"workgroups,omitempty"`
 
 	// Internal: path to the state file for Save()
 	path string `yaml:"-"`
@@ -51,13 +52,13 @@ type RepoState struct {
 	Description  string   `yaml:"description"`
 
 	// Sync State
-	LastFetch         time.Time `yaml:"last_fetch"`
-	LastFetchError    string    `yaml:"last_fetch_error"`
-	LastBackup        time.Time `yaml:"last_backup"`
-	LastBackupRef     string    `yaml:"last_backup_ref"`
-	LastBackupHasPatch bool    `yaml:"last_backup_has_patch"`
-	Status            string   `yaml:"status"` // clean, dirty, conflict, error, uncloned, missing, stale
-	Error             string   `yaml:"error"`
+	LastFetch          time.Time `yaml:"last_fetch"`
+	LastFetchError     string    `yaml:"last_fetch_error"`
+	LastBackup         time.Time `yaml:"last_backup"`
+	LastBackupRef      string    `yaml:"last_backup_ref"`
+	LastBackupHasPatch bool      `yaml:"last_backup_has_patch"`
+	Status             string    `yaml:"status"` // clean, dirty, conflict, error, uncloned, missing, stale
+	Error              string    `yaml:"error"`
 
 	// Discovery State
 	FirstSeen      time.Time `yaml:"first_seen"`
@@ -66,14 +67,37 @@ type RepoState struct {
 	ManuallyAdded  bool      `yaml:"manually_added"`
 }
 
+// WorkgroupState is the observed on-disk state of a managed workgroup.
+type WorkgroupState struct {
+	Name      string                 `yaml:"name"`
+	Kind      string                 `yaml:"kind"`
+	Root      string                 `yaml:"root"`
+	Source    string                 `yaml:"source,omitempty"`
+	BaseRef   string                 `yaml:"base_ref,omitempty"`
+	Members   []WorkgroupMemberState `yaml:"members"`
+	CreatedAt time.Time              `yaml:"created_at"`
+	LastCheck time.Time              `yaml:"last_check,omitempty"`
+}
+
+// WorkgroupMemberState is one working directory within a workgroup.
+type WorkgroupMemberState struct {
+	Name     string `yaml:"name"`
+	Path     string `yaml:"path"`
+	Branch   string `yaml:"branch,omitempty"`
+	RepoURL  string `yaml:"repo_url,omitempty"`
+	RepoKey  string `yaml:"repo_key,omitempty"`
+	Upstream string `yaml:"upstream,omitempty"`
+}
+
 // Load reads the state file from disk. Creates a new empty state if the file doesn't exist.
 func Load(path string) (*State, error) {
 	path = expandHome(path)
 
 	s := &State{
-		Version: 1,
-		Repos:   make(map[string]*RepoState),
-		path:    path,
+		Version:    1,
+		Repos:      make(map[string]*RepoState),
+		Workgroups: make(map[string]*WorkgroupState),
+		path:       path,
 	}
 
 	data, err := os.ReadFile(path)
@@ -91,6 +115,9 @@ func Load(path string) (*State, error) {
 
 	if s.Repos == nil {
 		s.Repos = make(map[string]*RepoState)
+	}
+	if s.Workgroups == nil {
+		s.Workgroups = make(map[string]*WorkgroupState)
 	}
 
 	return s, nil

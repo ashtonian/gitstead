@@ -10,8 +10,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/go-viper/mapstructure/v2"
 	"github.com/go-playground/validator/v10"
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
@@ -34,6 +34,9 @@ type Config struct {
 	RemoteSync   RemoteSyncConfig `koanf:"remote_sync"   yaml:"remote_sync"`
 	Notify       NotifyConfig     `koanf:"notify"        yaml:"notify"`
 	Log          LogConfig        `koanf:"log"           yaml:"log"`
+
+	WorkgroupBaseDir string      `koanf:"workgroup_base_dir" yaml:"workgroup_base_dir" default:"~/workgroups"`
+	Workgroups       []Workgroup `koanf:"workgroups" yaml:"workgroups,omitempty" validate:"dive"`
 }
 
 // ManualRepo allows specifying individual repos to manage without discovery rules.
@@ -77,14 +80,65 @@ type ExcludeRule struct {
 	Repos       []string `koanf:"repos"        yaml:"repos,omitempty"`
 }
 
-// Override allows per-repo config overrides.
+// Override allows per-repo config overrides. The Sync/Backup/RemoteSync
+// blocks use dedicated override types with pointer fields so that an unset
+// field is distinguishable from one explicitly set to its zero value.
+// (Using the plain *SyncConfig/*BackupCfg here meant a bare `backup:` block
+// silently forced enabled=false, disabling backups for matched repos.)
 type Override struct {
-	Repos        []string          `koanf:"repos"         yaml:"repos"                   validate:"required,min=1"`
-	SSHKey       string            `koanf:"ssh_key"       yaml:"ssh_key,omitempty"`
-	PathTemplate string            `koanf:"path_template" yaml:"path_template,omitempty"`
-	Sync         *SyncConfig       `koanf:"sync"          yaml:"sync,omitempty"`
-	Backup       *BackupCfg        `koanf:"backup"        yaml:"backup,omitempty"`
-	RemoteSync   *RemoteSyncConfig `koanf:"remote_sync"   yaml:"remote_sync,omitempty"`
+	Repos        []string            `koanf:"repos"         yaml:"repos"                   validate:"required,min=1"`
+	SSHKey       string              `koanf:"ssh_key"       yaml:"ssh_key,omitempty"`
+	PathTemplate string              `koanf:"path_template" yaml:"path_template,omitempty"`
+	Sync         *SyncOverride       `koanf:"sync"          yaml:"sync,omitempty"`
+	Backup       *BackupOverride     `koanf:"backup"        yaml:"backup,omitempty"`
+	RemoteSync   *RemoteSyncOverride `koanf:"remote_sync"   yaml:"remote_sync,omitempty"`
+}
+
+// SyncOverride overrides SyncConfig fields per repo. A nil pointer means "not set".
+type SyncOverride struct {
+	AutoDiscover     *bool          `koanf:"auto_discover"      yaml:"auto_discover,omitempty"`
+	MinFetchInterval *time.Duration `koanf:"min_fetch_interval" yaml:"min_fetch_interval,omitempty"`
+	TimeoutPerRepo   *time.Duration `koanf:"timeout_per_repo"   yaml:"timeout_per_repo,omitempty"`
+	Retries          *int           `koanf:"retries"            yaml:"retries,omitempty"`
+	RetryBackoff     *time.Duration `koanf:"retry_backoff"      yaml:"retry_backoff,omitempty"`
+}
+
+// BackupOverride overrides BackupCfg fields per repo. A nil pointer means "not set".
+type BackupOverride struct {
+	Enabled          *bool   `koanf:"enabled"           yaml:"enabled,omitempty"`
+	Strategy         *string `koanf:"strategy"          yaml:"strategy,omitempty"          validate:"omitempty,oneof=stash-ref patch both"`
+	IncludeUntracked *bool   `koanf:"include_untracked" yaml:"include_untracked,omitempty"`
+	MaxPerRepo       *int    `koanf:"max_per_repo"      yaml:"max_per_repo,omitempty"      validate:"omitempty,min=0"`
+	PatchDir         *string `koanf:"patch_dir"         yaml:"patch_dir,omitempty"`
+}
+
+// RemoteSyncOverride overrides RemoteSyncConfig fields per repo. A nil pointer means "not set".
+type RemoteSyncOverride struct {
+	Enabled    *bool   `koanf:"enabled"     yaml:"enabled,omitempty"`
+	RemoteName *string `koanf:"remote_name" yaml:"remote_name,omitempty"`
+	ReposGlob  *string `koanf:"repos_glob"  yaml:"repos_glob,omitempty"`
+}
+
+// Workgroup declares a set of working directories (members) managed as a unit
+// -- either N worktrees of one source repo (kind "worktree") or N independent
+// clones (kind "clone"). Group commands operate on members uniformly.
+type Workgroup struct {
+	Name    string            `koanf:"name"     yaml:"name"               validate:"required"`
+	Kind    string            `koanf:"kind"     yaml:"kind"               validate:"required,oneof=worktree clone"`
+	BaseDir string            `koanf:"base_dir" yaml:"base_dir,omitempty"`
+	Source  string            `koanf:"source"   yaml:"source,omitempty"`
+	BaseRef string            `koanf:"base_ref" yaml:"base_ref,omitempty"`
+	FromTag string            `koanf:"from_tag" yaml:"from_tag,omitempty"`
+	Members []WorkgroupMember `koanf:"members"  yaml:"members,omitempty"`
+}
+
+// WorkgroupMember is one working directory within a workgroup. For "worktree"
+// groups Branch is the branch to create/check out; for "clone" groups Repo is
+// the SSH URL (or a tracked repo key) to clone.
+type WorkgroupMember struct {
+	Name   string `koanf:"name"   yaml:"name,omitempty"`
+	Branch string `koanf:"branch" yaml:"branch,omitempty"`
+	Repo   string `koanf:"repo"   yaml:"repo,omitempty"`
 }
 
 // SyncConfig controls sync behavior.
@@ -140,10 +194,10 @@ type LogConfig struct {
 type Option func(*loadOptions)
 
 type loadOptions struct {
-	configPath    string
-	envPrefix     string
+	configPath     string
+	envPrefix      string
 	skipValidation bool
-	extraDefaults map[string]any
+	extraDefaults  map[string]any
 }
 
 // WithConfigFile sets the config file path.
@@ -250,6 +304,12 @@ func Load(path string, opts ...Option) (*Config, error) {
 
 func expandPaths(cfg *Config) {
 	cfg.BaseDir = ExpandHome(cfg.BaseDir)
+	cfg.WorkgroupBaseDir = ExpandHome(cfg.WorkgroupBaseDir)
+	for i := range cfg.Workgroups {
+		if cfg.Workgroups[i].BaseDir != "" {
+			cfg.Workgroups[i].BaseDir = ExpandHome(cfg.Workgroups[i].BaseDir)
+		}
+	}
 	if cfg.Backup.PatchDir == "" {
 		cfg.Backup.PatchDir = ExpandHome("~/.local/share/git-mgr/patches")
 	} else {
@@ -309,6 +369,25 @@ func Validate(cfg *Config) error {
 		if !provNames[r.Provider] {
 			return fmt.Errorf("discovery rule %q references unknown provider %q (available: %v)",
 				r.Name, r.Provider, providerNames(cfg.Providers))
+		}
+	}
+
+	// Workgroup cross-field validation
+	wgNames := make(map[string]bool)
+	for _, wg := range cfg.Workgroups {
+		if wgNames[wg.Name] {
+			return fmt.Errorf("duplicate workgroup name: %q", wg.Name)
+		}
+		wgNames[wg.Name] = true
+		switch wg.Kind {
+		case "worktree":
+			if wg.Source == "" {
+				return fmt.Errorf("workgroup %q (worktree) requires 'source'", wg.Name)
+			}
+		case "clone":
+			if wg.FromTag == "" && len(wg.Members) == 0 {
+				return fmt.Errorf("workgroup %q (clone) requires 'members' or 'from_tag'", wg.Name)
+			}
 		}
 	}
 
@@ -415,31 +494,55 @@ func (c *Config) ResolveForRepo(repoKey string) *Config {
 	resolved := *c
 
 	for _, o := range c.Overrides {
-		if matchesOverride(repoKey, o.Repos) {
-			if o.PathTemplate != "" {
-				resolved.PathTemplate = o.PathTemplate
+		if !matchesOverride(repoKey, o.Repos) {
+			continue
+		}
+		if o.PathTemplate != "" {
+			resolved.PathTemplate = o.PathTemplate
+		}
+		if o.Sync != nil {
+			if o.Sync.AutoDiscover != nil {
+				resolved.Sync.AutoDiscover = *o.Sync.AutoDiscover
 			}
-			if o.Sync != nil {
-				if o.Sync.TimeoutPerRepo > 0 {
-					resolved.Sync.TimeoutPerRepo = o.Sync.TimeoutPerRepo
-				}
-				if o.Sync.MinFetchInterval > 0 {
-					resolved.Sync.MinFetchInterval = o.Sync.MinFetchInterval
-				}
+			if o.Sync.MinFetchInterval != nil {
+				resolved.Sync.MinFetchInterval = *o.Sync.MinFetchInterval
 			}
-			if o.Backup != nil {
-				if o.Backup.Strategy != "" {
-					resolved.Backup.Strategy = o.Backup.Strategy
-				}
-				if !o.Backup.Enabled {
-					resolved.Backup.Enabled = false
-				}
-				if !o.Backup.IncludeUntracked {
-					resolved.Backup.IncludeUntracked = false
-				}
+			if o.Sync.TimeoutPerRepo != nil {
+				resolved.Sync.TimeoutPerRepo = *o.Sync.TimeoutPerRepo
 			}
-			if o.RemoteSync != nil {
-				resolved.RemoteSync = *o.RemoteSync
+			if o.Sync.Retries != nil {
+				resolved.Sync.Retries = *o.Sync.Retries
+			}
+			if o.Sync.RetryBackoff != nil {
+				resolved.Sync.RetryBackoff = *o.Sync.RetryBackoff
+			}
+		}
+		if o.Backup != nil {
+			if o.Backup.Enabled != nil {
+				resolved.Backup.Enabled = *o.Backup.Enabled
+			}
+			if o.Backup.Strategy != nil {
+				resolved.Backup.Strategy = *o.Backup.Strategy
+			}
+			if o.Backup.IncludeUntracked != nil {
+				resolved.Backup.IncludeUntracked = *o.Backup.IncludeUntracked
+			}
+			if o.Backup.MaxPerRepo != nil {
+				resolved.Backup.MaxPerRepo = *o.Backup.MaxPerRepo
+			}
+			if o.Backup.PatchDir != nil {
+				resolved.Backup.PatchDir = *o.Backup.PatchDir
+			}
+		}
+		if o.RemoteSync != nil {
+			if o.RemoteSync.Enabled != nil {
+				resolved.RemoteSync.Enabled = *o.RemoteSync.Enabled
+			}
+			if o.RemoteSync.RemoteName != nil {
+				resolved.RemoteSync.RemoteName = *o.RemoteSync.RemoteName
+			}
+			if o.RemoteSync.ReposGlob != nil {
+				resolved.RemoteSync.ReposGlob = *o.RemoteSync.ReposGlob
 			}
 		}
 	}
