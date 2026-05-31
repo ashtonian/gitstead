@@ -88,3 +88,37 @@ func TestEnsureCloneSpec(t *testing.T) {
 		t.Error("clone not created")
 	}
 }
+
+// A worktree member whose branch has no upstream must still be flagged when it
+// falls behind the workgroup's base ref.
+func TestHealth_WorktreeBehindBase(t *testing.T) {
+	ctx := context.Background()
+	src := initRepo(t)
+	base, _ := gitops.Git(ctx, src, "rev-parse", "--abbrev-ref", "HEAD")
+	root := filepath.Join(t.TempDir(), "wg")
+	spec := &workgroup.Spec{
+		Name: "x", Kind: "worktree", Root: root, Source: src, BaseRef: base,
+		Members: []workgroup.Member{{Name: "a", Path: filepath.Join(root, "a"), Branch: "a"}},
+	}
+	if _, err := workgroup.Ensure(ctx, spec, nil); err != nil {
+		t.Fatal(err)
+	}
+	if h := workgroup.ComputeHealth(ctx, spec); !h.OK() {
+		t.Fatalf("expected in sync at fork point, got %+v", h.Members[0].Issues)
+	}
+
+	// Advance the base branch in the source; the member is now behind it.
+	if err := os.WriteFile(filepath.Join(src, "more.txt"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	gitops.Git(ctx, src, "add", ".")
+	gitops.Git(ctx, src, "commit", "-m", "advance base")
+
+	h := workgroup.ComputeHealth(ctx, spec)
+	if h.Members[0].Behind != 1 {
+		t.Errorf("expected behind=1, got %d (issues %v)", h.Members[0].Behind, h.Members[0].Issues)
+	}
+	if h.OK() {
+		t.Error("expected check to flag the member as behind base")
+	}
+}

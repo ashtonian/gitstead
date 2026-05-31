@@ -118,6 +118,22 @@ func (c *WGFetchCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	// Worktree members share the source repo's object store and remotes, so one
+	// fetch updates them all -- and avoids N concurrent fetches contending on
+	// the same ref locks.
+	if spec.Kind == "worktree" {
+		src := spec.Source
+		if src == "" && len(spec.Members) > 0 {
+			src = spec.Members[0].Path
+		}
+		if err := gitops.Fetch(context.Background(), src, ""); err != nil {
+			return fmt.Errorf("%s: fetch failed: %w", c.Name, err)
+		}
+		if !ctx.Quiet {
+			fmt.Printf("%s: fetched shared source\n", c.Name)
+		}
+		return nil
+	}
 	keyFor := wgSSHKeyFor(cfg, st)
 	results := workgroup.ForEach(context.Background(), spec, cfg.Concurrency,
 		func(ctx context.Context, m workgroup.Member) (string, bool, error) {

@@ -87,12 +87,19 @@ func memberHealth(ctx context.Context, spec *Spec, m Member) MemberHealth {
 		mh.Issues = append(mh.Issues, fmt.Sprintf("on branch %q, expected %q", rs.CurrentBranch, m.Branch))
 	}
 
-	if up := gitops.Upstream(ctx, m.Path); up != "" {
-		mh.Upstream = up
-		if ahead, behind, err := gitops.AheadBehind(ctx, m.Path, up); err == nil {
+	mh.Upstream = gitops.Upstream(ctx, m.Path)
+	// Compare against the upstream when set, else (for a worktree) against the
+	// workgroup's base ref. Worktree agent-branches usually have no upstream of
+	// their own, so without this fallback "behind base" would never be flagged.
+	compareRef := mh.Upstream
+	if compareRef == "" && spec.Kind == "worktree" {
+		compareRef = spec.BaseRef
+	}
+	if compareRef != "" {
+		if ahead, behind, err := gitops.AheadBehind(ctx, m.Path, compareRef); err == nil {
 			mh.Ahead, mh.Behind = ahead, behind
 			if behind > 0 {
-				mh.Issues = append(mh.Issues, fmt.Sprintf("behind %s by %d", up, behind))
+				mh.Issues = append(mh.Issues, fmt.Sprintf("behind %s by %d", compareRef, behind))
 			}
 		}
 	}
