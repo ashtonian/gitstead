@@ -1,5 +1,11 @@
 # git-mgr
 
+[![CI](https://github.com/ashtonian/git-mgr/actions/workflows/ci.yml/badge.svg)](https://github.com/ashtonian/git-mgr/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ashtonian/git-mgr.svg)](https://pkg.go.dev/github.com/ashtonian/git-mgr)
+[![Go Report Card](https://goreportcard.com/badge/github.com/ashtonian/git-mgr)](https://goreportcard.com/report/github.com/ashtonian/git-mgr)
+[![Release](https://img.shields.io/github/v/release/ashtonian/git-mgr?sort=semver)](https://github.com/ashtonian/git-mgr/releases)
+[![License: MIT](https://img.shields.io/github/license/ashtonian/git-mgr)](LICENSE)
+
 Discover, clone, sync, and back up git repositories across multiple GitHub and GitLab instances.
 
 ## What it does
