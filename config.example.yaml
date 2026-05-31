@@ -19,6 +19,7 @@ concurrency: 8
 # =============================================================================
 # Named provider instances. Each discovery rule references one by name.
 # You can have multiple instances of the same type (e.g., github.com + GHE).
+# Supported types: github, gitlab, gitea, forgejo.
 
 providers:
   # Public GitHub
@@ -47,6 +48,12 @@ providers:
   # - name: "gitlab.com"
   #   type: "gitlab"
   #   token_command: "glab auth token"
+
+  # Gitea / Forgejo example (GitHub-compatible API under /api/v1/)
+  # - name: "gitea.company.com"
+  #   type: "gitea"                       # or "forgejo" (alias)
+  #   url: "https://gitea.company.com"    # /api/v1/ is appended automatically
+  #   token_env: "GITEA_TOKEN"
 
 # =============================================================================
 # Discovery Rules
@@ -83,7 +90,7 @@ discovery:
   #   provider: "github.com"
   #   user: "your-login"
   #   topics: ["go"]                       # Repo must have ALL listed topics
-  #   languages: ["Go"]                    # Filter by primary language
+  #   languages: ["Go"]                    # Any of the repo's languages, case-insensitive
   #   tags: ["go"]
 
   # GitLab group

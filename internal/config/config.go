@@ -46,10 +46,10 @@ type ManualRepo struct {
 	SSHKey string   `koanf:"ssh_key" yaml:"ssh_key,omitempty"`
 }
 
-// Provider represents a GitHub or GitLab instance.
+// Provider represents a GitHub, GitLab, or Gitea/Forgejo instance.
 type Provider struct {
 	Name         string `koanf:"name"          yaml:"name"                    validate:"required"`
-	Type         string `koanf:"type"          yaml:"type"                    validate:"required,oneof=github gitlab"`
+	Type         string `koanf:"type"          yaml:"type"                    validate:"required,oneof=github gitlab gitea forgejo"`
 	URL          string `koanf:"url"           yaml:"url,omitempty"`
 	Token        string `koanf:"token"         yaml:"token,omitempty"         sensitive:"true"`
 	TokenEnv     string `koanf:"token_env"     yaml:"token_env,omitempty"`
@@ -245,12 +245,12 @@ func Load(path string, opts ...Option) (*Config, error) {
 	// 1. Struct tag defaults (lowest precedence)
 	tagDefaults := DefaultsFromTags[Config]()
 	for key, val := range tagDefaults {
-		k.Set(key, val)
+		_ = k.Set(key, val)
 	}
 
 	// 2. Programmatic defaults
 	for key, val := range o.extraDefaults {
-		k.Set(key, val)
+		_ = k.Set(key, val)
 	}
 
 	// 3. Config file
@@ -337,7 +337,7 @@ func Validate(cfg *Config) error {
 	v := validator.New()
 
 	// Register custom validator for regex patterns
-	v.RegisterValidation("valid_regex", func(fl validator.FieldLevel) bool {
+	_ = v.RegisterValidation("valid_regex", func(fl validator.FieldLevel) bool {
 		_, err := regexp.Compile(fl.Field().String())
 		return err == nil
 	})
@@ -355,20 +355,25 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("invalid path_template %q: %w", cfg.PathTemplate, err)
 	}
 
-	// Check duplicate provider names
-	provNames := make(map[string]bool)
+	// Check duplicate provider names, capturing each provider's type.
+	provType := make(map[string]string)
 	for _, p := range cfg.Providers {
-		if provNames[p.Name] {
+		if _, ok := provType[p.Name]; ok {
 			return fmt.Errorf("duplicate provider name: %q", p.Name)
 		}
-		provNames[p.Name] = true
+		provType[p.Name] = NormalizeProviderType(p.Type)
 	}
 
-	// Check discovery rules reference valid providers
+	// Check discovery rules reference valid providers and use selectors that are
+	// valid for the provider's type.
 	for _, r := range cfg.Discovery {
-		if !provNames[r.Provider] {
+		typ, ok := provType[r.Provider]
+		if !ok {
 			return fmt.Errorf("discovery rule %q references unknown provider %q (available: %v)",
 				r.Name, r.Provider, providerNames(cfg.Providers))
+		}
+		if err := validateSelector(r, typ); err != nil {
+			return err
 		}
 	}
 
@@ -424,6 +429,41 @@ func providerNames(providers []Provider) []string {
 	return names
 }
 
+// NormalizeProviderType maps provider type aliases to their canonical form
+// ("forgejo" -> "gitea"). Unknown types are returned unchanged.
+func NormalizeProviderType(t string) string {
+	if t == "forgejo" {
+		return "gitea"
+	}
+	return t
+}
+
+// validateSelector ensures a discovery rule uses selectors valid for the
+// provider type: github/gitea use user/org; gitlab uses user/group. At most one
+// selector may be set (empty = the authenticated user's own repos).
+func validateSelector(r DiscoveryRule, typ string) error {
+	set := 0
+	for _, s := range []string{r.User, r.Org, r.Group} {
+		if s != "" {
+			set++
+		}
+	}
+	if set > 1 {
+		return fmt.Errorf("discovery rule %q: set at most one of user/org/group", r.Name)
+	}
+	switch typ {
+	case "gitlab":
+		if r.Org != "" {
+			return fmt.Errorf("discovery rule %q: 'org' is not valid for a gitlab provider (use 'group')", r.Name)
+		}
+	case "github", "gitea":
+		if r.Group != "" {
+			return fmt.Errorf("discovery rule %q: 'group' is not valid for a %s provider (use 'org')", r.Name, typ)
+		}
+	}
+	return nil
+}
+
 // --- Defaults from struct tags ---
 
 // DefaultsFromTags walks T's struct tags and extracts `default:"value"` into a flat map.
@@ -435,7 +475,7 @@ func DefaultsFromTags[T any]() map[string]any {
 }
 
 func walkDefaults(t reflect.Type, prefix string, defaults map[string]any) {
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {

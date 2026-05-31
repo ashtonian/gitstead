@@ -26,13 +26,13 @@ import (
 
 // testEnv holds a running Forgejo instance and test paths.
 type testEnv struct {
-	ctx       context.Context
-	container *forgejo.Container
-	httpURL   string // e.g. "http://localhost:32771"
-	adminUser string
-	adminPass string
-	baseDir   string // temp dir for cloned repos
-	stateFile string
+	ctx        context.Context
+	container  *forgejo.Container
+	httpURL    string // e.g. "http://localhost:32771"
+	adminUser  string
+	adminPass  string
+	baseDir    string // temp dir for cloned repos
+	stateFile  string
 	configFile string
 }
 
@@ -89,9 +89,9 @@ func (e *testEnv) createToken(t *testing.T) string {
 func (e *testEnv) createRepo(t *testing.T, token, name string, private bool) string {
 	t.Helper()
 	body := map[string]any{
-		"name":          name,
-		"private":       private,
-		"auto_init":     true, // creates initial commit so clone works
+		"name":           name,
+		"private":        private,
+		"auto_init":      true, // creates initial commit so clone works
 		"default_branch": "main",
 	}
 	resp := e.apiCallWithToken(t, "POST", "/api/v1/user/repos", body, token)
@@ -125,8 +125,8 @@ func (e *testEnv) createOrg(t *testing.T, token, orgName string) {
 func (e *testEnv) createOrgRepo(t *testing.T, token, org, name string) string {
 	t.Helper()
 	body := map[string]any{
-		"name":          name,
-		"auto_init":     true,
+		"name":           name,
+		"auto_init":      true,
 		"default_branch": "main",
 	}
 	resp := e.apiCallWithToken(t, "POST", "/api/v1/orgs/"+org+"/repos", body, token)
@@ -184,7 +184,7 @@ func (e *testEnv) writeConfig(t *testing.T, token string, rules []config.Discove
 	cfg.Providers = []config.Provider{
 		{
 			Name:  "forgejo",
-			Type:  "github", // Forgejo is GitHub API compatible
+			Type:  "github",               // Forgejo is GitHub API compatible
 			URL:   e.httpURL + "/api/v1/", // Forgejo uses /api/v1/, not GHE's /api/v3/
 			Token: token,
 		},
@@ -297,7 +297,7 @@ func TestE2E_DiscoverAndClone(t *testing.T) {
 			Tags:           repo.Tags,
 			Status:         "clean",
 			FirstSeen:      now,
-			LastDiscovered:  now,
+			LastDiscovered: now,
 		}
 	}
 

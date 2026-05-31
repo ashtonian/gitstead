@@ -62,18 +62,18 @@ func (c *AdoptCmd) adoptSingle(ctx *Context, st *state.State, repoPath string) e
 
 	now := time.Now()
 	st.Repos[key] = &state.RepoState{
-		CloneURL:      identity.SSHURL,
-		Host:          identity.Host,
-		Owner:         identity.Owner,
-		Name:          identity.Name,
-		FullName:      identity.FullName,
-		Provider:      identity.Host,
-		LocalPath:     absPath,
-		Cloned:        true,
-		Tags:          tags,
-		Status:        "clean",
-		ManuallyAdded: true,
-		FirstSeen:     now,
+		CloneURL:       identity.SSHURL,
+		Host:           identity.Host,
+		Owner:          identity.Owner,
+		Name:           identity.Name,
+		FullName:       identity.FullName,
+		Provider:       identity.Host,
+		LocalPath:      absPath,
+		Cloned:         true,
+		Tags:           tags,
+		Status:         "clean",
+		ManuallyAdded:  true,
+		FirstSeen:      now,
 		LastDiscovered: now,
 	}
 
