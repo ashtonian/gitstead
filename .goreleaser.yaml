@@ -1,0 +1,66 @@
+version: 2
+
+project_name: git-mgr
+
+builds:
+  - id: git-mgr
+    main: .
+    binary: git-mgr
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+# Multi-arch image built by buildx from the pre-compiled binaries (dockers_v2
+# builds the manifest itself, replacing the old dockers + docker_manifests).
+dockers_v2:
+  - images:
+      - ashtonian/git-mgr
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.goreleaser
+    labels:
+      org.opencontainers.image.title: "{{ .ProjectName }}"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.source: "https://github.com/ashtonian/git-mgr"
+
+homebrew_casks:
+  - name: git-mgr
+    repository:
+      owner: ashtonian
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/ashtonian/git-mgr"
+    description: "Discover, clone, sync, and back up git repositories across GitHub and GitLab."
+
+release:
+  github:
+    owner: ashtonian
+    name: git-mgr
