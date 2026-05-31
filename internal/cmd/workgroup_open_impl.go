@@ -81,7 +81,9 @@ func (c *WGOpenCmd) plan(session string, spec *workgroup.Spec, selfBin, cfgPath,
 
 	first := spec.Members[0]
 	build = append(build,
-		[]string{"new-session", "-d", "-s", session, "-n", "workgroup", "-c", first.Path},
+		// -x/-y give the detached window room so several split-windows don't
+		// fail with "no space for new pane"; it resizes to the client on attach.
+		[]string{"new-session", "-d", "-s", session, "-n", "workgroup", "-x", "250", "-y", "50", "-c", first.Path},
 		[]string{"send-keys", "-t", session, pane(first), "C-m"},
 	)
 	for _, m := range spec.Members[1:] {
