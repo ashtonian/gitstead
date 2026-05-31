@@ -37,10 +37,12 @@ func NewBackupConfig(opts ...BackupOption) BackupConfig {
 	return cfg
 }
 
-func WithStrategy(s string) BackupOption         { return func(c *BackupConfig) { c.Strategy = s } }
-func WithPatchDir(d string) BackupOption          { return func(c *BackupConfig) { c.PatchDir = d } }
-func WithMaxPerRepo(n int) BackupOption           { return func(c *BackupConfig) { c.MaxPerRepo = n } }
-func WithIncludeUntracked(b bool) BackupOption    { return func(c *BackupConfig) { c.IncludeUntracked = b } }
+func WithStrategy(s string) BackupOption { return func(c *BackupConfig) { c.Strategy = s } }
+func WithPatchDir(d string) BackupOption { return func(c *BackupConfig) { c.PatchDir = d } }
+func WithMaxPerRepo(n int) BackupOption  { return func(c *BackupConfig) { c.MaxPerRepo = n } }
+func WithIncludeUntracked(b bool) BackupOption {
+	return func(c *BackupConfig) { c.IncludeUntracked = b }
+}
 
 // BackupMetadata stores context about a backup for restoration.
 type BackupMetadata struct {
@@ -96,6 +98,14 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 	result.IsDirty = true
 	timestamp := time.Now().UTC().Format("20060102T150405Z")
 	result.Timestamp = timestamp
+
+	// git stash create captures tracked (staged + unstaged) changes
+	// only, never untracked files. Under stash-ref-only that means
+	// untracked work is silently not backed up -- warn so it is not a
+	// surprise (strategy "both"/"patch" tars untracked files).
+	if cfg.Strategy == "stash-ref" && wt.HasUntracked {
+		slog.Warn("stash-ref backup does not capture untracked files; use strategy 'both' or 'patch' to back them up", "repo", repoPath)
+	}
 
 	// Strategy: stash-ref
 	if cfg.Strategy == "stash-ref" || cfg.Strategy == "both" {

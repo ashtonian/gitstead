@@ -28,9 +28,7 @@ func GitWithSSHKey(ctx context.Context, repoPath, sshKeyPath string, args ...str
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if sshKeyPath != "" {
-		cmd.Env = append(os.Environ(),
-			fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %s -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new", sshKeyPath),
-		)
+		cmd.Env = append(os.Environ(), gitSSHCommandEnv(sshKeyPath))
 	}
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
@@ -59,12 +57,27 @@ func GitClone(ctx context.Context, sshURL, destPath, sshKeyPath string) (string,
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if sshKeyPath != "" {
-		cmd.Env = append(os.Environ(),
-			fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %s -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new", sshKeyPath),
-		)
+		cmd.Env = append(os.Environ(), gitSSHCommandEnv(sshKeyPath))
 	}
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("git clone %s: %w\n%s", sshURL, err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+// gitSSHCommandEnv builds the GIT_SSH_COMMAND env entry pointing git at a
+// specific SSH key. The key path is shell-quoted because git runs
+// GIT_SSH_COMMAND through the shell, so an unquoted path containing spaces
+// would otherwise be split into separate arguments.
+func gitSSHCommandEnv(sshKeyPath string) string {
+	return fmt.Sprintf(
+		"GIT_SSH_COMMAND=ssh -i %s -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
+		shellQuote(sshKeyPath),
+	)
+}
+
+// shellQuote wraps s in single quotes for safe use inside a shell command,
+// escaping any embedded single quotes.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

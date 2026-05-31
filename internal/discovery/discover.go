@@ -68,9 +68,16 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 		filtered := FilterRepos(repos, rule, cfg.Exclude)
 
 		for i := range filtered {
-			filtered[i].Tags = rule.Tags
-			filtered[i].DiscoveredBy = rule.Name
-			discovered[filtered[i].Key()] = filtered[i]
+			r := filtered[i]
+			r.Tags = rule.Tags
+			r.DiscoveredBy = rule.Name
+			// A repo can match several rules; union their tags and keep the
+			// first matching rule as discoverer (drives ssh-key resolution).
+			if existing, ok := discovered[r.Key()]; ok {
+				r.DiscoveredBy = existing.DiscoveredBy
+				r.Tags = mergeTags(existing.Tags, rule.Tags)
+			}
+			discovered[r.Key()] = r
 		}
 
 		results = append(results, DiscoverResult{
@@ -89,6 +96,12 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 		if tagFilter != "" && !hasTag(parsed.Tags, tagFilter) {
 			continue
 		}
+		if existing, ok := discovered[parsed.Key()]; ok {
+			parsed.Tags = mergeTags(existing.Tags, parsed.Tags)
+			if existing.DiscoveredBy != "" && existing.DiscoveredBy != "_manual" {
+				parsed.DiscoveredBy = existing.DiscoveredBy
+			}
+		}
 		discovered[parsed.Key()] = *parsed
 	}
 
@@ -97,63 +110,103 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 
 // parseManualRepo converts a ManualRepo config entry into a Repo.
 func parseManualRepo(mr config.ManualRepo) (*Repo, error) {
-	url := mr.URL
-
-	// Parse SSH URL: git@host:owner/name.git
-	if len(url) > 4 && url[:4] == "git@" {
-		parts := splitSSH(url)
-		if parts == nil {
-			return nil, fmt.Errorf("invalid SSH URL: %s", url)
-		}
-		return &Repo{
-			Host:         parts.host,
-			Owner:        parts.owner,
-			Name:         parts.name,
-			FullName:     parts.owner + "/" + parts.name,
-			SSHURL:       url,
-			Tags:         mr.Tags,
-			DiscoveredBy: "_manual",
-		}, nil
+	parts := parseGitURL(mr.URL)
+	if parts == nil {
+		return nil, fmt.Errorf("unsupported URL format (expected git@host:owner/repo.git or ssh://git@host[:port]/owner/repo.git): %s", mr.URL)
 	}
-
-	return nil, fmt.Errorf("unsupported URL format (expected git@host:owner/repo.git): %s", url)
+	return &Repo{
+		Host:         parts.host,
+		Owner:        parts.owner,
+		Name:         parts.name,
+		FullName:     parts.owner + "/" + parts.name,
+		SSHURL:       mr.URL,
+		Tags:         mr.Tags,
+		DiscoveredBy: "_manual",
+	}, nil
 }
 
 type sshParts struct {
 	host, owner, name string
 }
 
-func splitSSH(url string) *sshParts {
-	// git@host:owner/name.git
-	colonIdx := -1
-	for i, c := range url {
-		if c == ':' {
-			colonIdx = i
-			break
-		}
+// parseGitURL parses scp-like (git@host:owner/name.git) and ssh://
+// (ssh://git@host[:port]/owner/name.git) URLs. Other schemes return nil.
+func parseGitURL(url string) *sshParts {
+	if strings.HasPrefix(url, "ssh://") {
+		return parseSSHURL(url)
 	}
-	if colonIdx < 0 {
+	if strings.Contains(url, "://") {
 		return nil
 	}
-	host := url[4:colonIdx] // skip "git@"
-	path := url[colonIdx+1:]
-	path = strings.TrimSuffix(path, ".git")
+	if strings.Contains(url, ":") {
+		return splitSSH(url)
+	}
+	return nil
+}
 
-	slashIdx := -1
-	for i, c := range path {
-		if c == '/' {
-			slashIdx = i
-			break
-		}
+// splitSSH parses an scp-like URL: [user@]host:owner/.../name[.git]
+func splitSSH(url string) *sshParts {
+	if at := strings.Index(url, "@"); at >= 0 {
+		url = url[at+1:]
 	}
-	if slashIdx < 0 {
+	colon := strings.Index(url, ":")
+	if colon < 0 {
 		return nil
 	}
-	return &sshParts{
-		host:  host,
-		owner: path[:slashIdx],
-		name:  path[slashIdx+1:],
+	host := url[:colon]
+	owner, name := splitOwnerName(strings.TrimSuffix(url[colon+1:], ".git"))
+	if host == "" || owner == "" || name == "" {
+		return nil
 	}
+	return &sshParts{host: host, owner: owner, name: name}
+}
+
+// parseSSHURL parses ssh://[user@]host[:port]/owner/.../name[.git]
+func parseSSHURL(url string) *sshParts {
+	s := strings.TrimPrefix(url, "ssh://")
+	if at := strings.Index(s, "@"); at >= 0 {
+		s = s[at+1:]
+	}
+	slash := strings.Index(s, "/")
+	if slash < 0 {
+		return nil
+	}
+	host := s[:slash]
+	if c := strings.Index(host, ":"); c >= 0 {
+		host = host[:c]
+	}
+	owner, name := splitOwnerName(strings.TrimSuffix(s[slash+1:], ".git"))
+	if host == "" || owner == "" || name == "" {
+		return nil
+	}
+	return &sshParts{host: host, owner: owner, name: name}
+}
+
+// splitOwnerName splits owner/name or group/subgroup/name into the leading
+// owner path and the final repo name.
+func splitOwnerName(path string) (string, string) {
+	path = strings.Trim(path, "/")
+	idx := strings.LastIndex(path, "/")
+	if idx < 0 {
+		return "", ""
+	}
+	return path[:idx], path[idx+1:]
+}
+
+// mergeTags returns the de-duplicated union of two tag slices, preserving order.
+func mergeTags(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, group := range [][]string{a, b} {
+		for _, t := range group {
+			if t == "" || seen[t] {
+				continue
+			}
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func hasTag(tags []string, target string) bool {
