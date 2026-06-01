@@ -17,7 +17,7 @@ type CLI struct {
 	State   string `help:"State file path." default:"~/.local/share/git-mgr/state.yaml" env:"GIT_MGR_STATE" type:"path"`
 	Verbose bool   `help:"Verbose output." short:"v"`
 	Quiet   bool   `help:"Suppress non-error output." short:"q"`
-	Jobs    int    `help:"Max concurrent git operations." short:"j" default:"8"`
+	Jobs    int    `help:"Max concurrent git operations (default 8)." short:"j" name:"concurrency"`
 
 	// Commands
 	Version    VersionCmd    `cmd:"" help:"Print version information."`
