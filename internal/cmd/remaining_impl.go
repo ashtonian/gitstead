@@ -41,6 +41,12 @@ func (c *RemoteSyncCmd) Run(ctx *Context) error {
 		if !repoCfg.RemoteSync.Enabled {
 			continue
 		}
+		// Honor the configured repos_glob (intersected with the CLI filters).
+		if g := repoCfg.RemoteSync.ReposGlob; g != "" {
+			if matched, _ := filepath.Match(g, key); !matched {
+				continue
+			}
+		}
 
 		remoteName := repoCfg.RemoteSync.RemoteName
 		sshKey := cfg.ResolveSSHKey(key, repo.DiscoveredBy)
@@ -183,6 +189,10 @@ func (c *InitCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	// Append commented stubs so a first-run user has something to uncomment
+	// instead of an empty providers/discovery list. They stay commented, so the
+	// written config still validates as-is.
+	out = append(out, []byte(initExamples)...)
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -194,9 +204,32 @@ func (c *InitCmd) Run(ctx *Context) error {
 	}
 
 	fmt.Printf("Config written to %s\n", path)
-	fmt.Println("Edit the file to add providers and discovery rules.")
+	fmt.Println("Uncomment and edit the provider + discovery stubs, then run 'git-mgr discover'.")
 	return nil
 }
+
+// initExamples are commented-out config stubs appended by `init` so a fresh
+// config is usable by uncommenting rather than authored from scratch. Field
+// names mirror config.example.yaml.
+const initExamples = `
+# --- Examples: uncomment and edit. Full reference: config.example.yaml ---
+#
+# providers:
+#   - name: "github.com"
+#     type: "github"
+#     token_command: "gh auth token"   # or token_env: GITHUB_TOKEN
+#
+# discovery:
+#   - name: "my-repos"
+#     provider: "github.com"
+#     user: "your-username"            # or: org: "your-org"
+#     tags: ["personal"]
+#
+# workgroups:                          # clone is the default kind
+#   - name: "review"
+#     kind: "clone"
+#     from_tag: "backend"
+`
 
 func runShell(cmd string) error {
 	c := commandContext(cmd)
