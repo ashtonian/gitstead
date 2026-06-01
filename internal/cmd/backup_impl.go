@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
@@ -142,41 +141,17 @@ func (c *BackupCmd) runRestore(ctx *Context, cfg *config.Config, st *state.State
 		if !pass(key, repo) || !repo.Cloned {
 			continue
 		}
-
-		// A backup may be a stash ref, patch files, or both -- print whichever
-		// exist for this id, so the instructions match what was actually saved.
-		ref := "refs/git-mgr/backups/" + id
-		hasRef := gitops.GitExitCode(ctx.GoCtx(), repo.LocalPath, "rev-parse", "--verify", "--quiet", ref) == 0
-
-		repoCfg := cfg.ResolveForRepo(key)
-		patchDir := filepath.Join(repoCfg.Backup.PatchDir, filepath.Base(filepath.Dir(repo.LocalPath)), filepath.Base(repo.LocalPath), id)
-		staged := filepath.Join(patchDir, "staged.patch")
-		unstaged := filepath.Join(patchDir, "unstaged.patch")
-		untracked := filepath.Join(patchDir, "untracked.tar.gz")
-
-		if !hasRef && !fileExists(staged) && !fileExists(unstaged) && !fileExists(untracked) {
-			continue // no backup with this id for this repo
+		a := locateBackup(ctx, repo, cfg.ResolveForRepo(key), id)
+		if !a.any() {
+			continue
 		}
 		printed++
-
-		fmt.Printf("To restore backup %s for %s (apply onto a clean tree):\n", id, key)
-		fmt.Printf("  cd %s\n", repo.LocalPath)
-		if hasRef {
-			fmt.Printf("  git stash apply %s\n", ref)
-		}
-		if fileExists(staged) {
-			fmt.Printf("  git apply --cached %s\n", staged)
-		}
-		if fileExists(unstaged) {
-			fmt.Printf("  git apply %s\n", unstaged)
-		}
-		if fileExists(untracked) {
-			fmt.Printf("  tar -xzf %s   # restores untracked files (may overwrite)\n", untracked)
-		}
-		fmt.Println()
+		printRestoreSteps(repo.LocalPath, key, a)
 	}
 	if printed == 0 {
 		fmt.Printf("No backup %q found for the selected repos.\n", id)
+	} else {
+		fmt.Println("Tip: `git-mgr restore <repo> [id]` can apply a backup, or --into a scratch dir.")
 	}
 	return nil
 }

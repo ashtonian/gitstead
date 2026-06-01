@@ -25,6 +25,7 @@ type CLI struct {
 	Discover   DiscoverCmd   `cmd:"" help:"Discover repos from configured providers."`
 	Sync       SyncCmd       `cmd:"" help:"Fetch all tracked repos and backup uncommitted changes."`
 	Backup     BackupCmd     `cmd:"" help:"Backup uncommitted changes."`
+	Restore    RestoreCmd    `cmd:"" help:"Restore a backup (print steps, apply, or --into a scratch dir)."`
 	Status     StatusCmd     `cmd:"" help:"Show state of all managed repos."`
 	Doctor     DoctorCmd     `cmd:"" help:"Diagnose tooling, auth, config, and repo health."`
 	Run        RunCmd        `cmd:"" help:"Run a command in each matching repo (after --)."`

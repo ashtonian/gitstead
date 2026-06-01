@@ -49,6 +49,16 @@ type BackupCmd struct {
 	PushRemote string `help:"Remote for --push-branch (default: config/origin)." default:"" name:"push-remote"`
 }
 
+// RestoreCmd recovers a backup for a repo.
+// Run method is in restore_impl.go
+type RestoreCmd struct {
+	Repo  string `arg:"" help:"Repo key (or glob matching exactly one repo)."`
+	ID    string `arg:"" optional:"" default:"latest" help:"Backup id (timestamp) or 'latest'."`
+	Into  string `help:"Clone + apply the backup into this scratch dir (safe inspection)." default:""`
+	Apply bool   `help:"Apply the backup onto the repo's working tree (refuses a dirty tree without --force)."`
+	Force bool   `help:"With --apply, apply even onto a dirty working tree."`
+}
+
 // StatusCmd shows state of all managed repos.
 type StatusCmd struct {
 	JSON   bool   `help:"JSON output." default:"false"`
