@@ -70,26 +70,28 @@ type RepoState struct {
 	ManuallyAdded  bool      `yaml:"manually_added" json:"manually_added"`
 }
 
-// WorkgroupState is the observed on-disk state of a managed workgroup.
+// WorkgroupState is the observed on-disk state of a managed workgroup. Like
+// RepoState, each field carries a json tag mirroring its yaml tag so JSON output
+// uses the same snake_case keys as the config and state file.
 type WorkgroupState struct {
-	Name      string                 `yaml:"name"`
-	Kind      string                 `yaml:"kind"`
-	Root      string                 `yaml:"root"`
-	Source    string                 `yaml:"source,omitempty"`
-	BaseRef   string                 `yaml:"base_ref,omitempty"`
-	Members   []WorkgroupMemberState `yaml:"members"`
-	CreatedAt time.Time              `yaml:"created_at"`
-	LastCheck time.Time              `yaml:"last_check,omitempty"`
+	Name      string                 `yaml:"name"                json:"name"`
+	Kind      string                 `yaml:"kind"                json:"kind"`
+	Root      string                 `yaml:"root"                json:"root"`
+	Source    string                 `yaml:"source,omitempty"    json:"source,omitempty"`
+	BaseRef   string                 `yaml:"base_ref,omitempty"  json:"base_ref,omitempty"`
+	Members   []WorkgroupMemberState `yaml:"members"             json:"members"`
+	CreatedAt time.Time              `yaml:"created_at"          json:"created_at"`
+	LastCheck time.Time              `yaml:"last_check,omitempty" json:"last_check,omitempty"`
 }
 
 // WorkgroupMemberState is one working directory within a workgroup.
 type WorkgroupMemberState struct {
-	Name     string `yaml:"name"`
-	Path     string `yaml:"path"`
-	Branch   string `yaml:"branch,omitempty"`
-	RepoURL  string `yaml:"repo_url,omitempty"`
-	RepoKey  string `yaml:"repo_key,omitempty"`
-	Upstream string `yaml:"upstream,omitempty"`
+	Name     string `yaml:"name"               json:"name"`
+	Path     string `yaml:"path"               json:"path"`
+	Branch   string `yaml:"branch,omitempty"   json:"branch,omitempty"`
+	RepoURL  string `yaml:"repo_url,omitempty" json:"repo_url,omitempty"`
+	RepoKey  string `yaml:"repo_key,omitempty" json:"repo_key,omitempty"`
+	Upstream string `yaml:"upstream,omitempty" json:"upstream,omitempty"`
 }
 
 // Load reads the state file from disk. Creates a new empty state if the file doesn't exist.

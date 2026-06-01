@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -16,6 +18,7 @@ import (
 // WGStatusCmd shows the per-member status of a workgroup.
 type WGStatusCmd struct {
 	Name string `arg:"" help:"Workgroup name."`
+	JSON bool   `help:"Output JSON."`
 }
 
 // WGCheckCmd asserts a workgroup is set up and in sync.
@@ -61,6 +64,14 @@ func (c *WGStatusCmd) Run(ctx *Context) error {
 		return err
 	}
 	h := workgroup.ComputeHealth(ctx.GoCtx(), spec)
+
+	if c.JSON {
+		views := make([]memberStatusJSON, 0, len(h.Members))
+		for _, m := range h.Members {
+			views = append(views, memberHealthView(c.Name, m))
+		}
+		return printIndentedJSON(views)
+	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "MEMBER\tBRANCH\tSTATE\tUPSTREAM\tAHEAD/BEHIND\tNOTES")
@@ -313,6 +324,113 @@ func memberState(m workgroup.MemberHealth) string {
 	default:
 		return "clean"
 	}
+}
+
+// memberStatusJSON is the stable JSON shape for a member's observed health,
+// shared by `wg status --json` and `wg overview --json`.
+type memberStatusJSON struct {
+	Workgroup string   `json:"workgroup,omitempty"`
+	Member    string   `json:"member"`
+	Path      string   `json:"path"`
+	Branch    string   `json:"branch,omitempty"`
+	State     string   `json:"state"` // missing|clean|dirty|untracked|rebase|merge|cherry-pick
+	Present   bool     `json:"present"`
+	Dirty     bool     `json:"dirty"`
+	Untracked bool     `json:"untracked"`
+	Locked    bool     `json:"locked"`
+	Stuck     string   `json:"stuck,omitempty"`
+	Upstream  string   `json:"upstream,omitempty"`
+	Ahead     int      `json:"ahead"`
+	Behind    int      `json:"behind"`
+	Issues    []string `json:"issues,omitempty"`
+}
+
+func memberHealthView(wgName string, m workgroup.MemberHealth) memberStatusJSON {
+	return memberStatusJSON{
+		Workgroup: wgName,
+		Member:    m.Name,
+		Path:      m.Path,
+		Branch:    m.Branch,
+		State:     memberState(m),
+		Present:   m.Present,
+		Dirty:     m.Dirty,
+		Untracked: m.Untracked,
+		Locked:    m.Locked,
+		Stuck:     m.Stuck,
+		Upstream:  m.Upstream,
+		Ahead:     m.Ahead,
+		Behind:    m.Behind,
+		Issues:    m.Issues,
+	}
+}
+
+func printIndentedJSON(v any) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
+}
+
+// WGOverviewCmd shows member health across ALL created workgroups -- the
+// supervisor view for a fleet of agents (who is dirty / ahead / stuck / done).
+type WGOverviewCmd struct {
+	JSON bool `help:"Output JSON."`
+}
+
+func (c *WGOverviewCmd) Run(ctx *Context) error {
+	st, err := ctx.LoadState()
+	if err != nil {
+		return err
+	}
+	if len(st.Workgroups) == 0 {
+		fmt.Println("No workgroups created. See 'git-mgr wg create --help'.")
+		return nil
+	}
+
+	names := make([]string, 0, len(st.Workgroups))
+	for n := range st.Workgroups {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	type row struct {
+		wg string
+		m  workgroup.MemberHealth
+	}
+	var rows []row
+	for _, n := range names {
+		spec := workgroup.FromState(st.Workgroups[n])
+		for _, m := range workgroup.ComputeHealth(ctx.GoCtx(), spec).Members {
+			rows = append(rows, row{n, m})
+		}
+	}
+
+	if c.JSON {
+		views := make([]memberStatusJSON, 0, len(rows))
+		for _, r := range rows {
+			views = append(views, memberHealthView(r.wg, r.m))
+		}
+		return printIndentedJSON(views)
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "WORKGROUP\tMEMBER\tBRANCH\tSTATE\tAHEAD/BEHIND\tNOTES")
+	counts := map[string]int{}
+	for _, r := range rows {
+		s := memberState(r.m)
+		counts[s]++
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d/%d\t%s\n",
+			r.wg, r.m.Name, dashIfEmpty(r.m.Branch), s, r.m.Ahead, r.m.Behind, strings.Join(r.m.Issues, "; "))
+	}
+	tw.Flush()
+
+	var parts []string
+	for _, s := range []string{"clean", "dirty", "untracked", "rebase", "merge", "cherry-pick", "missing"} {
+		if counts[s] > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", counts[s], s))
+		}
+	}
+	fmt.Printf("\n%d members across %d workgroups: %s\n", len(rows), len(names), strings.Join(parts, ", "))
+	return nil
 }
 
 func countFlagged(h *workgroup.Health) int {

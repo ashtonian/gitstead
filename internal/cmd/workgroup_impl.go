@@ -20,8 +20,9 @@ type WorkgroupCmd struct {
 	Create WGCreateCmd `cmd:"" help:"Create a workgroup from flags (one-off) or a config declaration; materialise its members."`
 	Ensure WGEnsureCmd `cmd:"" help:"Reconcile workgroup(s) on disk to match config (idempotent)."`
 	Adopt  WGAdoptCmd  `cmd:"" help:"Adopt an existing directory of repos as a workgroup."`
-	List   WGListCmd   `cmd:"" name:"ls" help:"List workgroups."`
-	Status WGStatusCmd `cmd:"" help:"Show per-member status of a workgroup."`
+	List     WGListCmd     `cmd:"" name:"ls" help:"List workgroups."`
+	Status   WGStatusCmd   `cmd:"" help:"Show per-member status of a workgroup."`
+	Overview WGOverviewCmd `cmd:"" help:"Member health across all workgroups (fleet supervisor view)."`
 	Check  WGCheckCmd  `cmd:"" help:"Assert a workgroup is set up and in sync (non-zero exit on drift)."`
 	Fetch  WGFetchCmd  `cmd:"" help:"Fetch all members."`
 	Commit WGCommitCmd `cmd:"" help:"Commit changes across all members."`

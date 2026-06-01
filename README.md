@@ -273,7 +273,8 @@ and `wg backup` (plus the scheduled `sync`) keeps every member's WIP safe.
 | `open <name>` | Build/attach a tmux session, one pane per member. `--cmd <command>` runs it in each pane (e.g. an agent); `--no-check`, `--print`, `--recreate`, `--no-attach`. |
 | `check <name>` | Assert health; non-zero exit on drift. |
 | `backup <name>` | Back up every member's uncommitted work (`--push-branch`). |
-| `ls` / `status <name>` | List workgroups / show member status. |
+| `ls` / `status <name>` | List workgroups / show member status (`--json`). |
+| `overview` | Member health across all workgroups — the fleet supervisor view (`--json`). |
 | `rm <name>` | Tear down (backs up dirty members first unless `--force`). |
 | `adopt <name>` | Import an existing directory of working trees. |
 
