@@ -96,6 +96,9 @@ func (c *WGPruneCmd) Run(ctx *Context) error {
 			fmt.Printf("  %s\n", a)
 		}
 		ws.Members = dropMembers(ws.Members, reap)
+		if len(ws.Members) == 0 {
+			delete(st.Workgroups, name) // nothing left -- drop the empty workgroup
+		}
 		reaped += len(reap)
 	}
 

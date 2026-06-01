@@ -63,6 +63,11 @@ func (c *BootstrapCmd) Run(ctx *Context) error {
 		}
 	}
 
+	// Nudge when there's nothing to manage yet (e.g. a freshly init'd config).
+	if cfg, cerr := ctx.LoadConfig(); cerr == nil && len(cfg.Providers) == 0 {
+		fmt.Printf("\nNo providers configured yet — add providers + discovery rules to %s, then re-run bootstrap.\n", config.ExpandHome(ctx.Config))
+	}
+
 	fmt.Println("\nBootstrap complete.")
 	return nil
 }

@@ -166,7 +166,7 @@ func restoreBackupInto(ctx *Context, srcPath, into, label string, a backupArtifa
 	if entries, err := os.ReadDir(into); err == nil && len(entries) > 0 {
 		return fmt.Errorf("--into target %s exists and is not empty", into)
 	}
-	if _, err := gitops.GitClone(ctx.GoCtx(), srcPath, into, ""); err != nil {
+	if err := gitops.Clone(ctx.GoCtx(), srcPath, into, ""); err != nil {
 		return fmt.Errorf("cloning into %s: %w", into, err)
 	}
 	if a.hasRef {
