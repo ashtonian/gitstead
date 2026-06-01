@@ -201,6 +201,16 @@ func timeAgo(t time.Time) string {
 	}
 }
 
+// RunCmd runs a command in each matching tracked repo.
+// Run method is in run_impl.go
+type RunCmd struct {
+	Repos    string   `help:"Filter by glob." default:""`
+	Tag      string   `help:"Filter by tag." default:""`
+	Set      string   `help:"Filter by named set (from config 'sets:')." default:""`
+	FailFast bool     `help:"Stop at the first repo whose command fails." default:"false" name:"fail-fast"`
+	Command  []string `arg:"" help:"Command to run in each repo directory (after --)."`
+}
+
 // CloneCmd manually clones and tracks a repo.
 // Run method is in clone_impl.go
 type CloneCmd struct {
