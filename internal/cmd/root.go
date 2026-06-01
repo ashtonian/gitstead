@@ -25,6 +25,7 @@ type CLI struct {
 	Sync       SyncCmd       `cmd:"" help:"Fetch all tracked repos and backup uncommitted changes."`
 	Backup     BackupCmd     `cmd:"" help:"Backup uncommitted changes."`
 	Status     StatusCmd     `cmd:"" help:"Show state of all managed repos."`
+	Doctor     DoctorCmd     `cmd:"" help:"Diagnose tooling, auth, config, and repo health."`
 	Clone      CloneCmd      `cmd:"" help:"Manually clone and track a repo."`
 	Adopt      AdoptCmd      `cmd:"" help:"Import existing local repos into management."`
 	Remove     RemoveCmd     `cmd:"" help:"Stop tracking repos."`
