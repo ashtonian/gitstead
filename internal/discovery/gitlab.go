@@ -203,6 +203,7 @@ func (g *GitLabProvider) toRepo(p *gitlab.Project) Repo {
 		Name:          p.Path,
 		FullName:      owner + "/" + p.Path,
 		SSHURL:        p.SSHURLToRepo,
+		HTTPURL:       p.HTTPURLToRepo,
 		Description:   p.Description,
 		Language:      "", // GitLab doesn't expose a primary language in the list
 		Topics:        p.Topics,

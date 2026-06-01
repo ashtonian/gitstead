@@ -210,6 +210,7 @@ func (c *ghCore) toRepo(r *github.Repository) Repo {
 		Name:          name,
 		FullName:      owner + "/" + name,
 		SSHURL:        r.GetSSHURL(),
+		HTTPURL:       r.GetCloneURL(),
 		Description:   r.GetDescription(),
 		Language:      r.GetLanguage(),
 		IsFork:        r.GetFork(),

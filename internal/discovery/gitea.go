@@ -167,6 +167,7 @@ func (g *GiteaProvider) toRepo(r *gitea.Repository) Repo {
 		Name:          r.Name,
 		FullName:      owner + "/" + r.Name,
 		SSHURL:        r.SSHURL,
+		HTTPURL:       r.CloneURL,
 		Description:   r.Description,
 		Language:      r.Language,
 		IsFork:        r.Fork,

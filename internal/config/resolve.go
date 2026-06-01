@@ -36,6 +36,9 @@ func (c *Config) ResolveForRepo(repoKey string) *Config {
 		if o.PathTemplate != "" {
 			resolved.PathTemplate = o.PathTemplate
 		}
+		if o.CloneProtocol != "" {
+			resolved.CloneProtocol = o.CloneProtocol
+		}
 		if o.Sync != nil {
 			if o.Sync.AutoDiscover != nil {
 				resolved.Sync.AutoDiscover = *o.Sync.AutoDiscover

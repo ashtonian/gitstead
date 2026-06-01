@@ -11,6 +11,13 @@ base_dir: "~/repos"
 #   {{.FullName}} - owner/name
 path_template: "{{.Host}}/{{.Owner}}/{{.Name}}"
 
+# Transport for cloning/fetching: "ssh" (default) or "https".
+#   ssh   - uses your SSH agent/keys (or a provider/override ssh_key).
+#   https - uses git's own credential helper for auth (e.g. `gh auth setup-git`,
+#           osxkeychain, or a PAT via the manager) -- git-mgr does not store
+#           credentials. Override per repo set under `overrides:`.
+clone_protocol: "ssh"
+
 # Max concurrent git operations (clone, fetch, backup).
 concurrency: 8
 
