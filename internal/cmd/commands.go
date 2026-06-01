@@ -51,6 +51,7 @@ type BackupCmd struct {
 // StatusCmd shows state of all managed repos.
 type StatusCmd struct {
 	JSON   bool   `help:"JSON output." default:"false"`
+	Live   bool   `help:"Inspect working trees live (dirty + ahead/behind), not the cached state." default:"false"`
 	Repos  string `help:"Filter by glob." default:""`
 	Tag    string `help:"Filter by tag." default:""`
 	Dirty  bool   `help:"Only show dirty repos." default:"false"`
@@ -69,6 +70,9 @@ func (c *StatusCmd) Run(ctx *Context) error {
 		return nil
 	}
 
+	if c.Live {
+		return c.runLive(ctx, st)
+	}
 	if c.JSON {
 		return c.runJSON(st)
 	}
