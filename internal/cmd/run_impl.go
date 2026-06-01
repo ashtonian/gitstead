@@ -47,9 +47,12 @@ func (c *RunCmd) Run(ctx *Context) error {
 	}
 	results := make([]result, len(targets))
 	g, gctx := errgroup.WithContext(ctx.GoCtx())
-	sem := make(chan struct{}, cfg.Concurrency)
+	conc := cfg.Concurrency
+	if conc < 1 {
+		conc = 1
+	}
+	sem := make(chan struct{}, conc)
 	for i, key := range targets {
-		i, key := i, key
 		g.Go(func() error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
