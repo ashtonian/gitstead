@@ -112,17 +112,18 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 
 			destPath := filepath.Join(cfg.BaseDir, relPath)
 			sshKey := cfg.ResolveSSHKey(repo.Key(), "")
+			cloneURL, cloneKey := cloneTarget(repo, repoCfg.CloneProtocol, sshKey)
 
 			fmt.Printf("  [%d/%d] %s ...", i+1, len(newRepos), repo.Key())
 			start := time.Now()
 
-			if err := gitops.Clone(ctx.GoCtx(), repo.SSHURL, destPath, sshKey); err != nil {
+			if err := gitops.Clone(ctx.GoCtx(), cloneURL, destPath, cloneKey); err != nil {
 				fmt.Printf(" error: %v\n", err)
 				continue
 			}
 			fmt.Printf(" done (%.1fs)\n", time.Since(start).Seconds())
 
-			addRepoToState(st, repo, destPath)
+			addRepoToState(st, repo, destPath, cloneURL)
 		}
 	}
 

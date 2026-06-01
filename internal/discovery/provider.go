@@ -16,6 +16,7 @@ type Repo struct {
 	Name          string
 	FullName      string // "owner/name"
 	SSHURL        string // "git@host:owner/name.git"
+	HTTPURL       string // "https://host/owner/name.git" (for clone_protocol: https)
 	Description   string
 	Language      string   // primary language (for display/state)
 	Languages     []string // all languages detected in the repo (for filtering)

@@ -6,20 +6,21 @@ import (
 
 // Config is the top-level configuration.
 type Config struct {
-	BaseDir      string           `koanf:"base_dir"      yaml:"base_dir"      default:"~/repos"                              validate:"required"`
-	PathTemplate string           `koanf:"path_template" yaml:"path_template" default:"{{.Host}}/{{.Owner}}/{{.Name}}"       validate:"required"`
-	Concurrency  int              `koanf:"concurrency"   yaml:"concurrency"   default:"8"                                    validate:"min=1,max=128"`
-	Providers    []Provider       `koanf:"providers"     yaml:"providers"      validate:"dive"`
-	Discovery    []DiscoveryRule  `koanf:"discovery"     yaml:"discovery"      validate:"dive"`
-	Repos        []ManualRepo     `koanf:"repos"         yaml:"repos,omitempty" validate:"dive"`
-	Exclude      []ExcludeRule    `koanf:"exclude"       yaml:"exclude"        validate:"dive"`
-	Overrides    []Override       `koanf:"overrides"     yaml:"overrides"      validate:"dive"`
-	Sync         SyncConfig       `koanf:"sync"          yaml:"sync"`
-	Cleanup      CleanupConfig    `koanf:"cleanup"       yaml:"cleanup"`
-	Backup       BackupCfg        `koanf:"backup"        yaml:"backup"`
-	RemoteSync   RemoteSyncConfig `koanf:"remote_sync"   yaml:"remote_sync"`
-	Notify       NotifyConfig     `koanf:"notify"        yaml:"notify"`
-	Log          LogConfig        `koanf:"log"           yaml:"log"`
+	BaseDir       string           `koanf:"base_dir"       yaml:"base_dir"       default:"~/repos"                        validate:"required"`
+	PathTemplate  string           `koanf:"path_template"  yaml:"path_template"  default:"{{.Host}}/{{.Owner}}/{{.Name}}"  validate:"required"`
+	CloneProtocol string           `koanf:"clone_protocol" yaml:"clone_protocol" default:"ssh"                            validate:"oneof=ssh https"`
+	Concurrency   int              `koanf:"concurrency"   yaml:"concurrency"   default:"8"                                    validate:"min=1,max=128"`
+	Providers     []Provider       `koanf:"providers"     yaml:"providers"      validate:"dive"`
+	Discovery     []DiscoveryRule  `koanf:"discovery"     yaml:"discovery"      validate:"dive"`
+	Repos         []ManualRepo     `koanf:"repos"         yaml:"repos,omitempty" validate:"dive"`
+	Exclude       []ExcludeRule    `koanf:"exclude"       yaml:"exclude"        validate:"dive"`
+	Overrides     []Override       `koanf:"overrides"     yaml:"overrides"      validate:"dive"`
+	Sync          SyncConfig       `koanf:"sync"          yaml:"sync"`
+	Cleanup       CleanupConfig    `koanf:"cleanup"       yaml:"cleanup"`
+	Backup        BackupCfg        `koanf:"backup"        yaml:"backup"`
+	RemoteSync    RemoteSyncConfig `koanf:"remote_sync"   yaml:"remote_sync"`
+	Notify        NotifyConfig     `koanf:"notify"        yaml:"notify"`
+	Log           LogConfig        `koanf:"log"           yaml:"log"`
 
 	WorkgroupBaseDir string      `koanf:"workgroup_base_dir" yaml:"workgroup_base_dir" default:"~/workgroups"`
 	Workgroups       []Workgroup `koanf:"workgroups" yaml:"workgroups,omitempty" validate:"dive"`
@@ -73,12 +74,13 @@ type ExcludeRule struct {
 // (Using the plain *SyncConfig/*BackupCfg here meant a bare `backup:` block
 // silently forced enabled=false, disabling backups for matched repos.)
 type Override struct {
-	Repos        []string            `koanf:"repos"         yaml:"repos"                   validate:"required,min=1"`
-	SSHKey       string              `koanf:"ssh_key"       yaml:"ssh_key,omitempty"`
-	PathTemplate string              `koanf:"path_template" yaml:"path_template,omitempty"`
-	Sync         *SyncOverride       `koanf:"sync"          yaml:"sync,omitempty"`
-	Backup       *BackupOverride     `koanf:"backup"        yaml:"backup,omitempty"`
-	RemoteSync   *RemoteSyncOverride `koanf:"remote_sync"   yaml:"remote_sync,omitempty"`
+	Repos         []string            `koanf:"repos"          yaml:"repos"                    validate:"required,min=1"`
+	SSHKey        string              `koanf:"ssh_key"        yaml:"ssh_key,omitempty"`
+	PathTemplate  string              `koanf:"path_template"  yaml:"path_template,omitempty"`
+	CloneProtocol string              `koanf:"clone_protocol" yaml:"clone_protocol,omitempty" validate:"omitempty,oneof=ssh https"`
+	Sync          *SyncOverride       `koanf:"sync"          yaml:"sync,omitempty"`
+	Backup        *BackupOverride     `koanf:"backup"        yaml:"backup,omitempty"`
+	RemoteSync    *RemoteSyncOverride `koanf:"remote_sync"   yaml:"remote_sync,omitempty"`
 }
 
 // SyncOverride overrides SyncConfig fields per repo. A nil pointer means "not set".

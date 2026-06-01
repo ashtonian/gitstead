@@ -155,6 +155,29 @@ GitHub's Search API caps results at 1000 per query; when a query matches more,
 have no such cap). GitLab and Gitea route `query:` to their own project/repo
 search.
 
+### Authentication
+
+git-mgr separates two auth surfaces and **does not store credentials** itself:
+
+- **Provider APIs** (discovery) use a PAT, resolved per provider from `token` /
+  `token_env` / `token_command` (e.g. `token_command: "gh auth token"`).
+- **Git transport** (clone/fetch) uses `clone_protocol` — `ssh` (default; your
+  SSH agent/keys, or a provider/override `ssh_key`) or `https`. Over HTTPS, auth
+  flows through git's own credential helper (`gh auth setup-git`, osxkeychain, a
+  Git Credential Manager, or a PAT stored there). Set it globally or per repo set:
+
+```yaml
+clone_protocol: https            # default ssh
+overrides:
+  - repos: ["github.com/work-org/*"]
+    clone_protocol: ssh
+    ssh_key: "~/.ssh/id_work"
+```
+
+`git-mgr clone <url>` honors the scheme you pass (an `https://` URL clones over
+HTTPS, `git@…`/`ssh://` over SSH). `git-mgr doctor` reports whether each
+provider's token resolves and whether configured SSH keys exist.
+
 ### Manual repos, excludes, overrides, tags
 
 ```yaml

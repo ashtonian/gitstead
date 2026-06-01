@@ -50,10 +50,15 @@ func (c *CloneCmd) Run(ctx *Context) error {
 		destPath = filepath.Join(cfg.BaseDir, relPath)
 	}
 
-	sshKey := cfg.ResolveSSHKey(key, "")
+	// Honor the transport the user gave: an https URL clones over https (auth via
+	// git's credential helper), otherwise SSH with the resolved key.
+	cloneURL, cloneKey := identity.SSHURL, cfg.ResolveSSHKey(key, "")
+	if isHTTPURL(c.URL) {
+		cloneURL, cloneKey = c.URL, ""
+	}
 
 	fmt.Printf("Cloning %s ...\n", key)
-	if err := gitops.Clone(ctx.GoCtx(), identity.SSHURL, destPath, sshKey); err != nil {
+	if err := gitops.Clone(ctx.GoCtx(), cloneURL, destPath, cloneKey); err != nil {
 		return err
 	}
 
@@ -64,7 +69,7 @@ func (c *CloneCmd) Run(ctx *Context) error {
 
 	now := time.Now()
 	st.Repos[key] = &state.RepoState{
-		CloneURL:       identity.SSHURL,
+		CloneURL:       cloneURL,
 		Host:           identity.Host,
 		Owner:          identity.Owner,
 		Name:           identity.Name,
