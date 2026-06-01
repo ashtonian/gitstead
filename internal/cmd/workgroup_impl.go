@@ -49,6 +49,9 @@ type WGCreateCmd struct {
 	Sync    bool     `help:"Track the underlying repo(s) so 'git-mgr sync' keeps them fetched."`
 	Save    bool     `help:"Append the synthesized workgroup to the config file."`
 	Force   bool     `help:"With --save, overwrite an existing config workgroup of the same name."`
+	Open    bool     `help:"After creating, open a tmux session with one pane per member."`
+	Cmd     string   `help:"With --open, run this command in each pane (e.g. 'claude')."`
+	NoCheck bool     `name:"no-check" help:"With --open, skip the per-pane 'wg check'."`
 }
 
 // synthesized reports whether any workgroup-defining flag was given (vs. the
@@ -228,6 +231,19 @@ type WGRemoveCmd struct {
 }
 
 func (c *WGCreateCmd) Run(ctx *Context) error {
+	// materialize holds the state lock; let it return (releasing the lock) before
+	// opening, so the tmux attach never runs while the lock is held.
+	if err := c.materialize(ctx); err != nil {
+		return err
+	}
+	if c.Open {
+		open := &WGOpenCmd{Name: c.Name, Cmd: c.Cmd, NoCheck: c.NoCheck}
+		return open.Run(ctx)
+	}
+	return nil
+}
+
+func (c *WGCreateCmd) materialize(ctx *Context) error {
 	cfg, err := ctx.LoadConfig()
 	if err != nil {
 		return err

@@ -246,6 +246,19 @@ git-mgr wg create scratch --source ~/code/app --count 4 --base-ref origin/main
 git-mgr wg create fleet --repo git@github.com:me/app.git --count 3 --save --sync
 ```
 
+**Agent shells, one command.** `wg open --cmd <command>` runs a command in each
+pane before handing it a shell; combined with `--open` on create you get N
+isolated workspaces each running your agent. Under iTerm the panes are native
+splits (tmux `-CC` control mode), elsewhere a normal tmux session:
+
+```bash
+# 4 clones of a repo, each pane running `claude` (a shell alias works too):
+git-mgr wg create fleet --repo git@github.com:me/app.git --count 4 --open --cmd claude
+
+# or open an existing workgroup the same way:
+git-mgr wg open fleet --cmd claude          # add --no-check to skip the startup status line
+```
+
 `--member` (repeatable) sets members explicitly — `name[:branch]` for worktree,
 a repo URL/key for clone — overriding `--count`. Workgroups declared in config
 (`workgroups:`) are reconciled with `wg ensure` and rebuilt deterministically
@@ -257,7 +270,7 @@ and `wg backup` (plus the scheduled `sync`) keeps every member's WIP safe.
 |---|---|
 | `create <name>` | Build from flags (one-off) or a config declaration. `--kind`, `--repo`, `--from-tag`, `--source`, `--count`, `--member`, `--base-ref`, `--save`, `--force`, `--sync`. |
 | `ensure <name>` | Reconcile disk to the declared/created state (idempotent). |
-| `open <name>` | Build/attach a tmux session (`--print`, `--recreate`, `--no-attach`). |
+| `open <name>` | Build/attach a tmux session, one pane per member. `--cmd <command>` runs it in each pane (e.g. an agent); `--no-check`, `--print`, `--recreate`, `--no-attach`. |
 | `check <name>` | Assert health; non-zero exit on drift. |
 | `backup <name>` | Back up every member's uncommitted work (`--push-branch`). |
 | `ls` / `status <name>` | List workgroups / show member status. |
