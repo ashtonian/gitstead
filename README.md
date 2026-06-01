@@ -208,12 +208,20 @@ exclude:
 # Override any setting per repo or glob (later entries win).
 overrides:
   - repos: ["ghes.company.com/*"]
+    base_dir: "~/work"                 # clone this set under a different root
     ssh_key: "~/.ssh/id_work"
+    clone_protocol: "https"            # transport for this set (else infer/ssh)
     backup: { strategy: "patch" }
     remote_sync: { enabled: false }
   - repos: ["github.com/your-login/dotfiles"]
     path_template: "{{.Name}}"
+  - repos: ["github.com/acme/archived-*"]
+    sync: { enabled: false }           # track + back up, but never auto-fetch
 ```
+
+Everything has a per-repo escape hatch: `base_dir`/`path_template` (destination),
+`ssh_key`/`clone_protocol` (auth/transport), and `sync`/`backup`/`remote_sync`
+behavior. The operation log can be turned off with `log: { events: false }`.
 
 Tags come from discovery rules or manual entries and filter any command. For
 recurring selections, define a **named set** and use `--set` (it composes with
