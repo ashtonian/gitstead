@@ -4,6 +4,7 @@
 package scheduler
 
 import (
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/ashtonian/git-mgr/internal/shellutil"
 )
 
 // Label is the launchd label / systemd unit / crontab marker for the agent.
@@ -67,14 +70,14 @@ func (o Options) PlistContent() string {
 	fmt.Fprintf(&b, "  <key>Label</key><string>%s</string>\n", Label)
 	b.WriteString("  <key>ProgramArguments</key>\n  <array>\n")
 	for _, a := range o.syncArgs() {
-		fmt.Fprintf(&b, "    <string>%s</string>\n", a)
+		fmt.Fprintf(&b, "    <string>%s</string>\n", xmlEscape(a))
 	}
 	b.WriteString("  </array>\n")
 	fmt.Fprintf(&b, "  <key>StartInterval</key><integer>%d</integer>\n", int(o.Interval.Seconds()))
 	b.WriteString("  <key>RunAtLoad</key><true/>\n")
 	if o.LogPath != "" {
-		fmt.Fprintf(&b, "  <key>StandardOutPath</key><string>%s</string>\n", o.LogPath)
-		fmt.Fprintf(&b, "  <key>StandardErrorPath</key><string>%s</string>\n", o.LogPath)
+		fmt.Fprintf(&b, "  <key>StandardOutPath</key><string>%s</string>\n", xmlEscape(o.LogPath))
+		fmt.Fprintf(&b, "  <key>StandardErrorPath</key><string>%s</string>\n", xmlEscape(o.LogPath))
 	}
 	b.WriteString("</dict>\n</plist>\n")
 	return b.String()
@@ -88,7 +91,7 @@ Description=git-mgr periodic sync
 [Service]
 Type=oneshot
 ExecStart=%s
-`, strings.Join(o.syncArgs(), " "))
+`, systemdQuote(o.syncArgs()))
 }
 
 // TimerContent renders the systemd user timer unit.
@@ -106,13 +109,44 @@ WantedBy=timers.target
 `, o.Interval, int(o.Interval.Seconds()))
 }
 
-// CronLine renders the crontab entry.
+// CronLine renders the crontab entry. The argv and log path are shell-quoted
+// because cron executes the line via /bin/sh, so spaces or shell metacharacters
+// in any path would otherwise break it.
 func (o Options) CronLine() string {
-	line := fmt.Sprintf("%s %s", cronSchedule(o.Interval), strings.Join(o.syncArgs(), " "))
+	line := fmt.Sprintf("%s %s", cronSchedule(o.Interval), shellJoin(o.syncArgs()))
 	if o.LogPath != "" {
-		line += fmt.Sprintf(" 2>> %s", o.LogPath)
+		line += " 2>> " + shellutil.Quote(o.LogPath)
 	}
 	return line + "  # " + Label
+}
+
+// xmlEscape escapes a string for safe inclusion in a plist <string> body.
+func xmlEscape(s string) string {
+	var b strings.Builder
+	_ = xml.EscapeText(&b, []byte(s))
+	return b.String()
+}
+
+// systemdQuote renders argv as a systemd ExecStart value: each argument is
+// double-quoted (with " and \ escaped) so paths containing spaces survive
+// systemd's own word-splitting.
+func systemdQuote(args []string) string {
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		a = strings.ReplaceAll(a, `\`, `\\`)
+		a = strings.ReplaceAll(a, `"`, `\"`)
+		quoted[i] = `"` + a + `"`
+	}
+	return strings.Join(quoted, " ")
+}
+
+// shellJoin renders argv as a shell-safe command string (each arg single-quoted).
+func shellJoin(args []string) string {
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = shellutil.Quote(a)
+	}
+	return strings.Join(quoted, " ")
 }
 
 // cronSchedule maps an interval to a 5-field cron schedule.
