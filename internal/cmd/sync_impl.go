@@ -164,12 +164,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 
 			// Backup
 			if !c.NoBackup && repoCfg.Backup.Enabled {
-				backupCfg := gitops.NewBackupConfig(
-					gitops.WithStrategy(repoCfg.Backup.Strategy),
-					gitops.WithIncludeUntracked(repoCfg.Backup.IncludeUntracked),
-					gitops.WithMaxPerRepo(repoCfg.Backup.MaxPerRepo),
-					gitops.WithPatchDir(repoCfg.Backup.PatchDir),
-				)
+				backupCfg := backupConfigFor(cfg, repoCfg, key, repo.DiscoveredBy, c.PushBranch, "")
 				br, err := gitops.Backup(repoCtx, repo.LocalPath, backupCfg)
 				mu.Lock()
 				if err != nil {
@@ -180,6 +175,9 @@ func (c *SyncCmd) Run(ctx *Context) error {
 					repo.LastBackup = time.Now()
 					repo.LastBackupRef = br.RefName
 					repo.LastBackupHasPatch = br.HasPatch
+					if br.PushedBranch != "" {
+						log.Info("pushed WIP branch", "repo", key, "ref", br.PushedBranch)
+					}
 				}
 				mu.Unlock()
 			}

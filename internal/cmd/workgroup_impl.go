@@ -1,20 +1,23 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/state"
 	"github.com/ashtonian/git-mgr/internal/workgroup"
 )
 
 // WorkgroupCmd groups the workgroup subcommands.
 type WorkgroupCmd struct {
-	Create WGCreateCmd `cmd:"" help:"Materialise a configured workgroup (create its members)."`
+	Create WGCreateCmd `cmd:"" help:"Create a workgroup from flags (one-off) or a config declaration; materialise its members."`
 	Ensure WGEnsureCmd `cmd:"" help:"Reconcile workgroup(s) on disk to match config (idempotent)."`
 	Adopt  WGAdoptCmd  `cmd:"" help:"Adopt an existing directory of repos as a workgroup."`
 	List   WGListCmd   `cmd:"" name:"ls" help:"List workgroups."`
@@ -29,9 +32,79 @@ type WorkgroupCmd struct {
 	Remove WGRemoveCmd `cmd:"" name:"rm" help:"Tear down a workgroup."`
 }
 
-// WGCreateCmd materialises a configured workgroup for the first time.
+// WGCreateCmd materialises a workgroup for the first time. With no flags it
+// looks the name up in config (the original behavior); with --source/--count/
+// --member/--from-tag it synthesizes the workgroup from the CLI as a one-off,
+// which --save can persist to config.
 type WGCreateCmd struct {
-	Name string `arg:"" help:"Workgroup name (must be declared in config)."`
+	Name    string   `arg:"" help:"Workgroup name."`
+	Source  string   `help:"Source repo (tracked key or local path); defines a worktree workgroup."`
+	Count   int      `help:"Number of worktree members to create, named agent-1..N."`
+	Member  []string `help:"Explicit member; repeatable. worktree: name[:branch]. clone: a repo URL. Overrides --count."`
+	BaseRef string   `help:"Worktree fork point (default: source HEAD)." name:"base-ref"`
+	FromTag string   `help:"Clone workgroup from tracked repos carrying this tag." name:"from-tag"`
+	Sync    bool     `help:"Track the underlying repo(s) so 'git-mgr sync' keeps them fetched."`
+	Save    bool     `help:"Append the synthesized workgroup to the config file."`
+	Force   bool     `help:"With --save, overwrite an existing config workgroup of the same name."`
+}
+
+// synthesized reports whether any workgroup-defining flag was given (vs. the
+// legacy config-lookup path).
+func (c *WGCreateCmd) synthesized() bool {
+	return c.Source != "" || c.Count > 0 || len(c.Member) > 0 || c.FromTag != ""
+}
+
+// toWorkgroup builds a config.Workgroup from the CLI flags. It mirrors the rules
+// config.Validate enforces (worktree needs source + members; clone needs members
+// or from_tag), so a synthesized group is indistinguishable from a declared one.
+func (c *WGCreateCmd) toWorkgroup() (config.Workgroup, error) {
+	wg := config.Workgroup{Name: c.Name, BaseRef: c.BaseRef, FromTag: c.FromTag, Sync: c.Sync}
+
+	switch {
+	case c.Source != "":
+		wg.Kind = "worktree"
+		wg.Source = c.Source
+		members, err := worktreeMembers(c.Name, c.Count, c.Member)
+		if err != nil {
+			return config.Workgroup{}, err
+		}
+		wg.Members = members
+	case c.FromTag != "" || len(c.Member) > 0:
+		wg.Kind = "clone"
+		for _, m := range c.Member {
+			wg.Members = append(wg.Members, config.WorkgroupMember{Repo: m})
+		}
+	default:
+		return config.Workgroup{}, fmt.Errorf("specify --source (worktree) or --from-tag/--member (clone)")
+	}
+	return wg, nil
+}
+
+// worktreeMembers expands --count / --member into worktree members. Explicit
+// --member entries (name[:branch]) win over --count; otherwise --count N yields
+// members agent-1..agent-N. Default branches are namespaced by the workgroup
+// name (<wgName>/agent-N) so two workgroups off the same source repo don't
+// collide on branch names; an explicit branch (name:branch) is used as-is.
+func worktreeMembers(wgName string, count int, explicit []string) ([]config.WorkgroupMember, error) {
+	var members []config.WorkgroupMember
+	if len(explicit) > 0 {
+		for _, m := range explicit {
+			name, branch, hasBranch := strings.Cut(m, ":")
+			if !hasBranch {
+				branch = wgName + "/" + name
+			}
+			members = append(members, config.WorkgroupMember{Name: name, Branch: branch})
+		}
+		return members, nil
+	}
+	if count < 1 {
+		return nil, fmt.Errorf("worktree workgroup needs --count >= 1 or at least one --member")
+	}
+	for i := 1; i <= count; i++ {
+		name := fmt.Sprintf("agent-%d", i)
+		members = append(members, config.WorkgroupMember{Name: name, Branch: wgName + "/" + name})
+	}
+	return members, nil
 }
 
 // WGEnsureCmd reconciles configured workgroups to disk.
@@ -65,22 +138,67 @@ func (c *WGCreateCmd) Run(ctx *Context) error {
 		return err
 	}
 	defer unlock()
-	if _, exists := st.Workgroups[c.Name]; exists {
+	// A workgroup already materialized in state can't be re-created -- but with
+	// --save the intent may be to (re)persist its declaration to config, which is
+	// still useful, so allow that path through (Ensure is idempotent).
+	if _, exists := st.Workgroups[c.Name]; exists && !c.Save {
 		return fmt.Errorf("workgroup %q already exists; use 'workgroup ensure %s' to reconcile", c.Name, c.Name)
 	}
-	spec, err := workgroup.FromConfig(cfg, st, c.Name)
+
+	// A synthesized workgroup is built from flags; otherwise look the name up in
+	// config (the original behavior).
+	var wg config.Workgroup
+	var spec *workgroup.Spec
+	if c.synthesized() {
+		wg, err = c.toWorkgroup()
+		if err != nil {
+			return err
+		}
+		spec, err = workgroup.SpecFromWorkgroup(cfg, st, &wg)
+	} else {
+		spec, err = workgroup.FromConfig(cfg, st, c.Name)
+	}
 	if err != nil {
 		return err
 	}
+
 	statuses, err := workgroup.Ensure(ctx.GoCtx(), spec, wgSSHKeyFor(cfg, st))
 	if err != nil {
 		return err
 	}
 	created, failed := printEnsure(statuses, ctx.Quiet)
 	persistWorkgroup(st, spec)
+
+	// --sync (or sync:true on a config workgroup) tracks the underlying repo(s)
+	// so the normal sync loop keeps them fetched.
+	wantSync := c.Sync || (!c.synthesized() && configWorkgroupSync(cfg, c.Name))
+	if wantSync {
+		n, skipped := trackWorkgroupRepos(st, spec)
+		if n > 0 && !ctx.Quiet {
+			fmt.Printf("Tracking %d repo(s) for sync.\n", n)
+		}
+		for _, p := range skipped {
+			fmt.Fprintf(os.Stderr, "warning: not tracking %s for sync (no parseable SSH remote)\n", p)
+		}
+	}
+
 	if err := st.Save(); err != nil {
 		return err
 	}
+
+	// --save persists the synthesized declaration to config.
+	if c.Save {
+		if !c.synthesized() {
+			return fmt.Errorf("--save requires synthesizing flags (--source/--count/--member/--from-tag)")
+		}
+		if err := config.SaveWorkgroup(ctx.Config, wg, c.Force); err != nil {
+			return err
+		}
+		if !ctx.Quiet {
+			fmt.Printf("Saved workgroup %q to config.\n", c.Name)
+		}
+	}
+
 	if !ctx.Quiet {
 		fmt.Printf("Workgroup %q: %d members (%d created) at %s\n", c.Name, len(spec.Members), created, spec.Root)
 	}
@@ -88,6 +206,59 @@ func (c *WGCreateCmd) Run(ctx *Context) error {
 		return fmt.Errorf("%d member(s) failed", failed)
 	}
 	return nil
+}
+
+// configWorkgroupSync reports whether the named config workgroup has sync: true.
+func configWorkgroupSync(cfg *config.Config, name string) bool {
+	for i := range cfg.Workgroups {
+		if cfg.Workgroups[i].Name == name {
+			return cfg.Workgroups[i].Sync
+		}
+	}
+	return false
+}
+
+// trackWorkgroupRepos registers the workgroup's underlying repo(s) as tracked
+// (fetch-only) so `git-mgr sync` keeps them current. For worktree groups that is
+// the shared source repo; for clone groups it is each member clone. Already
+// tracked repos are left untouched. Returns how many new repos were added and
+// the paths it skipped because their origin remote could not be parsed (no
+// remote, or a non-SSH URL) -- those can't be synced and the caller warns.
+func trackWorkgroupRepos(st *state.State, spec *workgroup.Spec) (added int, skipped []string) {
+	track := func(localPath string) {
+		if localPath == "" {
+			return
+		}
+		for _, r := range st.Repos {
+			if r.LocalPath == localPath {
+				return // already tracked
+			}
+		}
+		id, err := gitops.ParseRemoteURL(context.Background(), localPath)
+		if err != nil {
+			skipped = append(skipped, localPath)
+			return
+		}
+		key := id.Host + "/" + id.FullName
+		if _, ok := st.Repos[key]; ok {
+			return
+		}
+		st.Repos[key] = &state.RepoState{
+			CloneURL: id.SSHURL, Host: id.Host, Owner: id.Owner, Name: id.Name,
+			FullName: id.FullName, Provider: id.Host, LocalPath: localPath,
+			Cloned: true, ManuallyAdded: true, Status: "clean",
+			Tags: []string{"workgroup:" + spec.Name}, FirstSeen: time.Now(),
+		}
+		added++
+	}
+	if spec.Kind == "worktree" {
+		track(spec.Source)
+	} else {
+		for _, m := range spec.Members {
+			track(m.Path)
+		}
+	}
+	return added, skipped
 }
 
 func (c *WGEnsureCmd) Run(ctx *Context) error {

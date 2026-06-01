@@ -54,15 +54,15 @@ git-mgr status               # table of all managed repos
 |---|---|
 | `git-mgr init` | Create a config file with sensible defaults. |
 | `git-mgr discover` | Discover repos from providers (dry-run; `--apply` to clone). `--rule`, `--tag` to scope. |
-| `git-mgr sync` | Fetch all repos + back up uncommitted changes (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`. |
-| `git-mgr backup` | Back up only (no fetch). `--list` to see backups, `--restore <id>` for instructions. |
+| `git-mgr sync` | Fetch all repos + back up uncommitted changes (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`, `--push-branch`. |
+| `git-mgr backup` | Back up only (no fetch). `--list` to see backups, `--restore <id>` for instructions, `--push-branch` to also save WIP to a remote branch. |
 | `git-mgr status` | Table of managed repos. `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
 | `git-mgr clone <url>` | Clone and track a single repo by SSH URL. `--tag`, `--path`. |
 | `git-mgr adopt <path>` | Import an existing clone. `--scan` for batch, `--dry-run`, `--tag`. |
 | `git-mgr remove <pattern>` | Stop tracking repos. `--delete` to also remove from disk, `--yes`. |
 | `git-mgr remote-sync` | Push backup refs to remotes. `--repos`, `--tag`, `--dry-run`. |
 | `git-mgr config` | Print resolved config. `--validate`, `--edit`, `--path`, `--for-repo <key>`. |
-| `git-mgr workgroup` (`wg`) | Manage workgroups: parallel worktrees or multi-repo bundles. |
+| `git-mgr workgroup` (`wg`) | Manage workgroups: parallel worktrees or multi-repo bundles. `wg create` builds one from flags or config; `--save`, `--sync`, `open`, `ensure`, `check`. |
 | `git-mgr install-agent` | Install/remove a periodic sync agent (launchd/systemd/cron). |
 | `git-mgr version` | Print version, commit, build date. |
 
@@ -204,6 +204,55 @@ error, never silently recorded as backed up.
 git-mgr backup --list --repos "*/my-repo"
 git-mgr backup --restore 20260417T103000Z --repos "*/my-repo"   # prints how to restore
 ```
+
+**Save WIP offsite** — `--push-branch` (or `backup.push_branch: true`) also
+force-pushes a snapshot of your uncommitted tracked changes to a recoverable
+branch `git-mgr/wip/<branch>` on the remote. Unlike the hidden stash-ref, it's a
+normal branch visible in the host's UI, so dirty work survives a lost laptop and
+is one `git fetch` away. The branch is force-updated each run; the working tree
+is never touched.
+
+```bash
+git-mgr backup --push-branch --repos "*/my-repo"   # local backup + push WIP to git-mgr/wip/<branch>
+git-mgr sync --push-branch                          # same, as part of the periodic sync
+```
+
+## Workgroups
+
+A *workgroup* is a parent directory of N working directories operated on as a
+unit — either **worktrees** (N `git worktree`s of one source repo, each on its
+own branch, sharing one object store — ideal for running N agents on one
+project) or **clones** (N independent repos worked on together, e.g. a
+microservice bundle). Unlike sync/backup, workgroup commands deliberately
+mutate on request.
+
+Launch one as a one-off from the CLI — no config edit needed:
+
+```bash
+# 4 isolated worktrees of a repo, forked from origin/main, in a tmux session:
+git-mgr wg create scratch --source ~/code/app --count 4 --base-ref origin/main
+git-mgr wg open scratch                      # tmux session, one pane per member
+
+# Persist it back to config (--force overwrites an existing entry), and track
+# the underlying repo so `git-mgr sync` keeps it fetched:
+git-mgr wg create scratch --source ~/code/app --count 4 --save --sync
+```
+
+`--member name[:branch]` (repeatable) sets members explicitly instead of
+`--count`; `--from-tag <tag>` builds a clone workgroup from tracked repos
+carrying a tag. Workgroups declared in config (`workgroups:`) are reconciled
+with `wg ensure` and rebuilt deterministically after a reboot — a machine
+restart is a non-event. `wg check` exits non-zero on drift (missing members,
+wrong branch, in-progress rebase/merge, behind upstream).
+
+| `wg` subcommand | Description |
+|---|---|
+| `create <name>` | Build from flags (one-off) or a config declaration. `--source`, `--count`, `--member`, `--base-ref`, `--from-tag`, `--save`, `--force`, `--sync`. |
+| `ensure <name>` | Reconcile disk to the declared/created state (idempotent). |
+| `open <name>` | Build/attach a tmux session (`--print`, `--recreate`, `--no-attach`). |
+| `check <name>` | Assert health; non-zero exit on drift. |
+| `ls` / `status <name>` | List workgroups / show member status. |
+| `adopt <name>` | Import an existing directory of working trees. |
 
 ## Running on a schedule
 

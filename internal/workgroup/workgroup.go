@@ -49,6 +49,14 @@ func FromConfig(cfg *config.Config, st *state.State, name string) (*Spec, error)
 	return nil, fmt.Errorf("workgroup %q is not declared in config", name)
 }
 
+// SpecFromWorkgroup resolves an arbitrary config.Workgroup into a Spec, whether
+// it was declared in the config file or synthesized from CLI flags. cfg supplies
+// the workgroup_base_dir default; st resolves a worktree source given as a
+// tracked-repo key.
+func SpecFromWorkgroup(cfg *config.Config, st *state.State, wg *config.Workgroup) (*Spec, error) {
+	return resolveConfig(cfg, st, wg)
+}
+
 func resolveConfig(cfg *config.Config, st *state.State, wg *config.Workgroup) (*Spec, error) {
 	root := wg.BaseDir
 	if root == "" {

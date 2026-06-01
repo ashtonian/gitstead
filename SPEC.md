@@ -547,6 +547,15 @@ backup:
   # Default: ~/.local/share/git-mgr/patches/
   patch_dir: ""
 
+  # Also force-push a snapshot of uncommitted tracked changes to a recoverable
+  # branch (refs/heads/git-mgr/wip/<branch>) on push_remote, in addition to the
+  # local backup. A normal, visible branch (not the hidden refs/git-mgr/*
+  # namespace), so dirty work is saved offsite. Equivalent to the --push-branch
+  # flag on `sync`/`backup`. Untracked-only changes are not captured (no commit
+  # to push); the working tree is never modified.
+  push_branch: false
+  push_remote: "origin"
+
 # ============================================================================
 # Remote Sync Settings
 # ============================================================================
@@ -1449,13 +1458,34 @@ predicate differ by kind.
 ### Desired state vs observed state
 
 - **config** declares workgroups (`workgroups:` + `workgroup_base_dir`) — the
-  reproducible, machine-portable source of truth.
+  reproducible, machine-portable source of truth. A workgroup may also set
+  `sync: true` to register its underlying repo(s) as tracked, so the read-only
+  `git-mgr sync` engine keeps them fetched (fetching a worktree source is safe —
+  the object store is shared).
 - **state** records what has been materialised (the `workgroups:` map) — the
   operational source of truth for group commands.
 - `workgroup ensure` reconciles disk to the declared state (creating missing
   members, pruning stale worktree registrations); `workgroup check` asserts
   health and exits non-zero on drift. Together they make a machine restart a
   non-event: re-running `ensure` + `open` deterministically rebuilds everything.
+
+### Creating from the CLI
+
+`workgroup create <name>` builds a workgroup two ways: with no defining flags it
+looks `<name>` up in config (the declarative path); with `--source`/`--count`/
+`--member`/`--from-tag` it **synthesizes** a `config.Workgroup` from the CLI as a
+one-off — no config edit required. A synthesized worktree group expands
+`--count N` into members `agent-1..N` with branches namespaced `<name>/agent-N`
+(so distinct groups off one source never collide); `--member name[:branch]` sets
+members explicitly. Both paths converge on the same `Spec` → `ensure`
+materialisation, so a flag-built group is indistinguishable from a declared one.
+
+- `--save` appends the synthesized workgroup back to the config file via a
+  comment-preserving YAML round-trip (the config library is load-only, so this
+  is a `yaml.v3` Node edit, written atomically and re-validated); a name
+  conflict errors unless `--force` overwrites the existing entry.
+- `--sync` registers the group's underlying repo(s) as tracked at create time
+  (tagged `workgroup:<name>`), warning on any whose remote can't be parsed.
 
 ### Health / "in sync"
 

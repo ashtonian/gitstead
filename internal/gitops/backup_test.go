@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ashtonian/git-mgr/internal/gitops"
@@ -156,6 +157,60 @@ func TestBackup_Both(t *testing.T) {
 	}
 	if !result.HasPatch {
 		t.Error("expected patches from 'both' strategy")
+	}
+}
+
+func TestBackup_PushBranch(t *testing.T) {
+	ctx := context.Background()
+
+	// A bare repo acts as the "remote"; a local-path remote needs no SSH key.
+	remote := t.TempDir()
+	if _, err := gitops.Git(ctx, remote, "init", "--bare"); err != nil {
+		t.Fatalf("init bare: %v", err)
+	}
+
+	dir := setupTestRepo(t)
+	if _, err := gitops.Git(ctx, dir, "remote", "add", "origin", remote); err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+
+	// Dirty the working tree with a tracked change.
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# wip changes"), 0644)
+
+	cfg := gitops.NewBackupConfig(
+		gitops.WithStrategy("stash-ref"),
+		gitops.WithPatchDir(t.TempDir()),
+		gitops.WithPushBranch("origin", ""),
+	)
+	result, err := gitops.Backup(ctx, dir, cfg)
+	if err != nil {
+		t.Fatalf("backup failed: %v", err)
+	}
+	if result.PushedBranch == "" {
+		t.Fatal("expected a WIP branch to be pushed")
+	}
+	if !strings.HasPrefix(result.PushedBranch, "refs/heads/git-mgr/wip/") {
+		t.Errorf("unexpected pushed ref: %s", result.PushedBranch)
+	}
+
+	// The branch must actually exist on the remote.
+	ls, err := gitops.Git(ctx, dir, "ls-remote", "origin", "refs/heads/git-mgr/wip/*")
+	if err != nil {
+		t.Fatalf("ls-remote: %v", err)
+	}
+	if !strings.Contains(ls, "git-mgr/wip/") {
+		t.Errorf("WIP branch not found on remote: %q", ls)
+	}
+
+	// Re-running force-updates the same ref (no "already exists" failure).
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# wip changes v2"), 0644)
+	if _, err := gitops.Backup(ctx, dir, cfg); err != nil {
+		t.Fatalf("second push-branch backup failed: %v", err)
+	}
+
+	// Working tree must remain dirty — backup never touches it.
+	if out, _ := gitops.Git(ctx, dir, "diff", "--stat"); out == "" {
+		t.Error("working tree should still be dirty after push-branch backup")
 	}
 }
 

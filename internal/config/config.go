@@ -97,6 +97,8 @@ type BackupOverride struct {
 	IncludeUntracked *bool   `koanf:"include_untracked" yaml:"include_untracked,omitempty"`
 	MaxPerRepo       *int    `koanf:"max_per_repo"      yaml:"max_per_repo,omitempty"      validate:"omitempty,min=0"`
 	PatchDir         *string `koanf:"patch_dir"         yaml:"patch_dir,omitempty"`
+	PushBranch       *bool   `koanf:"push_branch"       yaml:"push_branch,omitempty"`
+	PushRemote       *string `koanf:"push_remote"       yaml:"push_remote,omitempty"`
 }
 
 // RemoteSyncOverride overrides RemoteSyncConfig fields per repo. A nil pointer means "not set".
@@ -117,6 +119,11 @@ type Workgroup struct {
 	BaseRef string            `koanf:"base_ref" yaml:"base_ref,omitempty"`
 	FromTag string            `koanf:"from_tag" yaml:"from_tag,omitempty"`
 	Members []WorkgroupMember `koanf:"members"  yaml:"members,omitempty"`
+	// Sync, when true, registers the workgroup's underlying repo(s) -- the
+	// worktree source, or each clone member -- as tracked repos so the normal
+	// `git-mgr sync` keeps them fetched. Fetch-only; it never touches member
+	// working trees.
+	Sync bool `koanf:"sync" yaml:"sync,omitempty"`
 }
 
 // WorkgroupMember is one working directory within a workgroup. For "worktree"
@@ -151,6 +158,11 @@ type BackupCfg struct {
 	IncludeUntracked bool   `koanf:"include_untracked" yaml:"include_untracked" default:"true"`
 	MaxPerRepo       int    `koanf:"max_per_repo"      yaml:"max_per_repo"      default:"10"    validate:"min=0"`
 	PatchDir         string `koanf:"patch_dir"         yaml:"patch_dir"`
+	// PushBranch also force-pushes uncommitted tracked changes to a recoverable
+	// branch (git-mgr/wip/<branch>) on PushRemote, so dirty work is saved
+	// offsite as a normal, visible branch in addition to the local backup.
+	PushBranch bool   `koanf:"push_branch" yaml:"push_branch" default:"false"`
+	PushRemote string `koanf:"push_remote" yaml:"push_remote" default:"origin"`
 }
 
 // RemoteSyncConfig controls pushing backup refs.

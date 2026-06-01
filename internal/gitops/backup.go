@@ -19,6 +19,15 @@ type BackupConfig struct {
 	IncludeUntracked bool
 	MaxPerRepo       int
 	PatchDir         string
+
+	// PushBranch, when set, also force-pushes a snapshot of tracked changes to
+	// a recoverable branch (refs/heads/git-mgr/wip/<branch>) on PushRemote,
+	// using SSHKey for auth. Unlike the stash-ref backup (which lives in the
+	// hidden refs/git-mgr namespace), the WIP branch is a normal branch visible
+	// in the remote's UI, so dirty work is saved offsite and easy to recover.
+	PushBranch bool
+	PushRemote string
+	SSHKey     string
 }
 
 // BackupOption is a functional option for BackupConfig.
@@ -51,6 +60,20 @@ func WithIncludeUntracked(b bool) BackupOption {
 	return func(c *BackupConfig) { c.IncludeUntracked = b }
 }
 
+// WithPushBranch enables pushing a snapshot of tracked changes to a recoverable
+// branch (refs/heads/git-mgr/wip/<branch>) on the given remote, using sshKey for
+// auth. An empty remote defaults to "origin".
+func WithPushBranch(remote, sshKey string) BackupOption {
+	return func(c *BackupConfig) {
+		c.PushBranch = true
+		if remote == "" {
+			remote = "origin"
+		}
+		c.PushRemote = remote
+		c.SSHKey = sshKey
+	}
+}
+
 // backupRefPrefix is the ref namespace for transparent stash-ref backups. It is
 // deliberately outside refs/heads and refs/stash so it stays invisible to
 // git branch, git stash list, git log, and IDEs.
@@ -71,10 +94,11 @@ type BackupMetadata struct {
 
 // BackupResult contains information about what was backed up.
 type BackupResult struct {
-	IsDirty   bool
-	RefName   string
-	HasPatch  bool
-	Timestamp string
+	IsDirty      bool
+	RefName      string
+	HasPatch     bool
+	PushedBranch string // WIP ref pushed to the remote, empty if none
+	Timestamp    string
 }
 
 // workingTreeState captures the state of a repo's working tree for backup.
@@ -119,16 +143,25 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 		slog.Warn("stash-ref backup does not capture untracked files; use strategy 'both' or 'patch' to back them up", "repo", repoPath)
 	}
 
+	// Capture a snapshot commit of tracked (staged + unstaged) changes once.
+	// Both the stash-ref strategy and push-branch reuse this single snapshot;
+	// git stash create produces a real commit without touching the working tree.
+	var snapshotOID string
+	if cfg.Strategy == "stash-ref" || cfg.Strategy == "both" || cfg.PushBranch {
+		if oid, err := Git(ctx, repoPath, "stash", "create"); err != nil {
+			slog.Warn("failed to create stash snapshot", "repo", repoPath, "error", err)
+		} else {
+			snapshotOID = oid
+		}
+	}
+
 	// Strategy: stash-ref
-	if cfg.Strategy == "stash-ref" || cfg.Strategy == "both" {
-		stashOID, err := Git(ctx, repoPath, "stash", "create")
-		if err == nil && stashOID != "" {
-			refName := backupRefPrefix + timestamp
-			if _, err := Git(ctx, repoPath, "update-ref", refName, stashOID); err != nil {
-				slog.Warn("failed to create backup ref", "repo", repoPath, "error", err)
-			} else {
-				result.RefName = refName
-			}
+	if (cfg.Strategy == "stash-ref" || cfg.Strategy == "both") && snapshotOID != "" {
+		refName := backupRefPrefix + timestamp
+		if _, err := Git(ctx, repoPath, "update-ref", refName, snapshotOID); err != nil {
+			slog.Warn("failed to create backup ref", "repo", repoPath, "error", err)
+		} else {
+			result.RefName = refName
 		}
 	}
 
@@ -141,6 +174,17 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 		}
 	}
 
+	// Push WIP to a recoverable remote branch, independent of strategy.
+	if cfg.PushBranch {
+		if snapshotOID == "" {
+			slog.Warn("push-branch: no tracked changes to push; untracked-only changes are not captured", "repo", repoPath)
+		} else if ref, err := pushWIPBranch(ctx, repoPath, cfg.PushRemote, cfg.SSHKey, snapshotOID); err != nil {
+			slog.Warn("push-branch failed", "repo", repoPath, "remote", cfg.PushRemote, "error", err)
+		} else {
+			result.PushedBranch = ref
+		}
+	}
+
 	// Prune old backups
 	if cfg.MaxPerRepo > 0 {
 		pruneRefs(ctx, repoPath, cfg.MaxPerRepo)
@@ -148,12 +192,31 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 	}
 
 	// A dirty repo for which no strategy produced a backup is a silent
-	// data-loss risk: the caller would otherwise record it as backed up.
-	if result.IsDirty && result.RefName == "" && !result.HasPatch {
+	// data-loss risk: the caller would otherwise record it as backed up. A
+	// pushed WIP branch also counts as the work being saved.
+	if result.IsDirty && result.RefName == "" && !result.HasPatch && result.PushedBranch == "" {
 		return result, fmt.Errorf("backup failed: no backup strategy succeeded for dirty repo %s", repoPath)
 	}
 
 	return result, nil
+}
+
+// pushWIPBranch force-pushes a snapshot commit to a recoverable branch on a
+// remote so dirty/WIP changes are saved offsite in addition to local backups.
+// The branch is namespaced under refs/heads/git-mgr/wip/<branch> and
+// force-updated each run so it always reflects the latest snapshot. It returns
+// the ref that was pushed.
+func pushWIPBranch(ctx context.Context, repoPath, remote, sshKey, snapshotOID string) (string, error) {
+	branch, err := Git(ctx, repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil || branch == "" || branch == "HEAD" {
+		branch = "detached" // detached HEAD: no branch name to mirror
+	}
+	wipRef := "refs/heads/git-mgr/wip/" + branch
+	refspec := snapshotOID + ":" + wipRef
+	if _, err := GitWithSSHKey(ctx, repoPath, sshKey, "push", "--force", remote, refspec); err != nil {
+		return "", err
+	}
+	return wipRef, nil
 }
 
 func detectWorkingTreeState(ctx context.Context, repoPath string) workingTreeState {
