@@ -7,6 +7,7 @@ import (
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/willabides/kongplete"
 )
 
 // CLI defines the top-level command structure.
@@ -39,7 +40,8 @@ type CLI struct {
 	Log        LogCmd        `cmd:"" help:"Print recent operation-log events."`
 	Workgroup  WorkgroupCmd  `cmd:"" aliases:"wg" help:"Manage workgroups: parallel worktrees or multi-repo bundles."`
 
-	InstallAgent InstallAgentCmd `cmd:"" name:"install-agent" help:"Install/remove a periodic sync agent (launchd/systemd/cron)."`
+	InstallAgent       InstallAgentCmd              `cmd:"" name:"install-agent" help:"Install/remove a periodic sync agent (launchd/systemd/cron)."`
+	InstallCompletions kongplete.InstallCompletions `cmd:"" name:"install-completions" help:"Output a shell completion script (bash/zsh/fish)."`
 }
 
 // Context is passed to all command Run methods.

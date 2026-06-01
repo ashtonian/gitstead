@@ -95,10 +95,29 @@ sync → agent), so on a gh-authed machine it's a true one-liner.
 | `git-mgr report` / `log` | Summarize / list recent activity (clones, backups, syncs…) from the operation log. `--since`, `-n`. |
 | `git-mgr workgroup` (`wg`) | Manage workgroups: parallel worktrees or multi-repo bundles. `wg create` builds one from flags or config; `--save`, `--sync`, `open`, `ensure`, `check`. |
 | `git-mgr install-agent` | Install/remove a periodic sync agent (launchd/systemd/cron). |
+| `git-mgr install-completions` | Print a shell completion script (bash/zsh/fish). See [Shell completions](#shell-completions). |
 | `git-mgr version` | Print version, commit, build date. |
 
 Global flags: `--config`, `--state`, `--verbose`/`-v`, `--quiet`/`-q`,
 `--concurrency`/`-j`.
+
+## Shell completions
+
+Tab-completion for commands, flags, and dynamic values — repo keys, tags, named
+sets, and workgroup names are pulled live from your state/config.
+
+```bash
+# zsh / bash — add to your rc file
+eval "$(git-mgr install-completions)"
+
+# fish
+git-mgr install-completions | source
+```
+
+The dynamic value predictors honor `GIT_MGR_CONFIG` / `GIT_MGR_STATE`, so
+completion reflects the same state your commands use. Note: to complete workgroup
+subcommands, spell out `git-mgr workgroup …` — the `wg` alias does not expand its
+subcommands during completion.
 
 ## Configuration
 

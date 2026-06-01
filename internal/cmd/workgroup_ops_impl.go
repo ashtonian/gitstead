@@ -18,13 +18,13 @@ import (
 
 // WGStatusCmd shows the per-member status of a workgroup.
 type WGStatusCmd struct {
-	Name string `arg:"" help:"Workgroup name."`
+	Name string `arg:"" help:"Workgroup name." predictor:"workgroup"`
 	JSON bool   `help:"Output JSON."`
 }
 
 // WGRecoverCmd recovers a member's backed-up WIP, reusing the restore machinery.
 type WGRecoverCmd struct {
-	Name   string `arg:"" help:"Workgroup name."`
+	Name   string `arg:"" help:"Workgroup name." predictor:"workgroup"`
 	Member string `help:"Only recover this member." default:""`
 	Into   string `help:"Clone + apply into this scratch dir (requires --member)." default:""`
 	Apply  bool   `help:"Apply the backup onto the member's worktree (refuses dirty without --force)."`
@@ -98,18 +98,18 @@ func (c *WGRecoverCmd) Run(ctx *Context) error {
 
 // WGCheckCmd asserts a workgroup is set up and in sync.
 type WGCheckCmd struct {
-	Name   string `arg:"" help:"Workgroup name."`
+	Name   string `arg:"" help:"Workgroup name." predictor:"workgroup"`
 	Member string `help:"Only check this member."`
 }
 
 // WGFetchCmd fetches every member.
 type WGFetchCmd struct {
-	Name string `arg:"" help:"Workgroup name."`
+	Name string `arg:"" help:"Workgroup name." predictor:"workgroup"`
 }
 
 // WGCommitCmd commits changes across members.
 type WGCommitCmd struct {
-	Name    string `arg:"" help:"Workgroup name."`
+	Name    string `arg:"" help:"Workgroup name." predictor:"workgroup"`
 	Message string `short:"m" required:"" help:"Commit message."`
 	AddAll  bool   `name:"add-all" help:"Also stage untracked files (git add -A)."`
 	Member  string `help:"Only commit this member."`
@@ -117,20 +117,20 @@ type WGCommitCmd struct {
 
 // WGPullCmd pulls every member.
 type WGPullCmd struct {
-	Name        string `arg:"" help:"Workgroup name."`
+	Name        string `arg:"" help:"Workgroup name." predictor:"workgroup"`
 	Rebase      bool   `help:"Use --rebase instead of the default --ff-only."`
 	BackupFirst bool   `help:"Back up dirty members before pulling." default:"true" name:"backup-first"`
 }
 
 // WGPushCmd pushes every member.
 type WGPushCmd struct {
-	Name        string `arg:"" help:"Workgroup name."`
+	Name        string `arg:"" help:"Workgroup name." predictor:"workgroup"`
 	SetUpstream bool   `name:"set-upstream" help:"Publish the branch as origin/<branch>."`
 }
 
 // WGExecCmd runs an arbitrary command in each member directory.
 type WGExecCmd struct {
-	Name    string   `arg:"" help:"Workgroup name."`
+	Name    string   `arg:"" help:"Workgroup name." predictor:"workgroup"`
 	Command []string `arg:"" help:"Command to run in each member directory (after --)."`
 }
 

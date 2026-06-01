@@ -41,7 +41,7 @@ type WorkgroupCmd struct {
 // --source/--count/--member it synthesizes the workgroup from the CLI as a
 // one-off, which --save can persist to config. Clone is the default kind.
 type WGCreateCmd struct {
-	Name    string   `arg:"" help:"Workgroup name."`
+	Name    string   `arg:"" help:"Workgroup name." predictor:"workgroup"`
 	Kind    string   `help:"Kind: clone (independent repos, the default) or worktree (shared source)." enum:"clone,worktree" default:"clone"`
 	Repo    []string `help:"Clone member: a repo URL or tracked key; repeatable. With --count, N clones of a single repo."`
 	FromTag string   `help:"Clone members from tracked repos carrying this tag." name:"from-tag"`
@@ -159,7 +159,7 @@ func worktreeMembers(wgName string, count int, explicit []string) ([]config.Work
 
 // WGEnsureCmd reconciles configured workgroups to disk.
 type WGEnsureCmd struct {
-	Name string `arg:"" optional:"" help:"Workgroup to reconcile; all configured if omitted."`
+	Name string `arg:"" optional:"" help:"Workgroup to reconcile; all configured if omitted." predictor:"workgroup"`
 }
 
 // WGAdoptCmd registers an existing directory of repos as a workgroup.
@@ -173,7 +173,7 @@ type WGListCmd struct{}
 
 // WGBackupCmd backs up every member's working tree so agent WIP is preserved.
 type WGBackupCmd struct {
-	Name       string `arg:"" help:"Workgroup to back up."`
+	Name       string `arg:"" help:"Workgroup to back up." predictor:"workgroup"`
 	Member     string `help:"Only back up this member." default:""`
 	PushBranch bool   `help:"Also push WIP to a recoverable remote branch (git-mgr/wip/<branch>)." name:"push-branch"`
 }
@@ -228,7 +228,7 @@ func (c *WGBackupCmd) Run(ctx *Context) error {
 
 // WGRemoveCmd tears down a workgroup.
 type WGRemoveCmd struct {
-	Name       string `arg:"" help:"Workgroup to remove."`
+	Name       string `arg:"" help:"Workgroup to remove." predictor:"workgroup"`
 	Delete     bool   `help:"Also delete member directories from disk."`
 	Yes        bool   `help:"Skip confirmation."`
 	Force      bool   `help:"Discard uncommitted member work without backing it up first."`

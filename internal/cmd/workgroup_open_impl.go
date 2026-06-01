@@ -17,7 +17,7 @@ import (
 // splits while the underlying tmux session survives disconnects and is rebuilt
 // deterministically after a restart.
 type WGOpenCmd struct {
-	Name     string `arg:"" help:"Workgroup name."`
+	Name     string `arg:"" help:"Workgroup name." predictor:"workgroup"`
 	Cmd      string `help:"Run this command in each pane before dropping to a shell (e.g. 'claude')."`
 	Agent    string `help:"Run the named agent command from config 'agents:' in each pane."`
 	NoCheck  bool   `name:"no-check" help:"Skip the per-pane 'wg check' on startup."`
