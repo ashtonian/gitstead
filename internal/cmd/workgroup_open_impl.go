@@ -18,6 +18,8 @@ import (
 // deterministically after a restart.
 type WGOpenCmd struct {
 	Name     string `arg:"" help:"Workgroup name."`
+	Cmd      string `help:"Run this command in each pane before dropping to a shell (e.g. 'claude')."`
+	NoCheck  bool   `name:"no-check" help:"Skip the per-pane 'wg check' on startup."`
 	Print    bool   `help:"Print the tmux script instead of running it."`
 	Recreate bool   `help:"Kill and rebuild the session if it already exists."`
 	NoAttach bool   `name:"no-attach" help:"Build the session but do not attach."`
@@ -77,7 +79,7 @@ func (c *WGOpenCmd) Run(ctx *Context) error {
 // plan returns the tmux build steps (argv lists) and the attach argv.
 func (c *WGOpenCmd) plan(session string, spec *workgroup.Spec, selfBin, cfgPath, statePath string) (build [][]string, attach []string) {
 	pane := func(m workgroup.Member) string {
-		return paneCommand(selfBin, cfgPath, statePath, c.Name, m.Name)
+		return paneCommand(selfBin, cfgPath, statePath, c.Name, m.Name, c.Cmd, !c.NoCheck)
 	}
 
 	first := spec.Members[0]
@@ -110,19 +112,29 @@ func (c *WGOpenCmd) useITerm() bool {
 	return os.Getenv("TERM_PROGRAM") == "iTerm.app" || os.Getenv("LC_TERMINAL") == "iTerm2"
 }
 
-// paneCommand is the line typed into each pane: run a one-shot in-sync check,
-// then hand the pane to an interactive shell. Paths are shell-quoted for the
-// pane's shell.
-func paneCommand(selfBin, cfgPath, statePath, wgName, member string) string {
-	parts := []string{shellutil.Quote(selfBin)}
-	if cfgPath != "" {
-		parts = append(parts, "--config", shellutil.Quote(cfgPath))
+// paneCommand is the line typed into each pane: an optional one-shot in-sync
+// check, then an optional user command (e.g. 'claude' to launch an agent per
+// member), then an interactive shell so the pane stays open after the command
+// exits. The user command is typed into the pane's interactive shell, so shell
+// aliases and functions resolve. Paths are shell-quoted for the pane's shell.
+func paneCommand(selfBin, cfgPath, statePath, wgName, member, userCmd string, check bool) string {
+	var segs []string
+	if check {
+		parts := []string{shellutil.Quote(selfBin)}
+		if cfgPath != "" {
+			parts = append(parts, "--config", shellutil.Quote(cfgPath))
+		}
+		if statePath != "" {
+			parts = append(parts, "--state", shellutil.Quote(statePath))
+		}
+		parts = append(parts, "wg", "check", shellutil.Quote(wgName), "--member", shellutil.Quote(member))
+		segs = append(segs, strings.Join(parts, " "))
 	}
-	if statePath != "" {
-		parts = append(parts, "--state", shellutil.Quote(statePath))
+	if userCmd != "" {
+		segs = append(segs, userCmd)
 	}
-	parts = append(parts, "wg", "check", shellutil.Quote(wgName), "--member", shellutil.Quote(member))
-	return strings.Join(parts, " ") + "; exec $SHELL"
+	segs = append(segs, "exec $SHELL")
+	return strings.Join(segs, "; ")
 }
 
 func printTmuxScript(session string, build [][]string, attach []string, recreate, noAttach bool) {
