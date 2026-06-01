@@ -131,10 +131,9 @@ Run discovery rules and show what repos would be added/removed.
 
 | Flag | Description |
 |---|---|
-| `--apply` | Actually add discovered repos to state and clone them |
+| `--apply` | Actually add discovered repos to state and clone them (default: preview only) |
 | `--rule <name>` | Run only a specific discovery rule |
 | `--tag <tag>` | Run only rules with this tag |
-| `--dry-run` | (default) Show what would happen without changing state |
 
 ```
 $ git-mgr discover
@@ -321,6 +320,28 @@ $ git-mgr version
 git-mgr v1.42 (abc1234, built 2026-04-17)
 ```
 
+### Operate layer
+
+Beyond the discover/sync/backup core, these commands make a fleet of repos and
+agent workspaces easy to set up and operate. All repo-selecting commands share
+one selector: `--repos <glob>` ∩ `--tag <tag>` ∩ `--set <name>` (named sets from
+config).
+
+| Command | Description |
+|---|---|
+| `bootstrap` | One-command machine setup: init (if missing) → doctor → discover --apply → sync → install-agent. `--profile` (tag scope), `--no-agent`, `--dry-run`. |
+| `doctor [--fix]` | Offline preflight: git present, config valid, base_dir writable, provider tokens resolve, configured SSH keys exist, state lock free, tracked repos on disk with matching origin. Non-zero exit on failure. |
+| `run [--set/--tag/--repos] -- <cmd>` | Run a command in each matching repo (parallel, bounded by concurrency). `--fail-fast`; non-zero exit if any failed. |
+| `manifest export [--out]` / `import <file>` | Portable `{url,tags,path}` manifest of the tracked set, to rehydrate a new machine (captures manual adoptions). import is idempotent and clones over the url's transport. |
+| `restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` (clone+apply to a scratch dir), or `--apply` onto the tree (refuses dirty without `--force`). id defaults to `latest`. |
+| `report [--since]` / `log [-n]` | Summarize / list recent activity from the operation log (clone/sync/backup/remove/wg events). |
+| `config --redact` | Print the resolved config with inline provider tokens blanked (token_env/token_command kept), safe to share. |
+
+The **operation log** is an append-only JSONL file next to the state file
+(`events.jsonl`), written best-effort on every mutation (O_APPEND keeps
+concurrent line writes atomic) and bounded to a few MiB by trimming the oldest
+entries.
+
 ---
 
 ## Configuration
@@ -341,8 +362,27 @@ base_dir: "~/repos"
 # Available fields: {{.Host}}, {{.Owner}}, {{.Name}}, {{.FullName}} (owner/name)
 path_template: "{{.Host}}/{{.Owner}}/{{.Name}}"
 
+# Git transport for clone/fetch: "ssh" (default, uses SSH agent/keys) or "https"
+# (auth via git's own credential helper; git-mgr stores no credentials).
+# Overridable per repo set under `overrides:`.
+clone_protocol: "ssh"
+
 # Max concurrent git operations (clone, fetch, backup).
 concurrency: 8
+
+# Named, reusable repo selections for `--set <name>` on status/sync/backup/run/
+# remove/remote-sync. In a set: repos globs OR tags (both empty = all), then
+# exclude_archived. --set composes (AND) with inline --repos/--tag.
+sets:
+  - name: core
+    repos: ["github.com/acme/*"]
+  - name: active-backend
+    tags: ["backend"]
+    exclude_archived: true
+
+# Named agent commands for `wg open --agent <name>` (each pane runs the command).
+agents:
+  claude: "claude"
 
 # ============================================================================
 # Provider Instances
@@ -1507,4 +1547,24 @@ reported but not treated as failure — agents are expected to have WIP.
 running `wg check` on startup). Under iTerm it attaches via control mode
 (`tmux -CC`) so panes are native iTerm splits backed by a restart-surviving tmux
 session; `--print` emits the script, `--recreate` rebuilds, `--no-attach` builds
-detached (useful from a login agent).
+detached (useful from a login agent). `--cmd <command>` runs a command in each
+pane before the shell, and `--agent <name>` resolves it from config `agents:` --
+so `wg create fleet --repo R --count 4 --open --agent claude` spins up four
+isolated workspaces each running an agent.
+
+### Agent lifecycle / WIP safety
+
+The workgroup subsystem treats agent WIP as precious:
+
+- **`wg backup`** snapshots every member's uncommitted work (and the scheduled
+  `sync` backs up workgroup members too, so the periodic agent protects them).
+  `--push-branch` also force-pushes the snapshot to a recoverable
+  `git-mgr/wip/<branch>` on the remote.
+- **`wg recover`** restores a member's latest backup (`--into <dir>` for safe
+  inspection, `--apply` onto the worktree), completing the backup→recover loop.
+- **`wg rm`** backs up dirty members before tearing them down (unless `--force`),
+  and **`wg prune`** reaps only members with no unique work (clean and ahead==0
+  vs upstream), removing an empty workgroup from state. **`wg pull --backup-first`**
+  (default on) snapshots dirty members before a possibly-rebasing pull.
+- A workgroup can be built over a **named set** (`wg create --from-set <name>`):
+  an agent fleet across a tag/glob-selected set of tracked repos.
