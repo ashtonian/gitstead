@@ -19,6 +19,7 @@ import (
 type WGOpenCmd struct {
 	Name     string `arg:"" help:"Workgroup name."`
 	Cmd      string `help:"Run this command in each pane before dropping to a shell (e.g. 'claude')."`
+	Agent    string `help:"Run the named agent command from config 'agents:' in each pane."`
 	NoCheck  bool   `name:"no-check" help:"Skip the per-pane 'wg check' on startup."`
 	Print    bool   `help:"Print the tmux script instead of running it."`
 	Recreate bool   `help:"Kill and rebuild the session if it already exists."`
@@ -27,6 +28,19 @@ type WGOpenCmd struct {
 }
 
 func (c *WGOpenCmd) Run(ctx *Context) error {
+	// --agent <name> resolves to the command configured under `agents:`.
+	if c.Agent != "" && c.Cmd == "" {
+		cfg, err := ctx.LoadConfig()
+		if err != nil {
+			return err
+		}
+		cmd, ok := cfg.Agents[c.Agent]
+		if !ok {
+			return fmt.Errorf("no agent %q in config 'agents:'", c.Agent)
+		}
+		c.Cmd = cmd
+	}
+
 	spec, _, err := operationalSpec(ctx, c.Name)
 	if err != nil {
 		return err

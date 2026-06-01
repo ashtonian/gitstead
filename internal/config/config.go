@@ -23,8 +23,9 @@ type Config struct {
 	Notify        NotifyConfig     `koanf:"notify"        yaml:"notify"`
 	Log           LogConfig        `koanf:"log"           yaml:"log"`
 
-	WorkgroupBaseDir string      `koanf:"workgroup_base_dir" yaml:"workgroup_base_dir" default:"~/workgroups"`
-	Workgroups       []Workgroup `koanf:"workgroups" yaml:"workgroups,omitempty" validate:"dive"`
+	WorkgroupBaseDir string            `koanf:"workgroup_base_dir" yaml:"workgroup_base_dir" default:"~/workgroups"`
+	Workgroups       []Workgroup       `koanf:"workgroups" yaml:"workgroups,omitempty" validate:"dive"`
+	Agents           map[string]string `koanf:"agents" yaml:"agents,omitempty"` // name -> command for `wg open --agent`
 }
 
 // ManualRepo allows specifying individual repos to manage without discovery rules.
