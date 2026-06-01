@@ -134,8 +134,9 @@ func (c *SyncCmd) Run(ctx *Context) error {
 			repoCtx, cancel := context.WithTimeout(gctx, repoCfg.Sync.TimeoutPerRepo)
 			defer cancel()
 
-			// Fetch
-			if !c.NoFetch {
+			// Fetch (skipped for repos with sync.enabled: false -- tracked/backed
+			// up but never auto-fetched).
+			if !c.NoFetch && repoCfg.Sync.Enabled {
 				if !c.Force && !repo.LastFetch.IsZero() && time.Since(repo.LastFetch) < repoCfg.Sync.MinFetchInterval {
 					mu.Lock()
 					result.skippedRecent++

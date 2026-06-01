@@ -23,8 +23,11 @@ func eventsPath(ctx *Context) string {
 }
 
 // logEvent appends a best-effort entry to the operation log (never fails the
-// caller).
+// caller). Honors log.events: false as an off-switch.
 func logEvent(ctx *Context, action, repo, detail string) {
+	if cfg, err := ctx.LoadConfig(); err == nil && !cfg.Log.Events {
+		return
+	}
 	_ = oplog.Append(eventsPath(ctx), oplog.Event{Time: time.Now(), Action: action, Repo: repo, Detail: detail})
 }
 

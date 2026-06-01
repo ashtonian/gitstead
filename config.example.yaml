@@ -176,6 +176,11 @@ overrides: []
   #   remote_sync:
   #     enabled: false
   #
+  # Track a repo but never auto-fetch it (e.g. a frozen archive)
+  # - repos: ["github.com/company/archived-thing"]
+  #   sync:
+  #     enabled: false
+  #
   # Override by exact repo
   # - repos: ["github.com/company/huge-monorepo"]
   #   sync:
@@ -295,6 +300,7 @@ log:
   format: "json"           # json or text
   file: ""                 # Log to file in addition to stderr
                            # e.g., "~/.local/share/git-mgr/git-mgr.log"
+  events: true             # write the operation log (events.jsonl, read by report/log); false to disable
 
 # =============================================================================
 # Workgroups

@@ -112,6 +112,7 @@ type Override struct {
 
 // SyncOverride overrides SyncConfig fields per repo. A nil pointer means "not set".
 type SyncOverride struct {
+	Enabled          *bool          `koanf:"enabled"            yaml:"enabled,omitempty"`
 	AutoDiscover     *bool          `koanf:"auto_discover"      yaml:"auto_discover,omitempty"`
 	MinFetchInterval *time.Duration `koanf:"min_fetch_interval" yaml:"min_fetch_interval,omitempty"`
 	TimeoutPerRepo   *time.Duration `koanf:"timeout_per_repo"   yaml:"timeout_per_repo,omitempty"`
@@ -166,6 +167,7 @@ type WorkgroupMember struct {
 
 // SyncConfig controls sync behavior.
 type SyncConfig struct {
+	Enabled          bool          `koanf:"enabled"            yaml:"enabled"            default:"true"`
 	AutoDiscover     bool          `koanf:"auto_discover"      yaml:"auto_discover"      default:"true"`
 	MinFetchInterval time.Duration `koanf:"min_fetch_interval" yaml:"min_fetch_interval" default:"10m"    validate:"min=0"`
 	TimeoutPerRepo   time.Duration `koanf:"timeout_per_repo"   yaml:"timeout_per_repo"   default:"5m"     validate:"min=0"`
@@ -214,4 +216,5 @@ type LogConfig struct {
 	Level  string `koanf:"level"  yaml:"level"  default:"info"  validate:"oneof=debug info warn error"`
 	Format string `koanf:"format" yaml:"format" default:"json"  validate:"oneof=json text"`
 	File   string `koanf:"file"   yaml:"file"`
+	Events bool   `koanf:"events" yaml:"events" default:"true"` // write the operation log (events.jsonl)
 }
