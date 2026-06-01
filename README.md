@@ -53,6 +53,7 @@ git-mgr status               # table of all managed repos
 | Command | Description |
 |---|---|
 | `git-mgr init` | Create a config file with sensible defaults. |
+| `git-mgr bootstrap` | Set up a fresh machine in one command: init → doctor → discover --apply → sync → install agent. `--profile`, `--no-agent`, `--dry-run`. |
 | `git-mgr discover` | Discover repos from providers (dry-run; `--apply` to clone). `--rule`, `--tag` to scope. |
 | `git-mgr sync` | Fetch all repos + back up uncommitted changes (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`, `--push-branch`. |
 | `git-mgr backup` | Back up only (no fetch). `--list` to see backups, `--restore <id>` for instructions, `--push-branch` to also save WIP to a remote branch. |
