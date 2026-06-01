@@ -29,6 +29,7 @@ type WorkgroupCmd struct {
 	Push   WGPushCmd   `cmd:"" help:"Push all members."`
 	Exec   WGExecCmd   `cmd:"" help:"Run a command in each member directory."`
 	Open   WGOpenCmd   `cmd:"" aliases:"tmux" help:"Open/attach a tmux session with one pane per member."`
+	Backup WGBackupCmd `cmd:"" help:"Back up every member's uncommitted work (agent WIP safety net)."`
 	Remove WGRemoveCmd `cmd:"" name:"rm" help:"Tear down a workgroup."`
 }
 
@@ -121,11 +122,68 @@ type WGAdoptCmd struct {
 // WGListCmd lists workgroups.
 type WGListCmd struct{}
 
+// WGBackupCmd backs up every member's working tree so agent WIP is preserved.
+type WGBackupCmd struct {
+	Name       string `arg:"" help:"Workgroup to back up."`
+	Member     string `help:"Only back up this member." default:""`
+	PushBranch bool   `help:"Also push WIP to a recoverable remote branch (git-mgr/wip/<branch>)." name:"push-branch"`
+}
+
+func (c *WGBackupCmd) Run(ctx *Context) error {
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return err
+	}
+	st, err := ctx.LoadState()
+	if err != nil {
+		return err
+	}
+	ws, ok := st.Workgroups[c.Name]
+	if !ok {
+		return fmt.Errorf("workgroup %q not found in state; run 'workgroup ensure %s' first", c.Name, c.Name)
+	}
+
+	bcfg := backupConfigFor(cfg, cfg.ResolveForRepo(""), "", "", c.PushBranch, "")
+	backed := 0
+	for _, m := range ws.Members {
+		if c.Member != "" && m.Name != c.Member {
+			continue
+		}
+		if !gitops.HasGitDir(m.Path) {
+			continue
+		}
+		br, berr := gitops.Backup(ctx.GoCtx(), m.Path, bcfg)
+		if berr != nil {
+			fmt.Printf("  %s: error: %v\n", m.Name, berr)
+			continue
+		}
+		if br.IsDirty {
+			backed++
+			if !ctx.Quiet {
+				where := br.RefName
+				if where == "" {
+					where = "patch"
+				}
+				if br.PushedBranch != "" {
+					where += " + " + br.PushedBranch
+				}
+				fmt.Printf("  %s: backed up (%s)\n", m.Name, where)
+			}
+		}
+	}
+	if !ctx.Quiet {
+		fmt.Printf("Backed up %d dirty member(s) of %q\n", backed, c.Name)
+	}
+	return nil
+}
+
 // WGRemoveCmd tears down a workgroup.
 type WGRemoveCmd struct {
-	Name   string `arg:"" help:"Workgroup to remove."`
-	Delete bool   `help:"Also delete member directories from disk."`
-	Yes    bool   `help:"Skip confirmation."`
+	Name       string `arg:"" help:"Workgroup to remove."`
+	Delete     bool   `help:"Also delete member directories from disk."`
+	Yes        bool   `help:"Skip confirmation."`
+	Force      bool   `help:"Discard uncommitted member work without backing it up first."`
+	PushBranch bool   `help:"Also push members' WIP to a recoverable remote branch during the safety backup." name:"push-branch"`
 }
 
 func (c *WGCreateCmd) Run(ctx *Context) error {
@@ -403,17 +461,60 @@ func (c *WGRemoveCmd) Run(ctx *Context) error {
 		spec = s
 	}
 
+	// Safety: never silently destroy uncommitted work. Unless --force, find any
+	// dirty/untracked/mid-operation member (read-only) so the prompt warns, and
+	// back each one up before the worktree is torn down.
+	var unsafe []workgroup.MemberHealth
+	if !c.Force {
+		for _, m := range workgroup.ComputeHealth(ctx.GoCtx(), spec).Members {
+			if m.Dirty || m.Untracked || m.Stuck != "" {
+				unsafe = append(unsafe, m)
+			}
+		}
+	}
+
 	if !c.Yes {
 		extra := ""
 		if c.Delete {
 			extra = " and delete files"
 		}
-		fmt.Printf("Remove workgroup %q (%d members)%s? (y/n): ", c.Name, len(spec.Members), extra)
+		warn := ""
+		if len(unsafe) > 0 {
+			warn = fmt.Sprintf(" [%d member(s) have uncommitted work, will be backed up first]", len(unsafe))
+		}
+		fmt.Printf("Remove workgroup %q (%d members)%s%s? (y/n): ", c.Name, len(spec.Members), extra, warn)
 		var answer string
 		fmt.Scanln(&answer)
 		if answer != "y" && answer != "Y" {
 			fmt.Println("Cancelled.")
 			return nil
+		}
+	}
+
+	// Capture WIP before anything is removed; abort if a backup fails so work is
+	// never lost (the user can pass --force to discard deliberately).
+	if len(unsafe) > 0 {
+		cfg, cerr := ctx.LoadConfig()
+		if cerr != nil {
+			return cerr
+		}
+		for _, m := range unsafe {
+			repoCfg := cfg.ResolveForRepo(m.RepoKey)
+			bcfg := backupConfigFor(cfg, repoCfg, m.RepoKey, "", c.PushBranch, "")
+			br, berr := gitops.Backup(ctx.GoCtx(), m.Path, bcfg)
+			if berr != nil {
+				return fmt.Errorf("refusing to remove %q: backup of member %q failed (use --force to discard): %w", c.Name, m.Name, berr)
+			}
+			if !ctx.Quiet {
+				where := br.RefName
+				if where == "" {
+					where = "patch"
+				}
+				if br.PushedBranch != "" {
+					where += " + " + br.PushedBranch
+				}
+				fmt.Printf("  safety backup: %s (%s)\n", m.Name, where)
+			}
 		}
 	}
 

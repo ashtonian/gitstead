@@ -120,7 +120,7 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 	if !HasGitDir(repoPath) {
 		return result, nil
 	}
-	if locked, lf := IsLocked(repoPath); locked {
+	if locked, lf := IsLocked(ctx, repoPath); locked {
 		slog.Warn("repo locked, skipping backup", "repo", repoPath, "lock", lf)
 		return result, nil
 	}
@@ -225,15 +225,16 @@ func detectWorkingTreeState(ctx context.Context, repoPath string) workingTreeSta
 		slog.Debug("failed to list untracked files", "repo", repoPath, "error", err)
 	}
 
+	gitDir := ResolveGitDirs(ctx, repoPath).GitDir
 	return workingTreeState{
 		HasStaged:    GitExitCode(ctx, repoPath, "diff", "--cached", "--quiet") != 0,
 		HasUnstaged:  GitExitCode(ctx, repoPath, "diff", "--quiet") != 0,
 		HasUntracked: untrackedOut != "",
 		UntrackedOut: untrackedOut,
-		InRebase: fileExists(filepath.Join(repoPath, ".git", "rebase-merge")) ||
-			fileExists(filepath.Join(repoPath, ".git", "rebase-apply")),
-		InMerge:      fileExists(filepath.Join(repoPath, ".git", "MERGE_HEAD")),
-		InCherryPick: fileExists(filepath.Join(repoPath, ".git", "CHERRY_PICK_HEAD")),
+		InRebase: fileExists(filepath.Join(gitDir, "rebase-merge")) ||
+			fileExists(filepath.Join(gitDir, "rebase-apply")),
+		InMerge:      fileExists(filepath.Join(gitDir, "MERGE_HEAD")),
+		InCherryPick: fileExists(filepath.Join(gitDir, "CHERRY_PICK_HEAD")),
 	}
 }
 

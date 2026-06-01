@@ -16,10 +16,11 @@ func (c *CloneCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	st, err := ctx.LoadState()
+	st, unlock, err := lockedState(ctx)
 	if err != nil {
 		return err
 	}
+	defer unlock()
 
 	identity, err := gitops.ParseURL(c.URL)
 	if err != nil {
