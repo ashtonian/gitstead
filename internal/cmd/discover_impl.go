@@ -124,6 +124,7 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 			fmt.Printf(" done (%.1fs)\n", time.Since(start).Seconds())
 
 			addRepoToState(st, repo, destPath, cloneURL)
+			logEvent(ctx, "clone", repo.Key(), cloneURL)
 		}
 	}
 

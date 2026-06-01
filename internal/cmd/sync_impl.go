@@ -87,6 +87,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 						continue
 					}
 					addRepoToState(st, repo, destPath, cloneURL)
+					logEvent(ctx, "clone", key, cloneURL)
 				}
 			}
 
@@ -232,6 +233,8 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	if err := st.Save(); err != nil {
 		return fmt.Errorf("saving state: %w", err)
 	}
+	logEvent(ctx, "sync", "", fmt.Sprintf("fetched=%d backed_up=%d failed=%d skipped_recent=%d skipped_locked=%d",
+		result.fetched, result.backedUp, result.failed, result.skippedRecent, result.skippedLocked))
 
 	if !ctx.Quiet {
 		fmt.Printf("Synced: %d fetched, %d skipped (recent), %d skipped (locked), %d failed, %d backed up\n",

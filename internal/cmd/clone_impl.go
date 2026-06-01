@@ -87,6 +87,7 @@ func (c *CloneCmd) Run(ctx *Context) error {
 	if err := st.Save(); err != nil {
 		return fmt.Errorf("saving state: %w", err)
 	}
+	logEvent(ctx, "clone", key, cloneURL)
 
 	fmt.Printf("Cloned to %s\n", destPath)
 	if len(tags) > 0 {

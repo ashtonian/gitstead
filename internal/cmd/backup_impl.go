@@ -83,6 +83,7 @@ func (c *BackupCmd) Run(ctx *Context) error {
 			repo.LastBackupRef = br.RefName
 			repo.LastBackupHasPatch = br.HasPatch
 			repo.Status = "dirty"
+			logEvent(ctx, "backup", key, br.RefName)
 			if !ctx.Quiet {
 				if br.PushedBranch != "" {
 					fmt.Printf("  %s: backed up (pushed %s)\n", key, br.PushedBranch)
