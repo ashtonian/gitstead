@@ -48,13 +48,25 @@ git-mgr shells out to `git`, so git must be on `PATH`.
 
 ## Quick start
 
+**No config needed** — if git and your auth (SSH agent/keys, or a git credential
+helper like `gh auth setup-git`) already work on your machine, git-mgr does too.
+It uses your existing transport and a default layout (`~/repos`):
+
 ```bash
-git-mgr init                 # write a starter config
-git-mgr config --edit        # add providers + discovery rules
-git-mgr discover             # dry-run: show what would be cloned
-git-mgr discover --apply     # clone new repos and record them
-git-mgr sync                 # fetch everything + back up uncommitted work
-git-mgr status               # table of all managed repos
+git-mgr adopt ~/code/myrepo            # track a clone you already have
+git-mgr clone git@github.com:me/app    # clone + track by URL (your SSH/HTTPS auth)
+git-mgr sync                           # fetch all tracked repos + back up WIP
+git-mgr status                         # table of what you're managing
+git-mgr wg create scratch --source ~/code/app --count 4 --open --agent claude
+```
+
+To **auto-discover** repos from a provider (the one thing that needs to know
+*what* to fetch), add one to config — `gh auth token` makes auth a one-liner:
+
+```bash
+git-mgr init                 # starter config (uncomment a provider stub)
+git-mgr discover --apply     # clone everything the rules match
+git-mgr install-agent        # optional: periodic background sync
 ```
 
 ## Commands

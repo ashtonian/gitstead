@@ -78,7 +78,8 @@ func (c *StatusCmd) Run(ctx *Context) error {
 	}
 
 	if len(st.Repos) == 0 {
-		fmt.Println("No repos tracked. Run 'git-mgr discover --apply' to get started.")
+		fmt.Println("No repos tracked. Adopt clones you already have ('git-mgr adopt <path>'),")
+		fmt.Println("clone one ('git-mgr clone <url>'), or discover from a provider ('git-mgr discover --apply').")
 		return nil
 	}
 
