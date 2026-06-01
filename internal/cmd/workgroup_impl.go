@@ -34,35 +34,46 @@ type WorkgroupCmd struct {
 }
 
 // WGCreateCmd materialises a workgroup for the first time. With no flags it
-// looks the name up in config (the original behavior); with --source/--count/
-// --member/--from-tag it synthesizes the workgroup from the CLI as a one-off,
-// which --save can persist to config.
+// looks the name up in config (the original behavior); with --repo/--from-tag/
+// --source/--count/--member it synthesizes the workgroup from the CLI as a
+// one-off, which --save can persist to config. Clone is the default kind.
 type WGCreateCmd struct {
 	Name    string   `arg:"" help:"Workgroup name."`
-	Source  string   `help:"Source repo (tracked key or local path); defines a worktree workgroup."`
-	Count   int      `help:"Number of worktree members to create, named agent-1..N."`
-	Member  []string `help:"Explicit member; repeatable. worktree: name[:branch]. clone: a repo URL. Overrides --count."`
+	Kind    string   `help:"Kind: clone (independent repos, the default) or worktree (shared source)." enum:"clone,worktree" default:"clone"`
+	Repo    []string `help:"Clone member: a repo URL or tracked key; repeatable. With --count, N clones of a single repo."`
+	FromTag string   `help:"Clone members from tracked repos carrying this tag." name:"from-tag"`
+	Source  string   `help:"Worktree source repo (tracked key or local path); implies --kind worktree."`
+	Count   int      `help:"Number of members to create, named agent-1..N."`
+	Member  []string `help:"Explicit member; repeatable. worktree: name[:branch]. clone: a repo URL/key. Overrides --count."`
 	BaseRef string   `help:"Worktree fork point (default: source HEAD)." name:"base-ref"`
-	FromTag string   `help:"Clone workgroup from tracked repos carrying this tag." name:"from-tag"`
 	Sync    bool     `help:"Track the underlying repo(s) so 'git-mgr sync' keeps them fetched."`
 	Save    bool     `help:"Append the synthesized workgroup to the config file."`
 	Force   bool     `help:"With --save, overwrite an existing config workgroup of the same name."`
 }
 
 // synthesized reports whether any workgroup-defining flag was given (vs. the
-// legacy config-lookup path).
+// legacy config-lookup path). --kind alone (it has a default) does not count.
 func (c *WGCreateCmd) synthesized() bool {
-	return c.Source != "" || c.Count > 0 || len(c.Member) > 0 || c.FromTag != ""
+	return c.Source != "" || c.Count > 0 || len(c.Member) > 0 || c.FromTag != "" || len(c.Repo) > 0
 }
 
-// toWorkgroup builds a config.Workgroup from the CLI flags. It mirrors the rules
-// config.Validate enforces (worktree needs source + members; clone needs members
-// or from_tag), so a synthesized group is indistinguishable from a declared one.
+// toWorkgroup builds a config.Workgroup from the CLI flags. Clone is the default
+// kind; --source selects worktree (it is worktree-specific). It mirrors the
+// rules config.Validate enforces, so a synthesized group is indistinguishable
+// from a declared one.
 func (c *WGCreateCmd) toWorkgroup() (config.Workgroup, error) {
 	wg := config.Workgroup{Name: c.Name, BaseRef: c.BaseRef, FromTag: c.FromTag, Sync: c.Sync}
 
-	switch {
-	case c.Source != "":
+	kind := c.Kind
+	if c.Source != "" {
+		kind = "worktree"
+	}
+
+	switch kind {
+	case "worktree":
+		if c.Source == "" {
+			return config.Workgroup{}, fmt.Errorf("worktree workgroup needs --source")
+		}
 		wg.Kind = "worktree"
 		wg.Source = c.Source
 		members, err := worktreeMembers(c.Name, c.Count, c.Member)
@@ -70,15 +81,45 @@ func (c *WGCreateCmd) toWorkgroup() (config.Workgroup, error) {
 			return config.Workgroup{}, err
 		}
 		wg.Members = members
-	case c.FromTag != "" || len(c.Member) > 0:
+	case "clone":
 		wg.Kind = "clone"
-		for _, m := range c.Member {
-			wg.Members = append(wg.Members, config.WorkgroupMember{Repo: m})
+		members, err := cloneMembers(c.Repo, c.Member, c.Count, c.FromTag)
+		if err != nil {
+			return config.Workgroup{}, err
 		}
+		wg.Members = members
 	default:
-		return config.Workgroup{}, fmt.Errorf("specify --source (worktree) or --from-tag/--member (clone)")
+		return config.Workgroup{}, fmt.Errorf("unknown --kind %q (want clone or worktree)", kind)
 	}
 	return wg, nil
+}
+
+// cloneMembers builds clone members from --repo/--member (repo URLs or tracked
+// keys) and --from-tag. With a single repo and --count N it yields an N-clone
+// agent fleet (agent-1..N) of that one repo; otherwise one member per repo.
+func cloneMembers(repos, members []string, count int, fromTag string) ([]config.WorkgroupMember, error) {
+	all := append(append([]string{}, repos...), members...)
+	if fromTag != "" {
+		if len(all) > 0 {
+			return nil, fmt.Errorf("--from-tag cannot be combined with --repo/--member")
+		}
+		return nil, nil // members are selected from the tag at resolve time
+	}
+	if len(all) == 0 {
+		return nil, fmt.Errorf("clone workgroup needs --repo/--member or --from-tag")
+	}
+	if count > 1 && len(all) == 1 {
+		var ms []config.WorkgroupMember
+		for i := 1; i <= count; i++ {
+			ms = append(ms, config.WorkgroupMember{Name: fmt.Sprintf("agent-%d", i), Repo: all[0]})
+		}
+		return ms, nil
+	}
+	var ms []config.WorkgroupMember
+	for _, r := range all {
+		ms = append(ms, config.WorkgroupMember{Repo: r})
+	}
+	return ms, nil
 }
 
 // worktreeMembers expands --count / --member into worktree members. Explicit
@@ -247,7 +288,7 @@ func (c *WGCreateCmd) Run(ctx *Context) error {
 	// --save persists the synthesized declaration to config.
 	if c.Save {
 		if !c.synthesized() {
-			return fmt.Errorf("--save requires synthesizing flags (--source/--count/--member/--from-tag)")
+			return fmt.Errorf("--save requires synthesizing flags (--repo/--from-tag/--source/--count/--member)")
 		}
 		if err := config.SaveWorkgroup(ctx.Config, wg, c.Force); err != nil {
 			return err

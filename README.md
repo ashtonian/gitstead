@@ -220,38 +220,48 @@ git-mgr sync --push-branch                          # same, as part of the perio
 ## Workgroups
 
 A *workgroup* is a parent directory of N working directories operated on as a
-unit — either **worktrees** (N `git worktree`s of one source repo, each on its
-own branch, sharing one object store — ideal for running N agents on one
-project) or **clones** (N independent repos worked on together, e.g. a
-microservice bundle). Unlike sync/backup, workgroup commands deliberately
-mutate on request.
+unit. Two kinds:
 
-Launch one as a one-off from the CLI — no config edit needed:
+- **clone** (the default) — N independent clones, e.g. a microservice bundle, or
+  N isolated agent workspaces on one repo. Fully separate object stores.
+- **worktree** — N `git worktree`s of one source repo, each on its own branch,
+  sharing one object store (cheap; pass `--source`).
+
+Unlike sync/backup, workgroup commands deliberately mutate on request. Launch one
+as a one-off from the CLI — no config edit needed:
 
 ```bash
-# 4 isolated worktrees of a repo, forked from origin/main, in a tmux session:
-git-mgr wg create scratch --source ~/code/app --count 4 --base-ref origin/main
-git-mgr wg open scratch                      # tmux session, one pane per member
+# A clone fleet of every repo tagged "backend" (clone is the default kind):
+git-mgr wg create review --from-tag backend
+git-mgr wg open review                       # tmux session, one pane per member
 
-# Persist it back to config (--force overwrites an existing entry), and track
-# the underlying repo so `git-mgr sync` keeps it fetched:
-git-mgr wg create scratch --source ~/code/app --count 4 --save --sync
+# 3 independent clones of one repo — 3 agents, isolated working copies:
+git-mgr wg create fleet --repo git@github.com:me/app.git --count 3
+
+# Worktrees instead (shared object store), forked from origin/main:
+git-mgr wg create scratch --source ~/code/app --count 4 --base-ref origin/main
+
+# Persist any of these to config (--force overwrites), and track the underlying
+# repo(s) so `git-mgr sync` keeps them fetched and backed up:
+git-mgr wg create fleet --repo git@github.com:me/app.git --count 3 --save --sync
 ```
 
-`--member name[:branch]` (repeatable) sets members explicitly instead of
-`--count`; `--from-tag <tag>` builds a clone workgroup from tracked repos
-carrying a tag. Workgroups declared in config (`workgroups:`) are reconciled
-with `wg ensure` and rebuilt deterministically after a reboot — a machine
-restart is a non-event. `wg check` exits non-zero on drift (missing members,
-wrong branch, in-progress rebase/merge, behind upstream).
+`--member` (repeatable) sets members explicitly — `name[:branch]` for worktree,
+a repo URL/key for clone — overriding `--count`. Workgroups declared in config
+(`workgroups:`) are reconciled with `wg ensure` and rebuilt deterministically
+after a reboot — a machine restart is a non-event. `wg check` exits non-zero on
+drift (missing members, wrong branch, in-progress rebase/merge, behind upstream),
+and `wg backup` (plus the scheduled `sync`) keeps every member's WIP safe.
 
 | `wg` subcommand | Description |
 |---|---|
-| `create <name>` | Build from flags (one-off) or a config declaration. `--source`, `--count`, `--member`, `--base-ref`, `--from-tag`, `--save`, `--force`, `--sync`. |
+| `create <name>` | Build from flags (one-off) or a config declaration. `--kind`, `--repo`, `--from-tag`, `--source`, `--count`, `--member`, `--base-ref`, `--save`, `--force`, `--sync`. |
 | `ensure <name>` | Reconcile disk to the declared/created state (idempotent). |
 | `open <name>` | Build/attach a tmux session (`--print`, `--recreate`, `--no-attach`). |
 | `check <name>` | Assert health; non-zero exit on drift. |
+| `backup <name>` | Back up every member's uncommitted work (`--push-branch`). |
 | `ls` / `status <name>` | List workgroups / show member status. |
+| `rm <name>` | Tear down (backs up dirty members first unless `--force`). |
 | `adopt <name>` | Import an existing directory of working trees. |
 
 ## Running on a schedule

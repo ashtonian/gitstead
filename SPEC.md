@@ -1443,12 +1443,15 @@ distinct, opt-in subsystem with its own command family (`workgroup`, alias `wg`)
 
 ### Kinds
 
+- **clone** (the default kind) — N independent clones (distinct repos), e.g. a
+  microservice bundle, or N isolated agent workspaces on one repo. Members are
+  listed explicitly, selected from tracked repos via `from_tag`, or expanded
+  from a single repo with `--count`. "In sync" = present, on a branch, not
+  behind upstream.
 - **worktree** — N `git worktree`s of a single source repo, each on its own
-  branch (shared object store; cheap). For running N agents on one project in
-  isolation. "In sync" = present, on the expected branch, not behind base.
-- **clone** — N independent clones (distinct repos), e.g. a microservice
-  bundle. Members are listed explicitly or selected from tracked repos via
-  `from_tag`. "In sync" = present, on a branch, not behind upstream.
+  branch (shared object store; cheap; pass `--source`). For running N agents on
+  one project in isolation. "In sync" = present, on the expected branch, not
+  behind base.
 
 A *member* is the unifying abstraction: a working directory with a path,
 branch, and optional upstream. Group operations (status/check/fetch/commit/
@@ -1472,13 +1475,17 @@ predicate differ by kind.
 ### Creating from the CLI
 
 `workgroup create <name>` builds a workgroup two ways: with no defining flags it
-looks `<name>` up in config (the declarative path); with `--source`/`--count`/
-`--member`/`--from-tag` it **synthesizes** a `config.Workgroup` from the CLI as a
-one-off — no config edit required. A synthesized worktree group expands
-`--count N` into members `agent-1..N` with branches namespaced `<name>/agent-N`
-(so distinct groups off one source never collide); `--member name[:branch]` sets
-members explicitly. Both paths converge on the same `Spec` → `ensure`
-materialisation, so a flag-built group is indistinguishable from a declared one.
+looks `<name>` up in config (the declarative path); with
+`--repo`/`--from-tag`/`--source`/`--count`/`--member` it **synthesizes** a
+`config.Workgroup` from the CLI as a one-off — no config edit required. **Clone
+is the default kind**; `--source` (worktree-specific) selects worktree, or pass
+`--kind` explicitly. A clone group takes members from `--repo`/`--member` (repo
+URLs or tracked keys) or `--from-tag`, and `--repo R --count N` expands to an
+N-clone fleet `agent-1..N` of one repo. A worktree group expands `--count N`
+into members `agent-1..N` with branches namespaced `<name>/agent-N` (so distinct
+groups off one source never collide); `--member name[:branch]` sets members
+explicitly. Both paths converge on the same `Spec` → `ensure` materialisation,
+so a flag-built group is indistinguishable from a declared one.
 
 - `--save` appends the synthesized workgroup back to the config file via a
   comment-preserving YAML round-trip (the config library is load-only, so this

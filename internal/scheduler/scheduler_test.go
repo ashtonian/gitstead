@@ -36,7 +36,7 @@ func TestPlistContent(t *testing.T) {
 
 func TestSystemdContent(t *testing.T) {
 	o := opts()
-	if want := "ExecStart=/usr/local/bin/git-mgr --config /cfg/config.yaml --state /state/state.yaml sync --quiet"; !strings.Contains(o.ServiceContent(), want) {
+	if want := `ExecStart="/usr/local/bin/git-mgr" "--config" "/cfg/config.yaml" "--state" "/state/state.yaml" "sync" "--quiet"`; !strings.Contains(o.ServiceContent(), want) {
 		t.Errorf("service ExecStart wrong:\n%s", o.ServiceContent())
 	}
 	tm := o.TimerContent()
@@ -47,11 +47,39 @@ func TestSystemdContent(t *testing.T) {
 
 func TestCronLine(t *testing.T) {
 	l := opts().CronLine()
-	if !strings.HasPrefix(l, "*/15 * * * * /usr/local/bin/git-mgr") {
+	if !strings.HasPrefix(l, "*/15 * * * * '/usr/local/bin/git-mgr'") {
 		t.Errorf("cron prefix/schedule wrong: %s", l)
 	}
-	if !strings.Contains(l, "sync --quiet") || !strings.Contains(l, "2>> /log/git-mgr.log") || !strings.HasSuffix(l, scheduler.Label) {
+	if !strings.Contains(l, "'sync' '--quiet'") || !strings.Contains(l, "2>> '/log/git-mgr.log'") || !strings.HasSuffix(l, scheduler.Label) {
 		t.Errorf("cron line wrong: %s", l)
+	}
+}
+
+// TestSchedulerEscaping proves paths with spaces and shell/XML-special chars are
+// quoted/escaped so the generated units don't silently break or word-split.
+func TestSchedulerEscaping(t *testing.T) {
+	o := scheduler.Options{
+		BinPath:    "/Apps/My Tools/git-mgr",
+		Interval:   15 * time.Minute,
+		ConfigPath: "/c fg/a&b.yaml",
+		LogPath:    "/log dir/out.log",
+	}
+
+	// systemd: each arg double-quoted, so the space-containing path is one token.
+	if svc := o.ServiceContent(); !strings.Contains(svc, `"/Apps/My Tools/git-mgr"`) || !strings.Contains(svc, `"/c fg/a&b.yaml"`) {
+		t.Errorf("systemd ExecStart not quoted:\n%s", svc)
+	}
+
+	// launchd: XML-special chars escaped; the raw & must not appear unescaped.
+	p := o.PlistContent()
+	if !strings.Contains(p, "/c fg/a&amp;b.yaml") || strings.Contains(p, "a&b.yaml") {
+		t.Errorf("plist not XML-escaped:\n%s", p)
+	}
+
+	// cron: each arg single-quoted including the log redirect target.
+	l := o.CronLine()
+	if !strings.Contains(l, `'/Apps/My Tools/git-mgr'`) || !strings.Contains(l, `2>> '/log dir/out.log'`) {
+		t.Errorf("cron not shell-quoted: %s", l)
 	}
 }
 
