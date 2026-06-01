@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -52,7 +51,7 @@ func (c *RemoteSyncCmd) Run(ctx *Context) error {
 		}
 
 		refspec := "refs/git-mgr/*:refs/git-mgr/*"
-		_, err := gitops.GitWithSSHKey(context.Background(), repo.LocalPath, sshKey, "push", remoteName, refspec)
+		_, err := gitops.GitWithSSHKey(ctx.GoCtx(), repo.LocalPath, sshKey, "push", remoteName, refspec)
 		if err != nil {
 			fmt.Printf("  %s: push failed: %v\n", key, err)
 			continue

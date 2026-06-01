@@ -2,8 +2,9 @@ package discovery
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
+	"regexp"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 )
@@ -31,6 +32,20 @@ type DiscoverResult struct {
 	Existing   int
 	StaleCount int
 	Warnings   []string // filters that could not be honored, etc.
+	Err        error    // non-nil if this rule failed (others may still succeed)
+}
+
+// AnyFailed reports whether any discovery rule errored. Callers use this to
+// suppress stale detection on a partial run: a transient provider outage yields
+// an incomplete discovered set, and marking the missing repos stale (or, under
+// remove_and_delete, deleting them) would be destructive.
+func AnyFailed(results []DiscoverResult) bool {
+	for _, r := range results {
+		if r.Err != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // RunDiscovery runs all discovery rules (or a filtered set) and returns discovered repos.
@@ -55,20 +70,36 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 			}
 		}
 		if provCfg == nil {
-			return nil, nil, fmt.Errorf("rule %q references unknown provider %q", rule.Name, rule.Provider)
+			// Config-level error: surface it but keep processing other rules.
+			results = append(results, DiscoverResult{
+				Rule: rule.Name, Provider: rule.Provider,
+				Err: fmt.Errorf("rule %q references unknown provider %q", rule.Name, rule.Provider),
+			})
+			continue
 		}
 
 		provider, err := ProviderForConfig(*provCfg)
 		if err != nil {
-			return nil, nil, fmt.Errorf("creating provider %q: %w", provCfg.Name, err)
+			results = append(results, DiscoverResult{
+				Rule: rule.Name, Provider: provCfg.Name,
+				Err: fmt.Errorf("creating provider %q: %w", provCfg.Name, err),
+			})
+			continue
 		}
 
 		res, err := provider.Discover(ctx, rule)
 		if err != nil {
-			return nil, nil, fmt.Errorf("discovering from %q rule %q: %w", provCfg.Name, rule.Name, err)
+			// A single failing rule must not abort discovery for the rest:
+			// otherwise one expired token wipes out the whole run (and, via
+			// stale cleanup, could delete healthy repos).
+			results = append(results, DiscoverResult{
+				Rule: rule.Name, Provider: provCfg.Name,
+				Err: fmt.Errorf("discovering from %q rule %q: %w", provCfg.Name, rule.Name, err),
+			})
+			continue
 		}
 
-		filtered, warnings := applyFilters(ctx, provider, res, rule, cfg.Exclude)
+		filtered, warnings := applyFilters(ctx, provider, res, rule, cfg.Exclude, cfg.Concurrency)
 
 		for i := range filtered {
 			r := filtered[i]
@@ -89,6 +120,24 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 			Total:    len(filtered),
 			Warnings: warnings,
 		})
+	}
+
+	// If every rule that ran failed, report an aggregate error so callers don't
+	// treat an all-failed run as "nothing exists upstream".
+	if n := len(results); n > 0 {
+		failed := 0
+		for _, r := range results {
+			if r.Err != nil {
+				failed++
+			}
+		}
+		if failed == n {
+			var errs []error
+			for _, r := range results {
+				errs = append(errs, r.Err)
+			}
+			return results, discovered, errors.Join(errs...)
+		}
 	}
 
 	// Include manual repos from config
@@ -117,8 +166,9 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 // then handles language (and, where needed, topics) via per-repo enrichment on
 // the survivors only. It returns the matching repos plus any warnings about
 // filters that could not be honored.
-func applyFilters(ctx context.Context, provider Provider, res ProviderResult, rule config.DiscoveryRule, excludes []config.ExcludeRule) ([]Repo, []string) {
-	var warnings []string
+func applyFilters(ctx context.Context, provider Provider, res ProviderResult, rule config.DiscoveryRule, excludes []config.ExcludeRule, concurrency int) ([]Repo, []string) {
+	// Carry forward any provider-level warnings (e.g. search-result truncation).
+	warnings := append([]string(nil), res.Warnings...)
 	req := requestedFilters(rule)
 
 	// Filters to skip in the cheap client-side pass: those already applied
@@ -133,16 +183,26 @@ func applyFilters(ctx context.Context, provider Provider, res ProviderResult, ru
 		skip[FilterTopics] = true
 	}
 
+	// FilterRepos silently ignores an un-compilable name_pattern (it must not
+	// panic when driven without config.Validate); surface that as a warning so a
+	// bad pattern doesn't look like "nothing matched".
+	if rule.NamePattern != "" && !skip.Has(FilterName) {
+		if _, err := regexp.Compile(rule.NamePattern); err != nil {
+			warnings = append(warnings, fmt.Sprintf("rule %q: invalid name_pattern %q (%v); name filter not applied", rule.Name, rule.NamePattern, err))
+		}
+	}
+
 	repos := FilterRepos(res.Repos, rule, excludes, skip)
 
 	// Language: enrich the survivors, then match (any requested language).
+	// Enrichment is best-effort — on partial failure we still filter on what
+	// resolved (repos whose lookup failed have no languages and drop out).
 	if req.Has(FilterLanguage) && !res.Applied.Has(FilterLanguage) {
 		if res.Capabilities.CanEnrichLanguages {
-			if err := provider.EnrichLanguages(ctx, repos); err != nil {
-				warnings = append(warnings, fmt.Sprintf("rule %q: language lookup failed (%v); 'languages' filter not applied", rule.Name, err))
-			} else {
-				repos = filterByLanguage(repos, rule.Languages)
+			if err := provider.EnrichLanguages(ctx, repos, concurrency); err != nil {
+				warnings = append(warnings, fmt.Sprintf("rule %q: some language lookups failed (%v); filtering on what resolved", rule.Name, err))
 			}
+			repos = filterByLanguage(repos, rule.Languages)
 		} else {
 			warnings = append(warnings, fmt.Sprintf("rule %q: provider does not support the 'languages' filter; ignoring it", rule.Name))
 		}
@@ -150,11 +210,10 @@ func applyFilters(ctx context.Context, provider Provider, res ProviderResult, ru
 
 	// Topics via enrichment (providers that don't return them inline).
 	if deferTopics {
-		if err := provider.EnrichTopics(ctx, repos); err != nil {
-			warnings = append(warnings, fmt.Sprintf("rule %q: topic lookup failed (%v); 'topics' filter not applied", rule.Name, err))
-		} else {
-			repos = filterByTopics(repos, rule.Topics)
+		if err := provider.EnrichTopics(ctx, repos, concurrency); err != nil {
+			warnings = append(warnings, fmt.Sprintf("rule %q: some topic lookups failed (%v); filtering on what resolved", rule.Name, err))
 		}
+		repos = filterByTopics(repos, rule.Topics)
 	}
 
 	return repos, warnings
@@ -175,74 +234,6 @@ func parseManualRepo(mr config.ManualRepo) (*Repo, error) {
 		Tags:         mr.Tags,
 		DiscoveredBy: "_manual",
 	}, nil
-}
-
-type sshParts struct {
-	host, owner, name string
-}
-
-// parseGitURL parses scp-like (git@host:owner/name.git) and ssh://
-// (ssh://git@host[:port]/owner/name.git) URLs. Other schemes return nil.
-func parseGitURL(url string) *sshParts {
-	if strings.HasPrefix(url, "ssh://") {
-		return parseSSHURL(url)
-	}
-	if strings.Contains(url, "://") {
-		return nil
-	}
-	if strings.Contains(url, ":") {
-		return splitSSH(url)
-	}
-	return nil
-}
-
-// splitSSH parses an scp-like URL: [user@]host:owner/.../name[.git]
-func splitSSH(url string) *sshParts {
-	if at := strings.Index(url, "@"); at >= 0 {
-		url = url[at+1:]
-	}
-	colon := strings.Index(url, ":")
-	if colon < 0 {
-		return nil
-	}
-	host := url[:colon]
-	owner, name := splitOwnerName(strings.TrimSuffix(url[colon+1:], ".git"))
-	if host == "" || owner == "" || name == "" {
-		return nil
-	}
-	return &sshParts{host: host, owner: owner, name: name}
-}
-
-// parseSSHURL parses ssh://[user@]host[:port]/owner/.../name[.git]
-func parseSSHURL(url string) *sshParts {
-	s := strings.TrimPrefix(url, "ssh://")
-	if at := strings.Index(s, "@"); at >= 0 {
-		s = s[at+1:]
-	}
-	slash := strings.Index(s, "/")
-	if slash < 0 {
-		return nil
-	}
-	host := s[:slash]
-	if c := strings.Index(host, ":"); c >= 0 {
-		host = host[:c]
-	}
-	owner, name := splitOwnerName(strings.TrimSuffix(s[slash+1:], ".git"))
-	if host == "" || owner == "" || name == "" {
-		return nil
-	}
-	return &sshParts{host: host, owner: owner, name: name}
-}
-
-// splitOwnerName splits owner/name or group/subgroup/name into the leading
-// owner path and the final repo name.
-func splitOwnerName(path string) (string, string) {
-	path = strings.Trim(path, "/")
-	idx := strings.LastIndex(path, "/")
-	if idx < 0 {
-		return "", ""
-	}
-	return path[:idx], path[idx+1:]
 }
 
 // mergeTags returns the de-duplicated union of two tag slices, preserving order.

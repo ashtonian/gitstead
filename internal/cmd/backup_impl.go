@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -51,7 +50,7 @@ func (c *BackupCmd) Run(ctx *Context) error {
 			gitops.WithPatchDir(repoCfg.Backup.PatchDir),
 		)
 
-		br, err := gitops.Backup(context.Background(), repo.LocalPath, backupCfg)
+		br, err := gitops.Backup(ctx.GoCtx(), repo.LocalPath, backupCfg)
 		if err != nil {
 			fmt.Printf("  %s: error: %v\n", key, err)
 			continue
@@ -93,7 +92,7 @@ func (c *BackupCmd) runList(ctx *Context, st *state.State) error {
 			continue
 		}
 
-		refs, err := gitops.ListBackupRefs(context.Background(), repo.LocalPath)
+		refs, err := gitops.ListBackupRefs(ctx.GoCtx(), repo.LocalPath)
 		if err != nil || len(refs) == 0 {
 			continue
 		}

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -53,7 +52,7 @@ func (c *CloneCmd) Run(ctx *Context) error {
 	sshKey := cfg.ResolveSSHKey(key, "")
 
 	fmt.Printf("Cloning %s ...\n", key)
-	if err := gitops.Clone(context.Background(), identity.SSHURL, destPath, sshKey); err != nil {
+	if err := gitops.Clone(ctx.GoCtx(), identity.SSHURL, destPath, sshKey); err != nil {
 		return err
 	}
 

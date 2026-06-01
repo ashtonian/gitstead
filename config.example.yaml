@@ -93,11 +93,19 @@ discovery:
   #   languages: ["Go"]                    # Any of the repo's languages, case-insensitive
   #   tags: ["go"]
 
-  # GitLab group
+  # GitLab group (use 'group' for gitlab; 'org' for github/gitea)
   # - name: "gitlab-team"
   #   provider: "gitlab.company.com"
   #   group: "my-team/backend"             # Includes subgroups
   #   tags: ["work", "backend"]
+
+  # Raw provider search query (mutually exclusive with user/org/group and the
+  # structured filters; uses the provider's native search syntax).
+  # GitHub caps search at 1000 results — discover warns if a query exceeds it.
+  # - name: "go-stars"
+  #   provider: "github.com"
+  #   query: "org:acme language:go stars:>50"
+  #   tags: ["oss"]
 
 # =============================================================================
 # Manual Repos

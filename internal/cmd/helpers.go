@@ -24,6 +24,7 @@ func addRepoToState(st *state.State, repo discovery.Repo, localPath string) {
 		IsFork:         repo.IsFork,
 		IsArchived:     repo.IsArchived,
 		Language:       repo.Language,
+		Languages:      repo.Languages,
 		Topics:         repo.Topics,
 		Tags:           repo.Tags,
 		Description:    repo.Description,

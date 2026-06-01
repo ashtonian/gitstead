@@ -1,0 +1,156 @@
+package config
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+	"text/template"
+
+	"github.com/go-playground/validator/v10"
+)
+
+// --- Validation ---
+
+// Validate checks the config using go-playground/validator struct tags
+// plus custom cross-field validation.
+func Validate(cfg *Config) error {
+	v := validator.New()
+
+	// Register custom validator for regex patterns
+	_ = v.RegisterValidation("valid_regex", func(fl validator.FieldLevel) bool {
+		_, err := regexp.Compile(fl.Field().String())
+		return err == nil
+	})
+
+	// Struct tag validation (required, oneof, min, max, etc.)
+	if err := v.Struct(cfg); err != nil {
+		if validationErrors, ok := err.(validator.ValidationErrors); ok {
+			return formatValidationErrors(validationErrors)
+		}
+		return fmt.Errorf("validation: %w", err)
+	}
+
+	// Cross-field validation
+	if _, err := template.New("test").Parse(cfg.PathTemplate); err != nil {
+		return fmt.Errorf("invalid path_template %q: %w", cfg.PathTemplate, err)
+	}
+
+	// Check duplicate provider names, capturing each provider's type.
+	provType := make(map[string]string)
+	for _, p := range cfg.Providers {
+		if _, ok := provType[p.Name]; ok {
+			return fmt.Errorf("duplicate provider name: %q", p.Name)
+		}
+		provType[p.Name] = NormalizeProviderType(p.Type)
+	}
+
+	// Check discovery rules reference valid providers and use selectors that are
+	// valid for the provider's type.
+	for _, r := range cfg.Discovery {
+		typ, ok := provType[r.Provider]
+		if !ok {
+			return fmt.Errorf("discovery rule %q references unknown provider %q (available: %v)",
+				r.Name, r.Provider, providerNames(cfg.Providers))
+		}
+		if err := validateSelector(r, typ); err != nil {
+			return err
+		}
+	}
+
+	// Workgroup cross-field validation
+	wgNames := make(map[string]bool)
+	for _, wg := range cfg.Workgroups {
+		if wgNames[wg.Name] {
+			return fmt.Errorf("duplicate workgroup name: %q", wg.Name)
+		}
+		wgNames[wg.Name] = true
+		switch wg.Kind {
+		case "worktree":
+			if wg.Source == "" {
+				return fmt.Errorf("workgroup %q (worktree) requires 'source'", wg.Name)
+			}
+		case "clone":
+			if wg.FromTag == "" && len(wg.Members) == 0 {
+				return fmt.Errorf("workgroup %q (clone) requires 'members' or 'from_tag'", wg.Name)
+			}
+		}
+	}
+
+	return nil
+}
+
+func formatValidationErrors(errs validator.ValidationErrors) error {
+	var msgs []string
+	for _, e := range errs {
+		field := strings.TrimPrefix(e.Namespace(), "Config.")
+		switch e.Tag() {
+		case "required":
+			msgs = append(msgs, fmt.Sprintf("%s is required", field))
+		case "oneof":
+			msgs = append(msgs, fmt.Sprintf("%s must be one of [%s] (got %q)", field, e.Param(), e.Value()))
+		case "min":
+			msgs = append(msgs, fmt.Sprintf("%s must be >= %s (got %v)", field, e.Param(), e.Value()))
+		case "max":
+			msgs = append(msgs, fmt.Sprintf("%s must be <= %s (got %v)", field, e.Param(), e.Value()))
+		case "valid_regex":
+			msgs = append(msgs, fmt.Sprintf("%s contains invalid regex %q", field, e.Value()))
+		default:
+			msgs = append(msgs, fmt.Sprintf("%s: failed %s validation", field, e.Tag()))
+		}
+	}
+	return fmt.Errorf("config validation failed:\n  %s", strings.Join(msgs, "\n  "))
+}
+
+func providerNames(providers []Provider) []string {
+	names := make([]string, len(providers))
+	for i, p := range providers {
+		names[i] = p.Name
+	}
+	return names
+}
+
+// NormalizeProviderType maps provider type aliases to their canonical form
+// ("forgejo" -> "gitea"). Unknown types are returned unchanged.
+func NormalizeProviderType(t string) string {
+	if t == "forgejo" {
+		return "gitea"
+	}
+	return t
+}
+
+// validateSelector ensures a discovery rule uses selectors valid for the
+// provider type: github/gitea use user/org; gitlab uses user/group. At most one
+// selector may be set (empty = the authenticated user's own repos).
+func validateSelector(r DiscoveryRule, typ string) error {
+	// A raw search query owns the whole request: it is mutually exclusive with
+	// scope selectors and with the structured filters (which it expresses itself).
+	if r.Query != "" {
+		if r.User != "" || r.Org != "" || r.Group != "" {
+			return fmt.Errorf("discovery rule %q: 'query' cannot be combined with user/org/group", r.Name)
+		}
+		if r.Visibility != "" || len(r.Languages) > 0 || len(r.Topics) > 0 || r.NamePattern != "" {
+			return fmt.Errorf("discovery rule %q: 'query' cannot be combined with visibility/languages/topics/name_pattern", r.Name)
+		}
+		return nil
+	}
+	set := 0
+	for _, s := range []string{r.User, r.Org, r.Group} {
+		if s != "" {
+			set++
+		}
+	}
+	if set > 1 {
+		return fmt.Errorf("discovery rule %q: set at most one of user/org/group", r.Name)
+	}
+	switch typ {
+	case "gitlab":
+		if r.Org != "" {
+			return fmt.Errorf("discovery rule %q: 'org' is not valid for a gitlab provider (use 'group')", r.Name)
+		}
+	case "github", "gitea":
+		if r.Group != "" {
+			return fmt.Errorf("discovery rule %q: 'group' is not valid for a %s provider (use 'org')", r.Name, typ)
+		}
+	}
+	return nil
+}

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -21,7 +20,7 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	results, discovered, err := discovery.RunDiscovery(context.Background(), cfg, c.Rule, c.Tag)
+	results, discovered, err := discovery.RunDiscovery(ctx.GoCtx(), cfg, c.Rule, c.Tag)
 	if err != nil {
 		return err
 	}
@@ -39,6 +38,10 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 
 	// Print summary
 	for _, r := range results {
+		if r.Err != nil {
+			fmt.Printf("  [%s] %s: ERROR: %v\n", r.Provider, r.Rule, r.Err)
+			continue
+		}
 		fmt.Printf("  [%s] %s: found %d repos\n", r.Provider, r.Rule, r.Total)
 		for _, w := range r.Warnings {
 			fmt.Printf("      warning: %s\n", w)
@@ -53,14 +56,20 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 		}
 	}
 
-	// Detect stale
-	discoveredKeys := make(map[string]bool)
-	for k := range discovered {
-		discoveredKeys[k] = true
-	}
-	staleCount := discovery.DetectStale(st, discoveredKeys, cfg.Cleanup)
-	if staleCount > 0 {
-		fmt.Printf("\n%d newly stale repos\n", staleCount)
+	// Detect stale — but only on a fully successful run. If any rule failed,
+	// the discovered set is incomplete and marking the missing repos stale
+	// (or deleting them under remove_and_delete) would be destructive.
+	if discovery.AnyFailed(results) {
+		fmt.Println("\nSkipping stale detection: one or more discovery rules failed.")
+	} else {
+		discoveredKeys := make(map[string]bool)
+		for k := range discovered {
+			discoveredKeys[k] = true
+		}
+		staleCount := discovery.DetectStale(st, discoveredKeys, cfg.Cleanup)
+		if staleCount > 0 {
+			fmt.Printf("\n%d newly stale repos\n", staleCount)
+		}
 	}
 
 	if !c.Apply {
@@ -94,7 +103,7 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 			fmt.Printf("  [%d/%d] %s ...", i+1, len(newRepos), repo.Key())
 			start := time.Now()
 
-			if err := gitops.Clone(context.Background(), repo.SSHURL, destPath, sshKey); err != nil {
+			if err := gitops.Clone(ctx.GoCtx(), repo.SSHURL, destPath, sshKey); err != nil {
 				fmt.Printf(" error: %v\n", err)
 				continue
 			}
@@ -112,6 +121,7 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 			rs.IsFork = repo.IsFork
 			rs.Description = repo.Description
 			rs.Language = repo.Language
+			rs.Languages = repo.Languages
 			rs.Topics = repo.Topics
 			rs.DefaultBranch = repo.DefaultBranch
 		}

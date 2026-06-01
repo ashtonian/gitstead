@@ -2,3 +2,4 @@ git-mgr
 *.exe
 .DS_Store
 dist/
+.claude/

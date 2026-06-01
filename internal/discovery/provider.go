@@ -2,8 +2,11 @@ package discovery
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/ashtonian/git-mgr/internal/config"
+	"golang.org/x/sync/errgroup"
 )
 
 // Repo represents a discovered repository from any provider.
@@ -63,11 +66,13 @@ type Capabilities struct {
 }
 
 // ProviderResult is what Discover returns: the repos, the set of filters the
-// provider already enforced server-side, and its capabilities.
+// provider already enforced server-side, its capabilities, and any non-fatal
+// warnings (e.g. a search result truncated at the API's hard cap).
 type ProviderResult struct {
 	Repos        []Repo
 	Applied      FilterSet
 	Capabilities Capabilities
+	Warnings     []string
 }
 
 // Provider discovers repos from a hosting service instance.
@@ -79,13 +84,17 @@ type Provider interface {
 	// filters it can server-side and reporting them in ProviderResult.Applied.
 	Discover(ctx context.Context, rule config.DiscoveryRule) (ProviderResult, error)
 
-	// EnrichLanguages populates Repo.Languages in place for the given repos.
-	// Providers whose Capabilities.CanEnrichLanguages is false may no-op.
-	EnrichLanguages(ctx context.Context, repos []Repo) error
+	// EnrichLanguages populates Repo.Languages in place for the given repos,
+	// using up to concurrency parallel requests. It is best-effort: a per-repo
+	// failure leaves that repo's Languages empty and is reported via the returned
+	// (joined) error rather than aborting the batch. Providers whose
+	// Capabilities.CanEnrichLanguages is false may no-op.
+	EnrichLanguages(ctx context.Context, repos []Repo, concurrency int) error
 
-	// EnrichTopics populates Repo.Topics in place for the given repos.
-	// Providers whose Capabilities.CanEnrichTopics is false may no-op.
-	EnrichTopics(ctx context.Context, repos []Repo) error
+	// EnrichTopics populates Repo.Topics in place for the given repos, using up
+	// to concurrency parallel requests, with the same best-effort semantics as
+	// EnrichLanguages. Providers whose Capabilities.CanEnrichTopics is false may no-op.
+	EnrichTopics(ctx context.Context, repos []Repo, concurrency int) error
 }
 
 // ScopeKind is the kind of selection a discovery rule targets.
@@ -96,6 +105,7 @@ const (
 	ScopeUser                   // a named user
 	ScopeOrg                    // a GitHub/Gitea organization
 	ScopeGroup                  // a GitLab group
+	ScopeQuery                  // a raw provider search query
 )
 
 // Scope is the resolved selection target for a rule.
@@ -109,6 +119,8 @@ type Scope struct {
 // pick the first set selector in precedence order org > group > user > self.
 func ruleScope(rule config.DiscoveryRule) Scope {
 	switch {
+	case rule.Query != "":
+		return Scope{Kind: ScopeQuery, Value: rule.Query}
 	case rule.Org != "":
 		return Scope{Kind: ScopeOrg, Value: rule.Org}
 	case rule.Group != "":
@@ -118,6 +130,50 @@ func ruleScope(rule config.DiscoveryRule) Scope {
 	default:
 		return Scope{Kind: ScopeSelf}
 	}
+}
+
+// allFiltersApplied returns a FilterSet marking every filter as already
+// satisfied. Search-query scopes use this: the raw query owns the request, so
+// the client-side pass must not re-filter the server's results.
+func allFiltersApplied() FilterSet {
+	return FilterSet{
+		FilterForks: true, FilterArchived: true, FilterVisibility: true,
+		FilterLanguage: true, FilterTopics: true, FilterName: true,
+	}
+}
+
+// mapKeys returns the keys of m as a slice (order unspecified). Used to turn a
+// provider's language map (language -> byte count) into the Repo.Languages set.
+func mapKeys[K comparable, V any](m map[K]V) []K {
+	out := make([]K, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+// enrichConcurrent applies fn to each repo with up to concurrency workers,
+// best-effort: every repo is attempted and per-repo errors are joined and
+// returned rather than aborting the batch. fn mutates repos[i] in place.
+func enrichConcurrent(ctx context.Context, repos []Repo, concurrency int, fn func(context.Context, *Repo) error) error {
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(concurrency)
+
+	errs := make([]error, len(repos))
+	for i := range repos {
+		i := i
+		g.Go(func() error {
+			if err := fn(gctx, &repos[i]); err != nil {
+				errs[i] = fmt.Errorf("%s: %w", repos[i].FullName, err)
+			}
+			return nil // never abort siblings on a per-repo error
+		})
+	}
+	_ = g.Wait()
+	return errors.Join(errs...)
 }
 
 // requestedFilters returns the set of filters a rule asks for. Forks/archived

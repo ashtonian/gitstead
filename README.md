@@ -1,90 +1,92 @@
 # git-mgr
 
-[![CI](https://github.com/ashtonian/git-mgr/actions/workflows/ci.yml/badge.svg)](https://github.com/ashtonian/git-mgr/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/ashtonian/git-mgr.svg)](https://pkg.go.dev/github.com/ashtonian/git-mgr)
-[![Go Report Card](https://goreportcard.com/badge/github.com/ashtonian/git-mgr)](https://goreportcard.com/report/github.com/ashtonian/git-mgr)
-[![Release](https://img.shields.io/github/v/release/ashtonian/git-mgr?sort=semver)](https://github.com/ashtonian/git-mgr/releases)
-[![License: MIT](https://img.shields.io/github/license/ashtonian/git-mgr)](LICENSE)
+Discover, clone, sync, and back up git repositories across multiple GitHub,
+GitLab, and Gitea/Forgejo instances — into one structured local layout.
 
-Discover, clone, sync, and back up git repositories across multiple GitHub and GitLab instances.
+git-mgr is built to run two ways: **interactively** when bootstrapping a new
+machine, and as a **cron job** that fetches everything and transparently backs
+up uncommitted work without ever touching your branches or working tree.
 
-## What it does
+## Highlights
 
-- **Discovers** repos from GitHub, GitHub Enterprise, and GitLab based on configurable rules
-- **Clones** into a structured directory layout (`github.com/owner/repo`)
-- **Fetches** all tracked repos periodically (cron-safe, never pulls/merges)
-- **Backs up** uncommitted changes transparently without touching your working tree
-- **Tracks** state across runs for incremental sync
-
-Designed to run as a cron job every 15 minutes. Also works interactively for bootstrapping a new machine.
+- **Multi-provider discovery** — GitHub, GitHub Enterprise, GitLab (incl.
+  self-hosted), and Gitea/Forgejo, by user, org, group, or raw search query.
+- **Server-side filtering** where each provider's API supports it, with a
+  client-side fallback and clear warnings when a filter can't be honored.
+- **Structured layout** — repos land at `{{.Host}}/{{.Owner}}/{{.Name}}` (fully
+  templatable).
+- **Transparent backups** of uncommitted work via stash-refs and patch files —
+  never modifies your working tree, index, branches, or stash list.
+- **Cron-safe sync** — flock-guarded, fetch-only, with per-repo fetch intervals
+  and retry/back-off.
+- **Resilient** — one failing provider doesn't abort the run; GitHub/Gitea calls
+  retry on rate-limit and 5xx; Ctrl-C cancels in-flight work cleanly.
 
 ## Install
 
 ```bash
-# From source
+# From source (requires Go; see go.mod for the version)
 go install github.com/ashtonian/git-mgr@latest
 
-# Docker
+# Docker (multi-arch: linux/amd64, linux/arm64)
 docker pull ashtonian/git-mgr
+
+# Homebrew
+brew install ashtonian/tap/git-mgr
 ```
 
-## Quick Start
+git-mgr shells out to `git`, so git must be on `PATH`.
+
+## Quick start
 
 ```bash
-# Create config
-git-mgr init
-
-# Edit config to add providers and discovery rules
-git-mgr config --edit
-
-# Discover repos (dry-run)
-git-mgr discover
-
-# Clone discovered repos
-git-mgr discover --apply
-
-# Fetch all + backup uncommitted work
-git-mgr sync
-
-# See what's tracked
-git-mgr status
+git-mgr init                 # write a starter config
+git-mgr config --edit        # add providers + discovery rules
+git-mgr discover             # dry-run: show what would be cloned
+git-mgr discover --apply     # clone new repos and record them
+git-mgr sync                 # fetch everything + back up uncommitted work
+git-mgr status               # table of all managed repos
 ```
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `git-mgr init` | Create config file with defaults |
-| `git-mgr discover` | Discover repos from providers (dry-run by default, `--apply` to clone) |
-| `git-mgr sync` | Fetch all repos + backup uncommitted changes (the cron command) |
-| `git-mgr backup` | Backup only (no fetch). `--list` to see backups, `--restore` for instructions |
-| `git-mgr status` | Table of all managed repos. `--json`, `--dirty`, `--stale`, `--tag` filters |
-| `git-mgr clone <url>` | Manually clone and track a single repo |
-| `git-mgr adopt <path>` | Import existing clone into management. `--scan <dir>` for batch import |
-| `git-mgr remove <pattern>` | Stop tracking repos. `--delete` to remove from disk |
-| `git-mgr remote-sync` | Push backup refs to remotes |
-| `git-mgr config` | Print resolved config. `--validate`, `--edit`, `--for-repo <key>` |
-| `git-mgr version` | Print version info |
-| `git-mgr workgroup` (`wg`) | Manage [workgroups](#workgroups): parallel worktrees or multi-repo bundles |
-| `git-mgr install-agent` | Install/remove a periodic sync agent (launchd/systemd/cron) |
+| `git-mgr init` | Create a config file with sensible defaults. |
+| `git-mgr discover` | Discover repos from providers (dry-run; `--apply` to clone). `--rule`, `--tag` to scope. |
+| `git-mgr sync` | Fetch all repos + back up uncommitted changes (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`. |
+| `git-mgr backup` | Back up only (no fetch). `--list` to see backups, `--restore <id>` for instructions. |
+| `git-mgr status` | Table of managed repos. `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
+| `git-mgr clone <url>` | Clone and track a single repo by SSH URL. `--tag`, `--path`. |
+| `git-mgr adopt <path>` | Import an existing clone. `--scan` for batch, `--dry-run`, `--tag`. |
+| `git-mgr remove <pattern>` | Stop tracking repos. `--delete` to also remove from disk, `--yes`. |
+| `git-mgr remote-sync` | Push backup refs to remotes. `--repos`, `--tag`, `--dry-run`. |
+| `git-mgr config` | Print resolved config. `--validate`, `--edit`, `--path`, `--for-repo <key>`. |
+| `git-mgr workgroup` (`wg`) | Manage workgroups: parallel worktrees or multi-repo bundles. |
+| `git-mgr install-agent` | Install/remove a periodic sync agent (launchd/systemd/cron). |
+| `git-mgr version` | Print version, commit, build date. |
+
+Global flags: `--config`, `--state`, `--verbose`/`-v`, `--quiet`/`-q`,
+`--concurrency`/`-j`.
 
 ## Configuration
 
-Config lives at `~/.config/git-mgr/config.yaml`. See [`config.example.yaml`](config.example.yaml) for a fully annotated example.
+Config lives at `~/.config/git-mgr/config.yaml`. See
+[`config.example.yaml`](config.example.yaml) for a fully annotated reference.
 
-### Multiple Providers
+### Providers
 
-Supports any number of GitHub and GitLab instances:
+Any number of GitHub, GitLab, and Gitea/Forgejo instances:
 
 ```yaml
 providers:
   - name: "github.com"
-    type: "github"
+    type: "github"                    # github | gitlab | gitea | forgejo
     token_command: "gh auth token"
 
   - name: "ghes.company.com"
     type: "github"
-    url: "https://ghes.company.com"
+    url: "https://ghes.company.com"   # GitHub Enterprise
     token_env: "GHES_TOKEN"
     ssh_key: "~/.ssh/id_work"
 
@@ -92,11 +94,21 @@ providers:
     type: "gitlab"
     url: "https://gitlab.company.com"
     token_env: "GITLAB_COMPANY_TOKEN"
+
+  - name: "gitea.company.com"
+    type: "gitea"                     # "forgejo" is an alias
+    url: "https://gitea.company.com"  # /api/v1 is handled by the SDK
+    token_env: "GITEA_TOKEN"
 ```
 
-### Discovery Rules
+Token resolution order: `token` → `token_env` → provider default env var
+(`GITHUB_TOKEN` / `GITLAB_TOKEN` / `GITEA_TOKEN` / `FORGEJO_TOKEN`) →
+`token_command`.
 
-Discover repos by user, org, group, language, topic, or name pattern:
+### Discovery rules
+
+Each rule selects repos from one provider. Use `org`/`user` for GitHub and
+Gitea, `group`/`user` for GitLab. Repos matching **any** rule are included.
 
 ```yaml
 discovery:
@@ -108,261 +120,163 @@ discovery:
   - name: "work-services"
     provider: "ghes.company.com"
     org: "platform"
-    name_pattern: "^svc-"
+    visibility: "all"                 # all | public | private | internal
+    languages: ["Go", "Rust"]         # any of these, case-insensitive
+    topics: ["service"]               # repo must have ALL listed topics
+    name_pattern: "^svc-"             # regex on repo name
+    include_forks: false
+    include_archived: false
     tags: ["work", "services"]
+    ssh_key: "~/.ssh/id_work"
 ```
 
-### Manual Repos
+Filters are pushed to the server where the provider's list API supports it, and
+applied locally otherwise (per-repo language/topic lookups happen only for repos
+that pass the cheaper filters). When a provider genuinely can't honor a filter,
+`discover` prints a warning rather than silently returning nothing.
 
-Track individual repos without discovery rules:
+### Raw search queries
+
+For power users, a rule can pass a raw `query:` straight to the provider's native
+search API instead of the structured selectors/filters. It is mutually exclusive
+with `user`/`org`/`group` and the structured filters:
 
 ```yaml
+discovery:
+  - name: "go-stars"
+    provider: "github.com"
+    query: "org:acme language:go stars:>50"
+    tags: ["oss"]
+```
+
+GitHub's Search API caps results at 1000 per query; when a query matches more,
+`discover` warns that results were truncated (list-based `org:`/`user:` rules
+have no such cap). GitLab and Gitea route `query:` to their own project/repo
+search.
+
+### Manual repos, excludes, overrides, tags
+
+```yaml
+# Track individual repos without a discovery rule.
 repos:
   - url: "git@github.com:someone/useful-fork.git"
     tags: ["libs"]
-  - url: "git@gitlab.com:other-org/special-project.git"
-    tags: ["work"]
-```
 
-### Per-Repo Overrides
+# Skip repos even if a rule matched them.
+exclude:
+  - name_pattern: "^deprecated-"
+  - repos: ["my-org/legacy-monolith"]
 
-Override any setting per repo or glob pattern:
-
-```yaml
+# Override any setting per repo or glob (later entries win).
 overrides:
   - repos: ["ghes.company.com/*"]
     ssh_key: "~/.ssh/id_work"
-    backup:
-      strategy: "patch"
-    remote_sync:
-      enabled: false
-
+    backup: { strategy: "patch" }
+    remote_sync: { enabled: false }
   - repos: ["github.com/your-login/dotfiles"]
     path_template: "{{.Name}}"
 ```
 
-### Tags
-
-Tags are assigned by discovery rules or manually. Filter any command with `--tag`:
+Tags come from discovery rules or manual entries and filter any command:
 
 ```bash
 git-mgr status --tag work
-git-mgr sync --tag personal
-git-mgr backup --list --tag services
+git-mgr sync   --tag personal
 ```
 
-## Transparent Backup
+## Transparent backups
 
-The backup system saves uncommitted work without modifying your working tree, branches, or stash list. Two complementary strategies:
+The backup system saves uncommitted work without modifying your working tree,
+branches, or stash list. Two complementary strategies:
 
-### Stash Refs
+- **Stash refs** — `git stash create` produces a commit hash with no side
+  effects, stored under `refs/git-mgr/backups/<timestamp>`. Invisible to
+  `git branch`, `git stash list`, `git log`, and IDEs.
+- **Patch files** — `git diff` output plus a tar of untracked files, stored
+  outside the repo at `~/.local/share/git-mgr/patches/`.
 
-`git stash create` produces a commit hash without side effects. We store it under `refs/git-mgr/backups/<timestamp>` -- invisible to `git branch`, `git stash list`, `git log`, and all IDEs.
-
-### Patch Files
-
-`git diff` output plus a tar of untracked files, stored outside the repo at `~/.local/share/git-mgr/patches/`.
-
-### Safety Guarantees
-
-- **Never modifies** working tree, index, branches, or stash list
-- **Skips locked repos** (if `.git/index.lock` exists, another operation is in progress)
-- **Excludes** untracked files > 50MB
-- **Auto-prunes** old backups (configurable `max_per_repo`)
-
-### Restore
+Guarantees: never modifies the working tree/index/branches/stash; skips locked
+repos (`.git/index.lock`); excludes oversized untracked files; auto-prunes old
+backups (`max_per_repo`). A dirty repo whose backup fails is reported as an
+error, never silently recorded as backed up.
 
 ```bash
-# See backups
-git-mgr backup --list --repos */my-repo
-
-# Restore from stash ref
-cd ~/repos/github.com/owner/my-repo
-git stash apply refs/git-mgr/backups/20260417T103000Z
-
-# Or restore from patches
-git apply ~/.local/share/git-mgr/patches/.../staged.patch --cached
-git apply ~/.local/share/git-mgr/patches/.../unstaged.patch
+git-mgr backup --list --repos "*/my-repo"
+git-mgr backup --restore 20260417T103000Z --repos "*/my-repo"   # prints how to restore
 ```
 
-## Scheduling periodic sync
+## Running on a schedule
 
-Let git-mgr install a native scheduler for you (recommended):
+`git-mgr sync` is cron-safe: flock prevents overlapping runs, `min_fetch_interval`
+skips recently-fetched repos, `auto_discover` picks up new repos, and it is
+strictly fetch-only.
 
 ```bash
-git-mgr install-agent                 # launchd (macOS) / systemd timer (Linux) / cron fallback
-git-mgr install-agent --interval 30m  # custom cadence
-git-mgr install-agent --print         # show the unit file + actions without applying
-git-mgr install-agent --uninstall     # remove it
+git-mgr install-agent          # launchd (macOS) / systemd timer (Linux) / cron
 ```
 
-It schedules `git-mgr sync --quiet` using your platform's native scheduler (a launchd user agent on macOS, a systemd **user** timer on Linux, or a crontab entry otherwise; force one with `--kind`).
-
-Prefer to wire it yourself? A crontab line works too:
+Or wire it up by hand:
 
 ```cron
 */15 * * * * /usr/local/bin/git-mgr sync --quiet 2>> ~/.local/share/git-mgr/git-mgr.log
 ```
 
-Why periodic sync is safe to run unattended:
-- **flock** prevents concurrent runs (overlapping cron exits cleanly)
-- **min_fetch_interval** skips recently-fetched repos
-- **auto_discover** picks up new repos without a separate command
-- **Fetch-only** -- never pulls, merges, or modifies your branches
-- **Lock detection** -- skips repos with active git operations
+## Resilience
 
-## Stale Repos
+GitHub and Gitea requests retry automatically on rate-limit (429 / secondary
+limit) and 5xx responses, honoring `Retry-After` with capped back-off (the GitLab
+client has equivalent retry built in). If one discovery rule fails, the others
+still run, and stale detection is skipped for that run so a transient outage
+can't mark healthy repos stale. SIGINT/SIGTERM cancels in-flight git and API
+operations cleanly.
 
-When a repo is deleted upstream or you're removed from an org, it's detected during discovery:
+## Environment variables
 
-```yaml
-cleanup:
-  policy: "mark_stale"      # mark_stale | remove | remove_and_delete | ignore
-  grace_period: "720h"      # 30 days before remove/delete takes effect
-  protect_manual: true       # Never auto-cleanup manually-added repos
-```
+All config fields can be overridden via `GIT_MGR_*` env vars (e.g.
+`GIT_MGR_BASE_DIR`, `GIT_MGR_CONCURRENCY`). Notable ones:
 
-## Adopting Existing Repos
-
-Already have repos cloned? Import them:
-
-```bash
-# Single repo
-git-mgr adopt ~/projects/cool-lib --tag libs
-
-# Scan a directory
-git-mgr adopt --scan ~/projects --tag legacy
-
-# Dry-run first
-git-mgr adopt --scan ~/projects --dry-run
-```
-
-## Workgroups
-
-A **workgroup** is a parent directory holding *N* member working directories you operate on as a unit — built for running several agents (or yourself) in parallel without them stepping on each other. Two kinds:
-
-- **`worktree`** — N git worktrees of a *single* source repo, each on its own branch (shared `.git`, cheap). Run N agents on one project in isolation.
-- **`clone`** — N independent repos checked out side by side (e.g. microservices you work on together). Group commands fan out across them.
-
-Members are operated on identically; only creation and "in sync" semantics differ by kind.
-
-### Declare in config
-
-```yaml
-workgroup_base_dir: "~/workgroups"           # parent for all workgroups
-
-workgroups:
-  - name: "feature-x"                        # -> ~/workgroups/feature-x/{agent-1,agent-2,agent-3}
-    kind: "worktree"
-    source: "github.com/your-login/myapp"    # a tracked repo key, or a local path
-    base_ref: "origin/main"                  # fork point (optional)
-    members:
-      - { name: "agent-1" }                  # branch defaults to the member name
-      - { name: "agent-2" }
-      - { name: "agent-3" }
-
-  - name: "platform"                         # a multi-repo bundle
-    kind: "clone"
-    from_tag: "platform"                     # members = all tracked repos with this tag
-```
-
-### Commands
-
-| Command | Description |
+| Variable | Effect |
 |---|---|
-| `wg create <name>` | Materialise a configured workgroup (create its members) |
-| `wg ensure [name]` | Reconcile workgroup(s) to config — recreate missing members; idempotent |
-| `wg adopt <name> <dir>` | Register an existing directory of repos as a workgroup |
-| `wg ls` | List workgroups |
-| `wg status <name>` | Per-member table: branch, state, upstream, ahead/behind, notes |
-| `wg check <name>` | Assert set up + in sync; **non-zero exit** and flags on drift |
-| `wg fetch/commit/pull/push <name>` | Group git operations across all members (concurrent) |
-| `wg exec <name> -- <cmd>` | Run a command in each member directory |
-| `wg open <name>` (`wg tmux`) | Open/attach a tmux session, one pane per member |
-| `wg rm <name>` | Tear down (worktrees detached); `--delete` also removes directories |
-
-`commit` skips clean members and stages tracked changes by default (`--add-all` for untracked); `pull` is `--ff-only` by default (`--rebase` to rebase); `push` takes `--set-upstream`.
-
-### Escape hatch
-
-When agents get stuck, drive every member at once:
-
-```bash
-git-mgr wg status feature-x                    # who's dirty / behind / mid-rebase?
-git-mgr wg commit feature-x -m wip --add-all   # commit everyone's WIP
-git-mgr wg exec feature-x -- git rebase --abort
-```
-
-### Terminal layout (tmux + iTerm)
-
-`wg open` builds a tmux session `wg-<name>` with one pane per member, each `cd`'d into its directory and running `wg check` on startup so drift is flagged the moment you open it:
-
-```bash
-git-mgr wg open feature-x          # create-or-attach; --recreate to rebuild
-git-mgr wg open feature-x --print  # print the tmux script instead of running it
-```
-
-Under **iTerm** it uses tmux control mode (`tmux -CC`), so panes render as native iTerm splits while the tmux session survives disconnects. After a Mac restart the tmux server is gone — just run the same command again and the identical layout is rebuilt deterministically. Make it one keystroke with an alias, or auto-build at login:
-
-```bash
-alias wgx='git-mgr wg open feature-x'
-# or, in a login script / launchd agent, build it detached:
-#   git-mgr wg open feature-x --no-attach
-```
+| `GIT_MGR_CONFIG` | Config file path (same as `--config`). |
+| `GIT_MGR_STATE` | State file path (same as `--state`). |
+| `GIT_MGR_BASE_DIR` | Override `base_dir`. |
+| `GITHUB_TOKEN` / `GITLAB_TOKEN` / `GITEA_TOKEN` / `FORGEJO_TOKEN` | Default provider tokens. |
 
 ## Docker
 
 ```bash
-# Run sync in Docker
 docker run -v ~/.config/git-mgr:/root/.config/git-mgr \
            -v ~/repos:/root/repos \
            -v ~/.ssh:/root/.ssh:ro \
            ashtonian/git-mgr sync
-
-# Multi-arch: linux/amd64, linux/arm64
 ```
-
-## Config Debugging
-
-```bash
-# Validate config
-git-mgr config --validate
-
-# See resolved config for a specific repo
-git-mgr config --for-repo github.com/company/api
-
-# Print full resolved config
-git-mgr config
-```
-
-## Environment Variables
-
-All config fields can be overridden via `GIT_MGR_*` env vars:
-
-| Variable | Overrides |
-|---|---|
-| `GIT_MGR_CONFIG` | `--config` flag |
-| `GIT_MGR_STATE` | `--state` flag |
-| `GIT_MGR_BASE_DIR` | `base_dir` |
-| `GITHUB_TOKEN` | Default GitHub token |
-| `GITLAB_TOKEN` | Default GitLab token |
 
 ## Development
 
 ```bash
-# Build
-go build -o git-mgr .
+go build ./...
+go vet ./...
+go test ./...                 # unit tests
+go test -race ./...           # with the race detector
+```
 
-# Unit tests
-go test ./...
+End-to-end tests live in a **separate module** under [`e2e/`](e2e/) so their
+heavy dependencies (testcontainers, Docker client) stay out of the root module.
+They build the `git-mgr` binary and drive it against a real Forgejo container:
 
-# E2E tests (requires Docker)
-go test -tags=e2e -v ./e2e/
+```bash
+cd e2e && go test ./...       # requires Docker
+```
 
-# Build with version info
+Build with version info:
+
+```bash
 go build -ldflags="-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD)" .
 ```
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow and
+[SECURITY.md](SECURITY.md) for the security model and how to report issues.
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

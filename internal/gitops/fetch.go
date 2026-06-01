@@ -5,7 +5,8 @@ import (
 	"fmt"
 )
 
-// Fetch fetches all remotes with pruning. Skips if the repo is locked.
+// Fetch fetches all remotes with pruning and tags using the given SSH key.
+// It returns ErrLocked (without fetching) if the repo has an active git lock.
 func Fetch(ctx context.Context, repoPath, sshKeyPath string) error {
 	if locked, file := IsLocked(repoPath); locked {
 		return fmt.Errorf("%w: %s", ErrLocked, file)

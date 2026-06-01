@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"log/slog"
 	"os"
 
@@ -43,10 +44,24 @@ type Context struct {
 	Jobs       int
 	VersionStr string
 
+	// Ctx is the root context for the command, cancelled on SIGINT/SIGTERM so
+	// in-flight git and API operations stop cleanly. Use GoCtx() to read it
+	// (it falls back to context.Background() when unset, e.g. in tests).
+	Ctx context.Context
+
 	// Lazily loaded
 	cfg    *config.Config
 	st     *state.State
 	logger *slog.Logger
+}
+
+// GoCtx returns the root context.Context for git/API operations, defaulting to
+// context.Background() when no signal-aware context was injected.
+func (c *Context) GoCtx() context.Context {
+	if c.Ctx != nil {
+		return c.Ctx
+	}
+	return context.Background()
 }
 
 // LoadConfig loads and validates the config file.

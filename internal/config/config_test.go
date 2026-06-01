@@ -229,3 +229,18 @@ func containsStr(s, sub string) bool {
 	}
 	return false
 }
+
+// TestLoad_EnvUnderscoreKey proves env overrides of koanf keys containing
+// underscores now work. The previous hand-rolled loader mapped GIT_MGR_BASE_DIR
+// to "base.dir" (≠ koanf key "base_dir") and silently ignored it; the pkg
+// loader's struct-aware env mapping resolves it correctly.
+func TestLoad_EnvUnderscoreKey(t *testing.T) {
+	t.Setenv("GIT_MGR_BASE_DIR", "/custom/env/repos")
+	cfg, err := config.Load("/tmp/nonexistent-git-mgr-config.yaml")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.BaseDir != "/custom/env/repos" {
+		t.Errorf("base_dir from env: got %q, want /custom/env/repos", cfg.BaseDir)
+	}
+}
