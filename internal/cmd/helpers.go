@@ -1,16 +1,31 @@
 package cmd
 
 import (
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/discovery"
+	"github.com/ashtonian/git-mgr/internal/oplog"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
 // isHTTPURL reports whether u is an http(s) clone URL (vs ssh/scp).
 func isHTTPURL(u string) bool {
 	return strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://")
+}
+
+// eventsPath is the operation-log file, kept next to the state file so it
+// follows GIT_MGR_STATE / --state.
+func eventsPath(ctx *Context) string {
+	return filepath.Join(filepath.Dir(config.ExpandHome(ctx.State)), "events.jsonl")
+}
+
+// logEvent appends a best-effort entry to the operation log (never fails the
+// caller).
+func logEvent(ctx *Context, action, repo, detail string) {
+	_ = oplog.Append(eventsPath(ctx), oplog.Event{Time: time.Now(), Action: action, Repo: repo, Detail: detail})
 }
 
 // cloneTarget picks the clone URL and SSH key for a discovered repo given the

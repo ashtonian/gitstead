@@ -121,6 +121,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 			}
 		}
 		delete(st.Repos, key)
+		logEvent(ctx, "remove", key, "")
 		fmt.Printf("  Removed %s\n", key)
 	}
 

@@ -301,6 +301,7 @@ func (c *WGCreateCmd) materialize(ctx *Context) error {
 	if err := st.Save(); err != nil {
 		return err
 	}
+	logEvent(ctx, "wg_create", c.Name, spec.Kind)
 
 	// --save persists the synthesized declaration to config.
 	if c.Save {
@@ -580,6 +581,7 @@ func (c *WGRemoveCmd) Run(ctx *Context) error {
 		fmt.Printf("  %s\n", a)
 	}
 	delete(st.Workgroups, c.Name)
+	logEvent(ctx, "wg_remove", c.Name, "")
 	return st.Save()
 }
 

@@ -91,6 +91,7 @@ func (c *AdoptCmd) adoptSingle(ctx *Context, st *state.State, repoPath string) e
 	if err := st.Save(); err != nil {
 		return fmt.Errorf("saving state: %w", err)
 	}
+	logEvent(ctx, "adopt", key, absPath)
 
 	fmt.Printf("Adopted: %s -> %s\n", key, absPath)
 	return nil
