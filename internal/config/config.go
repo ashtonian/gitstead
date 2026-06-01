@@ -101,6 +101,7 @@ func (c *Config) FindSet(name string) (*RepoSet, bool) {
 // silently forced enabled=false, disabling backups for matched repos.)
 type Override struct {
 	Repos         []string            `koanf:"repos"          yaml:"repos"                    validate:"required,min=1"`
+	BaseDir       string              `koanf:"base_dir"       yaml:"base_dir,omitempty"`
 	SSHKey        string              `koanf:"ssh_key"        yaml:"ssh_key,omitempty"`
 	PathTemplate  string              `koanf:"path_template"  yaml:"path_template,omitempty"`
 	CloneProtocol string              `koanf:"clone_protocol" yaml:"clone_protocol,omitempty" validate:"omitempty,oneof=ssh https"`

@@ -79,7 +79,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 						log.Warn("path template error", "repo", key, "error", err)
 						continue
 					}
-					destPath := filepath.Join(cfg.BaseDir, relPath)
+					destPath := filepath.Join(repoCfg.BaseDir, relPath)
 					sshKey := cfg.ResolveSSHKey(key, "")
 					cloneURL, cloneKey := cloneTarget(repo, cfg.CloneProtocolFor(key, repo.DiscoveredBy), sshKey)
 					if err := gitops.Clone(ctx.GoCtx(), cloneURL, destPath, cloneKey); err != nil {

@@ -169,6 +169,7 @@ sets: []
 overrides: []
   # Override by glob - all company repos
   # - repos: ["ghes.company.com/*"]
+  #   base_dir: "~/work"                    # Clone this set under a different root
   #   ssh_key: "~/.ssh/id_work"
   #   backup:
   #     strategy: "patch"                   # No custom refs in company repos
