@@ -20,10 +20,9 @@ type InitCmd struct{}
 // DiscoverCmd discovers repos from configured providers.
 // Run method is in discover_impl.go
 type DiscoverCmd struct {
-	Apply  bool   `help:"Clone new repos and update state." default:"false"`
-	Rule   string `help:"Run only a specific discovery rule." default:""`
-	Tag    string `help:"Run only rules with this tag." default:""`
-	DryRun bool   `help:"Show what would happen without changing state (default)." default:"true" name:"dry-run"`
+	Apply bool   `help:"Clone new repos and update state (default: preview only)." default:"false"`
+	Rule  string `help:"Run only a specific discovery rule." default:""`
+	Tag   string `help:"Run only rules with this tag." default:""`
 }
 
 // SyncCmd fetches all tracked repos and backs up uncommitted changes.
