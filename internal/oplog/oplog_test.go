@@ -1,10 +1,28 @@
 package oplog
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestTrim(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "e.jsonl")
+	for i := 0; i < 100; i++ {
+		if err := Append(path, Event{Time: time.Now(), Action: "x", Detail: fmt.Sprint(i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	trim(path, 10)
+	evs, _ := Read(path, time.Time{})
+	if len(evs) != 10 {
+		t.Fatalf("after trim: %d events, want 10", len(evs))
+	}
+	if evs[9].Detail != "99" || evs[0].Detail != "90" { // newest kept, in order
+		t.Errorf("trim kept wrong window: first=%s last=%s", evs[0].Detail, evs[9].Detail)
+	}
+}
 
 func TestAppendRead(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sub", "events.jsonl") // parent dir doesn't exist

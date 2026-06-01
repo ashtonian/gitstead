@@ -13,6 +13,13 @@ import (
 	"time"
 )
 
+// Growth bound: once the log passes maxBytes, trim it to the newest keepLines
+// entries. Generous enough that a 15-minute sync agent takes years to hit it.
+const (
+	maxBytes  = 4 << 20 // ~4 MiB
+	keepLines = 5000
+)
+
 // Event is one logged action.
 type Event struct {
 	Time   time.Time `json:"time"`
@@ -21,8 +28,10 @@ type Event struct {
 	Detail string    `json:"detail,omitempty"`
 }
 
-// Append writes ev as a JSON line to path, creating the parent dir. Returns an
-// error, but callers generally ignore it so logging can't break a command.
+// Append writes ev as a JSON line to path, creating the parent dir. O_APPEND
+// makes the single-line write atomic, so concurrent writers don't interleave.
+// Returns an error, but callers generally ignore it so logging can't break a
+// command.
 func Append(path string, ev Event) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -31,13 +40,36 @@ func Append(path string, ev Event) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 	line, err := json.Marshal(ev)
 	if err != nil {
+		f.Close()
 		return err
 	}
-	_, err = f.Write(append(line, '\n'))
-	return err
+	_, werr := f.Write(append(line, '\n'))
+	fi, _ := f.Stat()
+	f.Close()
+	if fi != nil && fi.Size() > maxBytes {
+		trim(path, keepLines) // best-effort; bounds unbounded growth
+	}
+	return werr
+}
+
+// trim rewrites path keeping only the newest keep lines. Best-effort: any error
+// (or a rare race with a concurrent append) just leaves the log as-is.
+func trim(path string, keep int) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) <= keep {
+		return
+	}
+	out := strings.Join(lines[len(lines)-keep:], "\n") + "\n"
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, []byte(out), 0o600) == nil {
+		_ = os.Rename(tmp, path)
+	}
 }
 
 // Read returns events from path with Time >= since (a zero since returns all).
