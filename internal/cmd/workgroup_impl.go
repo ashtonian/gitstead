@@ -32,6 +32,7 @@ type WorkgroupCmd struct {
 	Open     WGOpenCmd     `cmd:"" aliases:"tmux" help:"Open/attach a tmux session with one pane per member."`
 	Backup   WGBackupCmd   `cmd:"" help:"Back up every member's uncommitted work (agent WIP safety net)."`
 	Recover  WGRecoverCmd  `cmd:"" help:"Recover a member's backed-up WIP (print/--into/--apply)."`
+	Prune    WGPruneCmd    `cmd:"" help:"Reap members with no unique work (clean + merged); never touches dirty WIP."`
 	Remove   WGRemoveCmd   `cmd:"" name:"rm" help:"Tear down a workgroup."`
 }
 
