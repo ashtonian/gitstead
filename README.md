@@ -5,20 +5,29 @@ GitLab, and Gitea/Forgejo instances — into one structured local layout.
 
 git-mgr is built to run two ways: **interactively** when bootstrapping a new
 machine, and as a **cron job** that fetches everything and transparently backs
-up uncommitted work without ever touching your branches or working tree.
+up uncommitted work without ever touching your branches or working tree. It also
+manages **workgroups** — fleets of isolated worktrees/clones for running parallel
+agents — keeping their WIP safe.
 
 ## Highlights
 
 - **Multi-provider discovery** — GitHub, GitHub Enterprise, GitLab (incl.
   self-hosted), and Gitea/Forgejo, by user, org, group, or raw search query.
-- **Server-side filtering** where each provider's API supports it, with a
-  client-side fallback and clear warnings when a filter can't be honored.
+  SSH or HTTPS/PAT transport (`clone_protocol`).
+- **One-command bootstrap** — `git-mgr bootstrap` (init → doctor → discover →
+  sync → agent) plus a portable `manifest export/import` to rehydrate a new
+  machine; `doctor` diagnoses tooling/auth/state before things break.
 - **Structured layout** — repos land at `{{.Host}}/{{.Owner}}/{{.Name}}` (fully
-  templatable).
+  templatable). Operate them in bulk with named **sets** (`--set`) and
+  `run -- <cmd>`.
 - **Transparent backups** of uncommitted work via stash-refs and patch files —
-  never modifies your working tree, index, branches, or stash list.
+  never modifies your working tree, index, branches, or stash list; `restore`
+  recovers them (into a scratch dir or in place).
+- **Workgroups / agent fleets** — spin up N isolated worktrees or clones and run
+  an agent in each pane (`wg create … --open --agent claude`); per-member backup,
+  safe teardown, recover, and prune keep agent WIP from ever being lost.
 - **Cron-safe sync** — flock-guarded, fetch-only, with per-repo fetch intervals
-  and retry/back-off.
+  and retry/back-off; an **operation log** (`report`/`log`) records what ran.
 - **Resilient** — one failing provider doesn't abort the run; GitHub/Gitea calls
   retry on rate-limit and 5xx; Ctrl-C cancels in-flight work cleanly.
 

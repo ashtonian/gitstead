@@ -181,7 +181,9 @@ func restoreBackupInto(ctx *Context, srcPath, into, label string, a backupArtifa
 		return err
 	}
 	if a.untracked != "" {
-		_ = untar(ctx, a.untracked, into)
+		if err := untar(ctx, a.untracked, into); err != nil {
+			fmt.Printf("  warning: could not restore untracked files from %s: %v\n", a.untracked, err)
+		}
 	}
 	fmt.Printf("Restored backup %s of %s into %s (for inspection).\n", a.id, label, into)
 	return nil
@@ -203,7 +205,9 @@ func applyBackupToTree(ctx *Context, localPath, label string, force bool, a back
 		return err
 	}
 	if a.untracked != "" {
-		_ = untar(ctx, a.untracked, localPath)
+		if err := untar(ctx, a.untracked, localPath); err != nil {
+			fmt.Printf("  warning: could not restore untracked files from %s: %v\n", a.untracked, err)
+		}
 	}
 	fmt.Printf("Applied backup %s onto %s.\n", a.id, label)
 	return nil
