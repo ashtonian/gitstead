@@ -16,7 +16,10 @@ func TestParseURL_SSH(t *testing.T) {
 	}{
 		{"git@github.com:ashtonian/git-mgr.git", "github.com", "ashtonian", "git-mgr", "ashtonian/git-mgr"},
 		{"git@ghes.company.com:org/repo.git", "ghes.company.com", "org", "repo", "org/repo"},
-		{"git@gitlab.com:group/subgroup/project.git", "gitlab.com", "group", "subgroup/project", "group/subgroup/project"},
+		// GitLab subgroups: owner is the full group path, name is just the repo.
+		{"git@gitlab.com:group/subgroup/project.git", "gitlab.com", "group/subgroup", "project", "group/subgroup/project"},
+		// ssh:// scheme, with a port.
+		{"ssh://git@ghes.company.com:2222/team/svc.git", "ghes.company.com", "team", "svc", "team/svc"},
 	}
 
 	for _, tt := range tests {
@@ -68,15 +71,61 @@ func TestParseURL_HTTPS(t *testing.T) {
 	}
 }
 
+func TestParseURL_HTTPSPort(t *testing.T) {
+	// A port and userinfo must be stripped from the host.
+	id, err := gitops.ParseURL("https://user@git.example.com:8443/team/app.git")
+	if err != nil {
+		t.Fatalf("ParseURL: %v", err)
+	}
+	if id.Host != "git.example.com" {
+		t.Errorf("host: got %q, want git.example.com (port/userinfo stripped)", id.Host)
+	}
+	if id.FullName != "team/app" {
+		t.Errorf("fullname: got %q, want team/app", id.FullName)
+	}
+}
+
+func TestParseURL_GitProtocol(t *testing.T) {
+	id, err := gitops.ParseURL("git://host.tld/owner/repo.git")
+	if err != nil {
+		t.Fatalf("ParseURL: %v", err)
+	}
+	if id.Host != "host.tld" || id.FullName != "owner/repo" {
+		t.Errorf("git://: got %s %s", id.Host, id.FullName)
+	}
+}
+
+func TestParseURL_LocalPath(t *testing.T) {
+	cases := []struct{ in, owner, name string }{
+		{"/srv/git/origin.git", "git", "origin"},
+		{"/tmp/wgr/origin.git", "wgr", "origin"},
+		{"~/repos/myapp", "repos", "myapp"},
+		{"file:///srv/mirrors/app.git", "mirrors", "app"},
+	}
+	for _, c := range cases {
+		id, err := gitops.ParseURL(c.in)
+		if err != nil {
+			t.Fatalf("ParseURL(%q): %v", c.in, err)
+		}
+		if id.Host != "local" || id.Owner != c.owner || id.Name != c.name {
+			t.Errorf("ParseURL(%q) = local/%s/%s, want local/%s/%s", c.in, id.Owner, id.Name, c.owner, c.name)
+		}
+		if id.SSHURL == "" {
+			t.Errorf("ParseURL(%q): empty SSHURL (clone source)", c.in)
+		}
+	}
+}
+
 func TestParseURL_Invalid(t *testing.T) {
 	invalids := []string{
-		"not-a-url",
-		"ftp://example.com/repo",
-		"",
+		"not-a-url",              // bare token, not path-like
+		"ftp://example.com/repo", // unsupported scheme
+		"",                       // empty
+		"https://github.com",     // no owner/repo path
+		"git@github.com:",        // no path
 	}
 	for _, url := range invalids {
-		_, err := gitops.ParseURL(url)
-		if err == nil {
+		if _, err := gitops.ParseURL(url); err == nil {
 			t.Errorf("expected error for %q", url)
 		}
 	}

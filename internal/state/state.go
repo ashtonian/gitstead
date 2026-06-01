@@ -25,47 +25,49 @@ type State struct {
 	lockFD *os.File `yaml:"-"`
 }
 
-// RepoState tracks the state of a single managed repo.
+// RepoState tracks the state of a single managed repo. Each field carries a
+// json tag matching its yaml tag so `git-mgr status --json` emits the same
+// snake_case keys used in config and the on-disk state file.
 type RepoState struct {
 	// Identity
-	CloneURL string `yaml:"clone_url"`
-	Host     string `yaml:"host"`
-	Owner    string `yaml:"owner"`
-	Name     string `yaml:"name"`
-	FullName string `yaml:"full_name"`
-	Provider string `yaml:"provider"` // provider instance name
+	CloneURL string `yaml:"clone_url" json:"clone_url"`
+	Host     string `yaml:"host" json:"host"`
+	Owner    string `yaml:"owner" json:"owner"`
+	Name     string `yaml:"name" json:"name"`
+	FullName string `yaml:"full_name" json:"full_name"`
+	Provider string `yaml:"provider" json:"provider"` // provider instance name
 
 	// Local State
-	LocalPath     string `yaml:"local_path"`
-	Cloned        bool   `yaml:"cloned"`
-	DefaultBranch string `yaml:"default_branch"`
-	HeadCommit    string `yaml:"head_commit"`
-	CurrentBranch string `yaml:"current_branch"`
+	LocalPath     string `yaml:"local_path" json:"local_path"`
+	Cloned        bool   `yaml:"cloned" json:"cloned"`
+	DefaultBranch string `yaml:"default_branch" json:"default_branch"`
+	HeadCommit    string `yaml:"head_commit" json:"head_commit"`
+	CurrentBranch string `yaml:"current_branch" json:"current_branch"`
 
 	// Metadata
-	DiscoveredBy string   `yaml:"discovered_by"`
-	IsFork       bool     `yaml:"is_fork"`
-	IsArchived   bool     `yaml:"is_archived"`
-	Language     string   `yaml:"language"`
-	Languages    []string `yaml:"languages,omitempty"`
-	Topics       []string `yaml:"topics"`
-	Tags         []string `yaml:"tags"`
-	Description  string   `yaml:"description"`
+	DiscoveredBy string   `yaml:"discovered_by" json:"discovered_by"`
+	IsFork       bool     `yaml:"is_fork" json:"is_fork"`
+	IsArchived   bool     `yaml:"is_archived" json:"is_archived"`
+	Language     string   `yaml:"language" json:"language"`
+	Languages    []string `yaml:"languages,omitempty" json:"languages,omitempty"`
+	Topics       []string `yaml:"topics" json:"topics"`
+	Tags         []string `yaml:"tags" json:"tags"`
+	Description  string   `yaml:"description" json:"description"`
 
 	// Sync State
-	LastFetch          time.Time `yaml:"last_fetch"`
-	LastFetchError     string    `yaml:"last_fetch_error"`
-	LastBackup         time.Time `yaml:"last_backup"`
-	LastBackupRef      string    `yaml:"last_backup_ref"`
-	LastBackupHasPatch bool      `yaml:"last_backup_has_patch"`
-	Status             string    `yaml:"status"` // clean, dirty, conflict, error, uncloned, missing, stale
-	Error              string    `yaml:"error"`
+	LastFetch          time.Time `yaml:"last_fetch" json:"last_fetch"`
+	LastFetchError     string    `yaml:"last_fetch_error" json:"last_fetch_error"`
+	LastBackup         time.Time `yaml:"last_backup" json:"last_backup"`
+	LastBackupRef      string    `yaml:"last_backup_ref" json:"last_backup_ref"`
+	LastBackupHasPatch bool      `yaml:"last_backup_has_patch" json:"last_backup_has_patch"`
+	Status             string    `yaml:"status" json:"status"` // clean, dirty, conflict, error, uncloned, missing, stale
+	Error              string    `yaml:"error" json:"error"`
 
 	// Discovery State
-	FirstSeen      time.Time `yaml:"first_seen"`
-	LastDiscovered time.Time `yaml:"last_discovered"`
-	StaleSince     time.Time `yaml:"stale_since,omitempty"`
-	ManuallyAdded  bool      `yaml:"manually_added"`
+	FirstSeen      time.Time `yaml:"first_seen" json:"first_seen"`
+	LastDiscovered time.Time `yaml:"last_discovered" json:"last_discovered"`
+	StaleSince     time.Time `yaml:"stale_since,omitempty" json:"stale_since,omitempty"`
+	ManuallyAdded  bool      `yaml:"manually_added" json:"manually_added"`
 }
 
 // WorkgroupState is the observed on-disk state of a managed workgroup.

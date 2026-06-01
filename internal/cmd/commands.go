@@ -35,15 +35,18 @@ type SyncCmd struct {
 	NoFetch    bool   `help:"Skip fetching, only backup." default:"false" name:"no-fetch"`
 	NoDiscover bool   `help:"Skip auto-discovery." default:"false" name:"no-discover"`
 	Force      bool   `help:"Ignore min_fetch_interval." default:"false"`
+	PushBranch bool   `help:"On backup, also push WIP to a recoverable remote branch (git-mgr/wip/<branch>)." default:"false" name:"push-branch"`
 }
 
 // BackupCmd backs up uncommitted changes.
 // Run method is in backup_impl.go
 type BackupCmd struct {
-	Repos   string `help:"Filter to specific repos." default:""`
-	Tag     string `help:"Filter by tag." default:""`
-	List    bool   `help:"List existing backups." default:"false"`
-	Restore string `help:"Show restore instructions for a backup." default:""`
+	Repos      string `help:"Filter to specific repos." default:""`
+	Tag        string `help:"Filter by tag." default:""`
+	List       bool   `help:"List existing backups." default:"false"`
+	Restore    string `help:"Show restore instructions for a backup." default:""`
+	PushBranch bool   `help:"Also push WIP to a recoverable remote branch (git-mgr/wip/<branch>)." default:"false" name:"push-branch"`
+	PushRemote string `help:"Remote for --push-branch (default: config/origin)." default:"" name:"push-remote"`
 }
 
 // StatusCmd shows state of all managed repos.

@@ -224,6 +224,16 @@ backup:
   # Default: ~/.local/share/git-mgr/patches/
   patch_dir: ""
 
+  # Also push uncommitted tracked changes to a recoverable branch
+  # (refs/heads/git-mgr/wip/<branch>) on push_remote. Unlike the hidden
+  # stash-ref backup, this is a normal branch visible in the remote's UI, so
+  # dirty work is saved offsite and easy to recover. Force-updated each run.
+  # Equivalent to passing `--push-branch` to `git-mgr sync`/`git-mgr backup`.
+  push_branch: false
+
+  # Remote to push the WIP branch to. Must exist in each repo's git config.
+  push_remote: "origin"
+
 # =============================================================================
 # Remote Sync
 # =============================================================================
@@ -265,8 +275,14 @@ log:
 # =============================================================================
 # A workgroup is a parent directory of N member working directories operated on
 # as a unit -- either N worktrees of one source repo (kind: worktree) or N
-# independent clones (kind: clone). Create with `git-mgr wg create <name>`,
-# reconcile with `git-mgr wg ensure`, open a tmux layout with `git-mgr wg open`.
+# independent clones (kind: clone). Declare them here, or create one as a
+# one-off from the CLI without editing this file:
+#
+#   git-mgr wg create scratch --source ~/code/app --count 4 --base-ref origin/main
+#
+# Add --save to append the synthesized workgroup back here (--force to overwrite
+# an existing entry), and --sync to also track its underlying repo(s) for sync.
+# Reconcile with `git-mgr wg ensure`; open a tmux layout with `git-mgr wg open`.
 
 # Parent directory for all workgroups (each lives at <workgroup_base_dir>/<name>).
 workgroup_base_dir: "~/workgroups"
@@ -277,10 +293,12 @@ workgroups:
     kind: "worktree"
     source: "github.com/your-login/myapp"  # tracked repo key, or a local path
     base_ref: "origin/main"                # fork point (optional; default = source HEAD)
+    sync: true                             # also track the source repo so `git-mgr sync`
+                                           # keeps it fetched (optional; default false)
     members:
       - { name: "agent-1" }                # branch defaults to the member name
-      - { name: "agent-2" }
-      - { name: "agent-3" }
+      - { name: "agent-2" }                # (the `wg create --count` CLI path
+      - { name: "agent-3" }                #  namespaces these as <name>/agent-N)
 
   # A multi-repo bundle worked on together.
   - name: "platform"

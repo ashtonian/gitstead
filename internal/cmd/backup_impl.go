@@ -5,9 +5,30 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
+
+// backupConfigFor builds a gitops.BackupConfig from resolved per-repo config,
+// layering in push-branch (with its resolved SSH key) when enabled by config or
+// the CLI flag. pushRemoteFlag overrides the configured remote when non-empty.
+func backupConfigFor(cfg, repoCfg *config.Config, key, discoveredBy string, pushBranchFlag bool, pushRemoteFlag string) gitops.BackupConfig {
+	opts := []gitops.BackupOption{
+		gitops.WithStrategy(repoCfg.Backup.Strategy),
+		gitops.WithIncludeUntracked(repoCfg.Backup.IncludeUntracked),
+		gitops.WithMaxPerRepo(repoCfg.Backup.MaxPerRepo),
+		gitops.WithPatchDir(repoCfg.Backup.PatchDir),
+	}
+	if pushBranchFlag || repoCfg.Backup.PushBranch {
+		remote := pushRemoteFlag
+		if remote == "" {
+			remote = repoCfg.Backup.PushRemote
+		}
+		opts = append(opts, gitops.WithPushBranch(remote, cfg.ResolveSSHKey(key, discoveredBy)))
+	}
+	return gitops.NewBackupConfig(opts...)
+}
 
 func (c *BackupCmd) Run(ctx *Context) error {
 	cfg, err := ctx.LoadConfig()
@@ -43,12 +64,7 @@ func (c *BackupCmd) Run(ctx *Context) error {
 		}
 
 		repoCfg := cfg.ResolveForRepo(key)
-		backupCfg := gitops.NewBackupConfig(
-			gitops.WithStrategy(repoCfg.Backup.Strategy),
-			gitops.WithIncludeUntracked(repoCfg.Backup.IncludeUntracked),
-			gitops.WithMaxPerRepo(repoCfg.Backup.MaxPerRepo),
-			gitops.WithPatchDir(repoCfg.Backup.PatchDir),
-		)
+		backupCfg := backupConfigFor(cfg, repoCfg, key, repo.DiscoveredBy, c.PushBranch, c.PushRemote)
 
 		br, err := gitops.Backup(ctx.GoCtx(), repo.LocalPath, backupCfg)
 		if err != nil {
@@ -62,7 +78,11 @@ func (c *BackupCmd) Run(ctx *Context) error {
 			repo.LastBackupHasPatch = br.HasPatch
 			repo.Status = "dirty"
 			if !ctx.Quiet {
-				fmt.Printf("  %s: backed up\n", key)
+				if br.PushedBranch != "" {
+					fmt.Printf("  %s: backed up (pushed %s)\n", key, br.PushedBranch)
+				} else {
+					fmt.Printf("  %s: backed up\n", key)
+				}
 			}
 		}
 	}

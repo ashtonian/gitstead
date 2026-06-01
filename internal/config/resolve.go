@@ -69,6 +69,12 @@ func (c *Config) ResolveForRepo(repoKey string) *Config {
 			if o.Backup.PatchDir != nil {
 				resolved.Backup.PatchDir = *o.Backup.PatchDir
 			}
+			if o.Backup.PushBranch != nil {
+				resolved.Backup.PushBranch = *o.Backup.PushBranch
+			}
+			if o.Backup.PushRemote != nil {
+				resolved.Backup.PushRemote = *o.Backup.PushRemote
+			}
 		}
 		if o.RemoteSync != nil {
 			if o.RemoteSync.Enabled != nil {

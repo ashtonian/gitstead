@@ -390,15 +390,15 @@ func TestE2E_AdoptAndStatus(t *testing.T) {
 	if len(repos) != 1 {
 		t.Fatalf("expected 1 tracked repo after adopt, got %d:\n%v", len(repos), repos)
 	}
-	// status --json serializes RepoState's Go field names (it has yaml tags, not
-	// json tags), so the keys are PascalCase: "ManuallyAdded", "Tags".
+	// status --json uses RepoState's json tags, which mirror the snake_case
+	// yaml/config keys.
 	for key, r := range repos {
-		if ma, _ := r["ManuallyAdded"].(bool); !ma {
-			t.Errorf("repo %s: expected ManuallyAdded=true, got %v", key, r["ManuallyAdded"])
+		if ma, _ := r["manually_added"].(bool); !ma {
+			t.Errorf("repo %s: expected manually_added=true, got %v", key, r["manually_added"])
 		}
-		tags, _ := r["Tags"].([]any)
+		tags, _ := r["tags"].([]any)
 		if len(tags) != 1 || tags[0] != "adopted" {
-			t.Errorf("repo %s: expected Tags=[adopted], got %v", key, r["Tags"])
+			t.Errorf("repo %s: expected tags=[adopted], got %v", key, r["tags"])
 		}
 	}
 }
@@ -466,5 +466,152 @@ func TestE2E_SyncFetch(t *testing.T) {
 	head, err := exec.Command("git", "-C", dest, "rev-parse", "HEAD").CombinedOutput()
 	if err != nil || len(strings.TrimSpace(string(head))) != 40 {
 		t.Errorf("invalid HEAD after sync: %q (%v)", head, err)
+	}
+}
+
+// --- Docker-free local tests (no Forgejo/provider needed) ---
+
+// newLocalEnv builds the binary and points it at fresh temp config/state files
+// without starting Forgejo. For features that need no provider: workgroups
+// created from a local source, and backups pushed to a local-path remote.
+func newLocalEnv(t *testing.T) *testEnv {
+	t.Helper()
+	tmp := t.TempDir()
+	return &testEnv{
+		bin:        gitMgrBin(t),
+		baseDir:    filepath.Join(tmp, "repos"),
+		stateFile:  filepath.Join(tmp, "state.yaml"),
+		configFile: filepath.Join(tmp, "config.yaml"),
+	}
+}
+
+// gitCmd runs `git -C dir args...`, failing the test on error.
+func gitCmd(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s (in %s): %v\n%s", strings.Join(args, " "), dir, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestE2E_WGCreateFromFlags drives `wg create` as a one-off from CLI flags (no
+// workgroup declared in config), asserting it materialises N worktrees on
+// namespaced branches without touching config, then that --save persists the
+// synthesized declaration.
+func TestE2E_WGCreateFromFlags(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+
+	// A local source repo with one commit.
+	src := filepath.Join(tmp, "app")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, src, "init", "-q")
+	gitCmd(t, src, "config", "user.email", "e2e@test.local")
+	gitCmd(t, src, "config", "user.name", "e2e")
+	if err := os.WriteFile(filepath.Join(src, "README.md"), []byte("# app"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, src, "add", ".")
+	gitCmd(t, src, "commit", "-qm", "init")
+	branch := gitCmd(t, src, "rev-parse", "--abbrev-ref", "HEAD")
+
+	// Minimal config so workgroup_base_dir is isolated to the temp dir.
+	wgBase := filepath.Join(tmp, "wg")
+	cfg := fmt.Sprintf("base_dir: %s\nworkgroup_base_dir: %s\n", env.baseDir, wgBase)
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// One-off create: 2 worktrees, nothing in config.
+	out, code := env.run(t, "wg", "create", "scratch", "--source", src, "--count", "2", "--base-ref", branch)
+	if code != 0 {
+		t.Fatalf("wg create exit %d:\n%s", code, out)
+	}
+
+	// Two worktrees on namespaced branches (<name>/agent-N) must exist.
+	for i := 1; i <= 2; i++ {
+		member := filepath.Join(wgBase, "scratch", fmt.Sprintf("agent-%d", i))
+		if _, err := os.Stat(filepath.Join(member, ".git")); err != nil {
+			t.Fatalf("expected worktree at %s: %v\n%s", member, err, out)
+		}
+		if got, want := gitCmd(t, member, "rev-parse", "--abbrev-ref", "HEAD"), fmt.Sprintf("scratch/agent-%d", i); got != want {
+			t.Errorf("member %d branch = %q, want %q", i, got, want)
+		}
+	}
+
+	// The one-off must not have modified config.
+	if b, _ := os.ReadFile(env.configFile); strings.Contains(string(b), "name: scratch") {
+		t.Error("one-off create should not modify config without --save")
+	}
+
+	// --save persists the synthesized workgroup (create is idempotent, so this
+	// exercises the save-after-materialise path).
+	out, code = env.run(t, "wg", "create", "scratch", "--source", src, "--count", "2", "--base-ref", branch, "--save")
+	if code != 0 {
+		t.Fatalf("wg create --save exit %d:\n%s", code, out)
+	}
+	b, err := os.ReadFile(env.configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "name: scratch") || !strings.Contains(string(b), "kind: worktree") {
+		t.Errorf("--save did not persist workgroup:\n%s", b)
+	}
+}
+
+// TestE2E_BackupPushBranch adopts a repo whose origin is a local bare remote,
+// dirties it, and runs `backup --push-branch`, asserting the WIP snapshot lands
+// on the remote as a normal branch while the working tree stays dirty.
+func TestE2E_BackupPushBranch(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+
+	// Bare "remote" + a working clone with origin pointing at it.
+	gitCmd(t, tmp, "init", "-q", "--bare", "remote.git")
+	gitCmd(t, tmp, "clone", "-q", "remote.git", "app")
+	remote := filepath.Join(tmp, "remote.git")
+	app := filepath.Join(tmp, "app")
+	gitCmd(t, app, "config", "user.email", "e2e@test.local")
+	gitCmd(t, app, "config", "user.name", "e2e")
+	if err := os.WriteFile(filepath.Join(app, "file.txt"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, app, "add", ".")
+	gitCmd(t, app, "commit", "-qm", "init")
+	gitCmd(t, app, "push", "-q", "origin", "HEAD")
+
+	cfg := fmt.Sprintf("base_dir: %s\nbackup:\n  patch_dir: %s\n", env.baseDir, filepath.Join(tmp, "patches"))
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Adopt the working clone (its origin is a local-path remote).
+	if out, code := env.run(t, "adopt", app); code != 0 {
+		t.Fatalf("adopt exit %d:\n%s", code, out)
+	}
+
+	// Dirty a tracked file, then back up + push WIP.
+	if err := os.WriteFile(filepath.Join(app, "file.txt"), []byte("v1\nwip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, code := env.run(t, "backup", "--push-branch")
+	if code != 0 {
+		t.Fatalf("backup --push-branch exit %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, "git-mgr/wip/") {
+		t.Errorf("expected a pushed WIP branch in output:\n%s", out)
+	}
+
+	// The WIP branch must exist on the remote as a normal branch.
+	if refs := gitCmd(t, remote, "for-each-ref", "refs/heads/git-mgr/wip/"); !strings.Contains(refs, "git-mgr/wip/") {
+		t.Errorf("WIP branch missing on remote: %q", refs)
+	}
+
+	// Working tree stays dirty — backup is non-destructive.
+	if st := gitCmd(t, app, "status", "--porcelain"); st == "" {
+		t.Error("backup should not have cleaned the working tree")
 	}
 }
