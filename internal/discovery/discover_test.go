@@ -1,31 +1,34 @@
 package discovery
 
-import "testing"
+import (
+	"testing"
 
-func TestParseGitURL(t *testing.T) {
-	cases := []struct {
-		url, host, owner, name string
-	}{
-		{"git@github.com:owner/repo.git", "github.com", "owner", "repo"},
-		{"git@github.com:owner/repo", "github.com", "owner", "repo"},
-		{"ssh://git@ghes.example.com:2222/team/svc.git", "ghes.example.com", "team", "svc"},
-		{"ssh://git@gitlab.com/group/subgroup/proj.git", "gitlab.com", "group/subgroup", "proj"},
+	"github.com/ashtonian/git-mgr/internal/config"
+)
+
+func TestParseManualRepo(t *testing.T) {
+	// SSH/scp form -> recorded as SSHURL, cloned over SSH.
+	ssh, err := parseManualRepo(config.ManualRepo{URL: "git@github.com:owner/repo.git", Tags: []string{"x"}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range cases {
-		p := parseGitURL(c.url)
-		if p == nil {
-			t.Errorf("%s: got nil", c.url)
-			continue
-		}
-		if p.host != c.host || p.owner != c.owner || p.name != c.name {
-			t.Errorf("%s: got %s/%s/%s, want %s/%s/%s",
-				c.url, p.host, p.owner, p.name, c.host, c.owner, c.name)
-		}
+	if ssh.Host != "github.com" || ssh.FullName != "owner/repo" {
+		t.Errorf("ssh identity wrong: %+v", ssh)
 	}
-	for _, bad := range []string{"https://github.com/owner/repo.git", "not-a-url", "git@host:noslash"} {
-		if p := parseGitURL(bad); p != nil {
-			t.Errorf("%s: expected nil, got %+v", bad, p)
-		}
+	if ssh.SSHURL != "git@github.com:owner/repo.git" || ssh.HTTPURL != "" {
+		t.Errorf("ssh url fields: ssh=%q http=%q", ssh.SSHURL, ssh.HTTPURL)
+	}
+
+	// HTTPS form -> recorded as HTTPURL and honored (was rejected before).
+	https, err := parseManualRepo(config.ManualRepo{URL: "https://gitlab.com/group/sub/proj.git"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if https.Host != "gitlab.com" || https.FullName != "group/sub/proj" {
+		t.Errorf("https identity wrong: %+v", https)
+	}
+	if https.HTTPURL != "https://gitlab.com/group/sub/proj.git" || https.SSHURL != "" {
+		t.Errorf("https url fields: ssh=%q http=%q", https.SSHURL, https.HTTPURL)
 	}
 }
 

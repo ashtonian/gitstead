@@ -43,6 +43,7 @@ providers:
   #   token_env: "GHES_TOKEN"              # Custom env var name
   #   token_command: "gh auth token -h ghes.company.com"
   #   ssh_key: "~/.ssh/id_work"            # Default SSH key for all repos from this provider
+  #   clone_protocol: "https"              # Transport for repos from THIS provider (overrides the top-level default)
 
   # Self-hosted GitLab example
   # - name: "gitlab.company.com"

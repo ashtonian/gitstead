@@ -112,7 +112,7 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 
 			destPath := filepath.Join(cfg.BaseDir, relPath)
 			sshKey := cfg.ResolveSSHKey(repo.Key(), "")
-			cloneURL, cloneKey := cloneTarget(repo, repoCfg.CloneProtocol, sshKey)
+			cloneURL, cloneKey := cloneTarget(repo, cfg.CloneProtocolFor(repo.Key(), repo.DiscoveredBy), sshKey)
 
 			fmt.Printf("  [%d/%d] %s ...", i+1, len(newRepos), repo.Key())
 			start := time.Now()

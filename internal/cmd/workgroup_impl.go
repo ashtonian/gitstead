@@ -378,7 +378,7 @@ func trackWorkgroupRepos(st *state.State, spec *workgroup.Spec) (added int, skip
 			return
 		}
 		st.Repos[key] = &state.RepoState{
-			CloneURL: id.SSHURL, Host: id.Host, Owner: id.Owner, Name: id.Name,
+			CloneURL: id.URL, Host: id.Host, Owner: id.Owner, Name: id.Name,
 			FullName: id.FullName, Provider: id.Host, LocalPath: localPath,
 			Cloned: true, ManuallyAdded: true, Status: "clean",
 			Tags: []string{"workgroup:" + spec.Name}, FirstSeen: time.Now(),

@@ -36,6 +36,14 @@ func cloneTarget(repo discovery.Repo, protocol, sshKey string) (url, key string)
 	if protocol == "https" && repo.HTTPURL != "" {
 		return repo.HTTPURL, ""
 	}
+	if repo.SSHURL != "" {
+		return repo.SSHURL, sshKey
+	}
+	// Single-URL repos (e.g. a manual `repos:` entry given as https) have only
+	// one of the two set -- honor whatever we have rather than returning empty.
+	if repo.HTTPURL != "" {
+		return repo.HTTPURL, ""
+	}
 	return repo.SSHURL, sshKey
 }
 

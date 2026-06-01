@@ -95,6 +95,28 @@ func (c *Config) ResolveForRepo(repoKey string) *Config {
 	return &resolved
 }
 
+// CloneProtocolFor resolves the clone transport for a repo, in order: a per-repo
+// override, the provider that discovered it (via the discovery rule), then the
+// top-level clone_protocol default. Only consulted at first clone of a newly
+// discovered repo; afterwards the stored remote URL is used.
+func (c *Config) CloneProtocolFor(repoKey, discoveredBy string) string {
+	for _, o := range c.Overrides {
+		if matchesOverride(repoKey, o.Repos) && o.CloneProtocol != "" {
+			return o.CloneProtocol
+		}
+	}
+	for _, r := range c.Discovery {
+		if r.Name == discoveredBy {
+			for _, p := range c.Providers {
+				if p.Name == r.Provider && p.CloneProtocol != "" {
+					return p.CloneProtocol
+				}
+			}
+		}
+	}
+	return c.CloneProtocol
+}
+
 // ResolveSSHKey returns the SSH key path for a given repo, checking overrides -> rule -> provider.
 func (c *Config) ResolveSSHKey(repoKey, ruleName string) string {
 	var overrideKey string
