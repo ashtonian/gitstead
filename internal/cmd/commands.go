@@ -201,6 +201,15 @@ func timeAgo(t time.Time) string {
 	}
 }
 
+// BootstrapCmd sets up a fresh machine in one command.
+// Run method is in bootstrap_impl.go
+type BootstrapCmd struct {
+	Profile  string        `help:"Scope discovery rules + sync to this tag." default:""`
+	Interval time.Duration `help:"Sync interval for the installed agent." default:"15m"`
+	NoAgent  bool          `help:"Skip installing the periodic sync agent." default:"false" name:"no-agent"`
+	DryRun   bool          `help:"Print the steps without running them." default:"false" name:"dry-run"`
+}
+
 // ManifestCmd groups portable export/import of the tracked repo set.
 type ManifestCmd struct {
 	Export ManifestExportCmd `cmd:"" help:"Export tracked repos to a portable manifest (stdout or --out)."`
