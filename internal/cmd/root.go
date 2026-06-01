@@ -30,6 +30,7 @@ type CLI struct {
 	Clone      CloneCmd      `cmd:"" help:"Manually clone and track a repo."`
 	Adopt      AdoptCmd      `cmd:"" help:"Import existing local repos into management."`
 	Remove     RemoveCmd     `cmd:"" help:"Stop tracking repos."`
+	Manifest   ManifestCmd   `cmd:"" help:"Export/import a portable manifest of the tracked repo set."`
 	RemoteSync RemoteSyncCmd `cmd:"" name:"remote-sync" help:"Push backup refs to remotes."`
 	ConfigShow ConfigCmd     `cmd:"" name:"config" help:"Print resolved configuration."`
 	Workgroup  WorkgroupCmd  `cmd:"" aliases:"wg" help:"Manage workgroups: parallel worktrees or multi-repo bundles."`
