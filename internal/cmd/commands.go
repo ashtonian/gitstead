@@ -242,6 +242,18 @@ type ManifestImportCmd struct {
 	DryRun bool   `help:"Show what would be cloned without doing it." default:"false" name:"dry-run"`
 }
 
+// ReportCmd summarizes recent activity from the operation log.
+// Run method is in report_impl.go
+type ReportCmd struct {
+	Since time.Duration `help:"Window to summarize." default:"24h"`
+}
+
+// LogCmd prints recent raw operation-log events.
+// Run method is in report_impl.go
+type LogCmd struct {
+	Lines int `help:"Show the last N events (0 = all)." default:"50" short:"n"`
+}
+
 // RunCmd runs a command in each matching tracked repo.
 // Run method is in run_impl.go
 type RunCmd struct {

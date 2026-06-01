@@ -35,6 +35,8 @@ type CLI struct {
 	Manifest   ManifestCmd   `cmd:"" help:"Export/import a portable manifest of the tracked repo set."`
 	RemoteSync RemoteSyncCmd `cmd:"" name:"remote-sync" help:"Push backup refs to remotes."`
 	ConfigShow ConfigCmd     `cmd:"" name:"config" help:"Print resolved configuration."`
+	Report     ReportCmd     `cmd:"" help:"Summarize recent activity from the operation log."`
+	Log        LogCmd        `cmd:"" help:"Print recent operation-log events."`
 	Workgroup  WorkgroupCmd  `cmd:"" aliases:"wg" help:"Manage workgroups: parallel worktrees or multi-repo bundles."`
 
 	InstallAgent InstallAgentCmd `cmd:"" name:"install-agent" help:"Install/remove a periodic sync agent (launchd/systemd/cron)."`
