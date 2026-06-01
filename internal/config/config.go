@@ -14,6 +14,7 @@ type Config struct {
 	Discovery     []DiscoveryRule  `koanf:"discovery"     yaml:"discovery"      validate:"dive"`
 	Repos         []ManualRepo     `koanf:"repos"         yaml:"repos,omitempty" validate:"dive"`
 	Exclude       []ExcludeRule    `koanf:"exclude"       yaml:"exclude"        validate:"dive"`
+	Sets          []RepoSet        `koanf:"sets"          yaml:"sets,omitempty" validate:"dive"`
 	Overrides     []Override       `koanf:"overrides"     yaml:"overrides"      validate:"dive"`
 	Sync          SyncConfig       `koanf:"sync"          yaml:"sync"`
 	Cleanup       CleanupConfig    `koanf:"cleanup"       yaml:"cleanup"`
@@ -66,6 +67,27 @@ type DiscoveryRule struct {
 type ExcludeRule struct {
 	NamePattern string   `koanf:"name_pattern" yaml:"name_pattern,omitempty" validate:"omitempty,valid_regex"`
 	Repos       []string `koanf:"repos"        yaml:"repos,omitempty"`
+}
+
+// RepoSet is a named, reusable selection of tracked repos, usable via --set on
+// repo-operating commands. A repo is in the set if its key matches any Repos
+// glob OR it carries any of Tags (both empty = all repos); ExcludeArchived then
+// drops archived repos.
+type RepoSet struct {
+	Name            string   `koanf:"name"             yaml:"name"                      validate:"required"`
+	Repos           []string `koanf:"repos"            yaml:"repos,omitempty"`
+	Tags            []string `koanf:"tags"             yaml:"tags,omitempty"`
+	ExcludeArchived bool     `koanf:"exclude_archived" yaml:"exclude_archived,omitempty"`
+}
+
+// FindSet returns the named set, or false if no set has that name.
+func (c *Config) FindSet(name string) (*RepoSet, bool) {
+	for i := range c.Sets {
+		if c.Sets[i].Name == name {
+			return &c.Sets[i], true
+		}
+	}
+	return nil, false
 }
 
 // Override allows per-repo config overrides. The Sync/Backup/RemoteSync

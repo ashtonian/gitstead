@@ -22,18 +22,14 @@ func (c *RemoteSyncCmd) Run(ctx *Context) error {
 		return err
 	}
 
+	pass, err := selection{c.Repos, c.Tag, c.Set}.predicate(cfg)
+	if err != nil {
+		return err
+	}
+
 	pushed := 0
 	for key, repo := range st.Repos {
-		if c.Repos != "" {
-			matched, _ := filepath.Match(c.Repos, key)
-			if !matched {
-				continue
-			}
-		}
-		if c.Tag != "" && !repo.HasTag(c.Tag) {
-			continue
-		}
-		if !repo.Cloned {
+		if !pass(key, repo) || !repo.Cloned {
 			continue
 		}
 
@@ -75,22 +71,27 @@ func (c *RemoteSyncCmd) Run(ctx *Context) error {
 }
 
 func (c *RemoveCmd) Run(ctx *Context) error {
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return err
+	}
+	sel := selection{repos: c.Pattern, tag: c.Tag, set: c.Set}
+	if sel.empty() {
+		return fmt.Errorf("specify a repo pattern, --tag, or --set")
+	}
+
 	st, unlock, err := lockedState(ctx)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 
-	var toRemove []string
-	for key := range st.Repos {
-		matched, _ := filepath.Match(c.Pattern, key)
-		if matched || key == c.Pattern {
-			toRemove = append(toRemove, key)
-		}
+	toRemove, err := selectRepos(cfg, st, sel)
+	if err != nil {
+		return err
 	}
-
 	if len(toRemove) == 0 {
-		return fmt.Errorf("no repos matching %q", c.Pattern)
+		return fmt.Errorf("no repos matched")
 	}
 
 	if !c.Yes {

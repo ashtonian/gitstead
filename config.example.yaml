@@ -143,6 +143,23 @@ exclude: []
   #   - "my-company/old-frontend"
 
 # =============================================================================
+# Named Sets
+# =============================================================================
+# Reusable repo selections, usable as `--set <name>` on status/sync/backup/run/
+# remove/remote-sync. A repo is in a set if its key matches any `repos` glob OR
+# it carries any of `tags` (both empty = all repos); `exclude_archived` then
+# drops archived repos. --set composes with (AND) inline --repos/--tag.
+
+sets: []
+  # - name: core
+  #   repos:
+  #     - "github.com/acme/api"
+  #     - "github.com/acme/web"
+  # - name: active-backend
+  #   tags: ["backend"]
+  #   exclude_archived: true
+
+# =============================================================================
 # Per-Repo Overrides
 # =============================================================================
 # Override settings for specific repos. Matched by full key (host/owner/name)

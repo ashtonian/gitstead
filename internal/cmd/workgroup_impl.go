@@ -17,21 +17,21 @@ import (
 
 // WorkgroupCmd groups the workgroup subcommands.
 type WorkgroupCmd struct {
-	Create WGCreateCmd `cmd:"" help:"Create a workgroup from flags (one-off) or a config declaration; materialise its members."`
-	Ensure WGEnsureCmd `cmd:"" help:"Reconcile workgroup(s) on disk to match config (idempotent)."`
-	Adopt  WGAdoptCmd  `cmd:"" help:"Adopt an existing directory of repos as a workgroup."`
+	Create   WGCreateCmd   `cmd:"" help:"Create a workgroup from flags (one-off) or a config declaration; materialise its members."`
+	Ensure   WGEnsureCmd   `cmd:"" help:"Reconcile workgroup(s) on disk to match config (idempotent)."`
+	Adopt    WGAdoptCmd    `cmd:"" help:"Adopt an existing directory of repos as a workgroup."`
 	List     WGListCmd     `cmd:"" name:"ls" help:"List workgroups."`
 	Status   WGStatusCmd   `cmd:"" help:"Show per-member status of a workgroup."`
 	Overview WGOverviewCmd `cmd:"" help:"Member health across all workgroups (fleet supervisor view)."`
-	Check  WGCheckCmd  `cmd:"" help:"Assert a workgroup is set up and in sync (non-zero exit on drift)."`
-	Fetch  WGFetchCmd  `cmd:"" help:"Fetch all members."`
-	Commit WGCommitCmd `cmd:"" help:"Commit changes across all members."`
-	Pull   WGPullCmd   `cmd:"" help:"Pull all members (--ff-only by default)."`
-	Push   WGPushCmd   `cmd:"" help:"Push all members."`
-	Exec   WGExecCmd   `cmd:"" help:"Run a command in each member directory."`
-	Open   WGOpenCmd   `cmd:"" aliases:"tmux" help:"Open/attach a tmux session with one pane per member."`
-	Backup WGBackupCmd `cmd:"" help:"Back up every member's uncommitted work (agent WIP safety net)."`
-	Remove WGRemoveCmd `cmd:"" name:"rm" help:"Tear down a workgroup."`
+	Check    WGCheckCmd    `cmd:"" help:"Assert a workgroup is set up and in sync (non-zero exit on drift)."`
+	Fetch    WGFetchCmd    `cmd:"" help:"Fetch all members."`
+	Commit   WGCommitCmd   `cmd:"" help:"Commit changes across all members."`
+	Pull     WGPullCmd     `cmd:"" help:"Pull all members (--ff-only by default)."`
+	Push     WGPushCmd     `cmd:"" help:"Push all members."`
+	Exec     WGExecCmd     `cmd:"" help:"Run a command in each member directory."`
+	Open     WGOpenCmd     `cmd:"" aliases:"tmux" help:"Open/attach a tmux session with one pane per member."`
+	Backup   WGBackupCmd   `cmd:"" help:"Back up every member's uncommitted work (agent WIP safety net)."`
+	Remove   WGRemoveCmd   `cmd:"" name:"rm" help:"Tear down a workgroup."`
 }
 
 // WGCreateCmd materialises a workgroup for the first time. With no flags it

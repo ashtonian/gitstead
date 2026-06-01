@@ -201,11 +201,23 @@ overrides:
     path_template: "{{.Name}}"
 ```
 
-Tags come from discovery rules or manual entries and filter any command:
+Tags come from discovery rules or manual entries and filter any command. For
+recurring selections, define a **named set** and use `--set` (it composes with
+`--repos`/`--tag`):
+
+```yaml
+sets:
+  - name: core
+    repos: ["github.com/acme/*"]
+  - name: active-backend
+    tags: ["backend"]
+    exclude_archived: true
+```
 
 ```bash
 git-mgr status --tag work
-git-mgr sync   --tag personal
+git-mgr sync   --set core
+git-mgr run    --set active-backend -- go test ./...
 ```
 
 ## Transparent backups

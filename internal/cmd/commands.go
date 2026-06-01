@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -30,6 +29,7 @@ type DiscoverCmd struct {
 type SyncCmd struct {
 	Repos      string `help:"Filter to repos matching glob." default:""`
 	Tag        string `help:"Filter to repos with this tag." default:""`
+	Set        string `help:"Filter by named set (from config 'sets:')." default:""`
 	NoBackup   bool   `help:"Skip the backup step." default:"false" name:"no-backup"`
 	NoFetch    bool   `help:"Skip fetching, only backup." default:"false" name:"no-fetch"`
 	NoDiscover bool   `help:"Skip auto-discovery." default:"false" name:"no-discover"`
@@ -42,6 +42,7 @@ type SyncCmd struct {
 type BackupCmd struct {
 	Repos      string `help:"Filter to specific repos." default:""`
 	Tag        string `help:"Filter by tag." default:""`
+	Set        string `help:"Filter by named set (from config 'sets:')." default:""`
 	List       bool   `help:"List existing backups." default:"false"`
 	Restore    string `help:"Show restore instructions for a backup." default:""`
 	PushBranch bool   `help:"Also push WIP to a recoverable remote branch (git-mgr/wip/<branch>)." default:"false" name:"push-branch"`
@@ -54,6 +55,7 @@ type StatusCmd struct {
 	Live   bool   `help:"Inspect working trees live (dirty + ahead/behind), not the cached state." default:"false"`
 	Repos  string `help:"Filter by glob." default:""`
 	Tag    string `help:"Filter by tag." default:""`
+	Set    string `help:"Filter by named set (from config 'sets:')." default:""`
 	Dirty  bool   `help:"Only show dirty repos." default:"false"`
 	Stale  bool   `help:"Only show stale repos." default:"false"`
 	Errors bool   `help:"Only show repos in error state." default:"false"`
@@ -70,25 +72,27 @@ func (c *StatusCmd) Run(ctx *Context) error {
 		return nil
 	}
 
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return err
+	}
+	pass, err := selection{c.Repos, c.Tag, c.Set}.predicate(cfg)
+	if err != nil {
+		return err
+	}
+
 	if c.Live {
-		return c.runLive(ctx, st)
+		return c.runLive(ctx, st, pass)
 	}
 	if c.JSON {
-		return c.runJSON(st)
+		return c.runJSON(st, pass)
 	}
-	return c.runTable(st)
+	return c.runTable(st, pass)
 }
 
-func (c *StatusCmd) matches(key string, repo *state.RepoState) bool {
-	if c.Repos != "" {
-		matched, _ := filepath.Match(c.Repos, key)
-		if !matched {
-			return false
-		}
-	}
-	if c.Tag != "" && !repo.HasTag(c.Tag) {
-		return false
-	}
+// statusFilter applies the cached-status filters (--dirty/--stale/--errors);
+// the glob/tag/set selection is handled separately by a selection predicate.
+func (c *StatusCmd) statusFilter(repo *state.RepoState) bool {
 	if c.Dirty && repo.Status != "dirty" {
 		return false
 	}
@@ -101,10 +105,10 @@ func (c *StatusCmd) matches(key string, repo *state.RepoState) bool {
 	return true
 }
 
-func (c *StatusCmd) runJSON(st *state.State) error {
+func (c *StatusCmd) runJSON(st *state.State, pass func(string, *state.RepoState) bool) error {
 	filtered := make(map[string]*state.RepoState)
 	for key, repo := range st.Repos {
-		if c.matches(key, repo) {
+		if pass(key, repo) && c.statusFilter(repo) {
 			filtered[key] = repo
 		}
 	}
@@ -113,7 +117,7 @@ func (c *StatusCmd) runJSON(st *state.State) error {
 	return enc.Encode(filtered)
 }
 
-func (c *StatusCmd) runTable(st *state.State) error {
+func (c *StatusCmd) runTable(st *state.State, pass func(string, *state.RepoState) bool) error {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "REPO\tSTATUS\tBRANCH\tLAST FETCH\tBACKUP\tTAGS")
 
@@ -127,7 +131,7 @@ func (c *StatusCmd) runTable(st *state.State) error {
 
 	for _, key := range keys {
 		repo := st.Repos[key]
-		if !c.matches(key, repo) {
+		if !pass(key, repo) || !c.statusFilter(repo) {
 			continue
 		}
 		counts.total++
@@ -217,7 +221,9 @@ type AdoptCmd struct {
 // RemoveCmd stops tracking repos.
 // Run method is in remaining_impl.go
 type RemoveCmd struct {
-	Pattern string `arg:"" help:"Repo name pattern to remove."`
+	Pattern string `arg:"" optional:"" help:"Repo key glob to remove (or use --tag/--set)."`
+	Tag     string `help:"Remove repos with this tag." default:""`
+	Set     string `help:"Remove repos in this named set (from config 'sets:')." default:""`
 	Delete  bool   `help:"Also delete from disk." default:"false"`
 	Yes     bool   `help:"Skip confirmation." default:"false"`
 }
@@ -227,6 +233,7 @@ type RemoveCmd struct {
 type RemoteSyncCmd struct {
 	Repos  string `help:"Filter by glob." default:""`
 	Tag    string `help:"Filter by tag." default:""`
+	Set    string `help:"Filter by named set (from config 'sets:')." default:""`
 	DryRun bool   `help:"Show what would be pushed." default:"false" name:"dry-run"`
 }
 

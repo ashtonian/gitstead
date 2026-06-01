@@ -112,22 +112,15 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	var mu sync.Mutex
 	g, gctx := errgroup.WithContext(ctx.GoCtx())
 
+	pass, err := selection{c.Repos, c.Tag, c.Set}.predicate(cfg)
+	if err != nil {
+		return err
+	}
+
 	for key, repo := range st.Repos {
 		key, repo := key, repo
 
-		if c.Repos != "" {
-			matched, _ := filepath.Match(c.Repos, key)
-			if !matched {
-				continue
-			}
-		}
-		if c.Tag != "" && !repo.HasTag(c.Tag) {
-			continue
-		}
-		if repo.Status == "stale" {
-			continue
-		}
-		if !repo.Cloned {
+		if !pass(key, repo) || repo.Status == "stale" || !repo.Cloned {
 			continue
 		}
 

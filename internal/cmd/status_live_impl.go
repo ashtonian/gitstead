@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -29,22 +28,14 @@ type liveRepo struct {
 // + ahead/behind vs upstream) instead of rendering the cached state. It is
 // read-only and makes no network calls, so it answers "what needs attention
 // right now?" without a sync.
-func (c *StatusCmd) runLive(ctx *Context, st *state.State) error {
+func (c *StatusCmd) runLive(ctx *Context, st *state.State, pass func(string, *state.RepoState) bool) error {
 	type cand struct {
 		key  string
 		repo *state.RepoState
 	}
 	var cands []cand
 	for key, repo := range st.Repos {
-		if c.Repos != "" {
-			if m, _ := filepath.Match(c.Repos, key); !m {
-				continue
-			}
-		}
-		if c.Tag != "" && !repo.HasTag(c.Tag) {
-			continue
-		}
-		if !repo.Cloned {
+		if !pass(key, repo) || !repo.Cloned {
 			continue
 		}
 		cands = append(cands, cand{key, repo})
