@@ -50,6 +50,12 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	}
 	defer st.ReleaseLock()
 
+	// Re-read state under the lock so this run mutates from the latest on-disk
+	// state, not the snapshot loaded before the lock was held.
+	if err := st.Reload(); err != nil {
+		return fmt.Errorf("reloading state: %w", err)
+	}
+
 	log := ctx.Logger()
 
 	// Auto-discover if enabled
@@ -198,6 +204,29 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	}
 
 	_ = g.Wait()
+
+	// Back up workgroup members too. The tracked-repo loop above never sees agent
+	// worktrees, so without this their uncommitted work is unprotected by the
+	// scheduled run -- exactly the data the workgroup subsystem exists to keep.
+	if !c.NoBackup {
+		repoCfg := cfg.ResolveForRepo("")
+		bcfg := backupConfigFor(cfg, repoCfg, "", "", c.PushBranch, "")
+		for wgName, ws := range st.Workgroups {
+			for _, m := range ws.Members {
+				if !gitops.HasGitDir(m.Path) {
+					continue
+				}
+				br, berr := gitops.Backup(ctx.GoCtx(), m.Path, bcfg)
+				if berr != nil {
+					log.Warn("workgroup member backup failed", "workgroup", wgName, "member", m.Name, "error", berr)
+					continue
+				}
+				if br.IsDirty {
+					result.backedUp++
+				}
+			}
+		}
+	}
 
 	// Notifications
 	if cfg.Notify.Enabled && len(result.errors) > 0 && cfg.Notify.OnError {

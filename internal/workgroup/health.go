@@ -56,7 +56,7 @@ func memberHealth(ctx context.Context, spec *Spec, m Member) MemberHealth {
 	}
 	mh.Present = true
 
-	if locked, _ := gitops.IsLocked(m.Path); locked {
+	if locked, _ := gitops.IsLocked(ctx, m.Path); locked {
 		mh.Locked = true
 		mh.Issues = append(mh.Issues, "git lock present")
 	}

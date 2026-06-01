@@ -69,10 +69,11 @@ func (c *RemoteSyncCmd) Run(ctx *Context) error {
 }
 
 func (c *RemoveCmd) Run(ctx *Context) error {
-	st, err := ctx.LoadState()
+	st, unlock, err := lockedState(ctx)
 	if err != nil {
 		return err
 	}
+	defer unlock()
 
 	var toRemove []string
 	for key := range st.Repos {

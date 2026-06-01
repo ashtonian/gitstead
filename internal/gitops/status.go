@@ -40,10 +40,11 @@ func GetStatus(ctx context.Context, repoPath string) (*RepoStatus, error) {
 	untracked, _ := Git(ctx, repoPath, "ls-files", "--others", "--exclude-standard")
 	rs.HasUntracked = untracked != ""
 
-	rs.InRebase = fileExists(filepath.Join(repoPath, ".git", "rebase-merge")) ||
-		fileExists(filepath.Join(repoPath, ".git", "rebase-apply"))
-	rs.InMerge = fileExists(filepath.Join(repoPath, ".git", "MERGE_HEAD"))
-	rs.InCherryPick = fileExists(filepath.Join(repoPath, ".git", "CHERRY_PICK_HEAD"))
+	gitDir := ResolveGitDirs(ctx, repoPath).GitDir
+	rs.InRebase = fileExists(filepath.Join(gitDir, "rebase-merge")) ||
+		fileExists(filepath.Join(gitDir, "rebase-apply"))
+	rs.InMerge = fileExists(filepath.Join(gitDir, "MERGE_HEAD"))
+	rs.InCherryPick = fileExists(filepath.Join(gitDir, "CHERRY_PICK_HEAD"))
 
 	return rs, nil
 }

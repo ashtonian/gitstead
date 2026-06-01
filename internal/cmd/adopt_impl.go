@@ -16,7 +16,19 @@ func (c *AdoptCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	st, err := ctx.LoadState()
+
+	// The dry-run path is read-only; the real path mutates state, so take the
+	// lock and re-read under it.
+	var st *state.State
+	if c.DryRun {
+		st, err = ctx.LoadState()
+	} else {
+		var unlock func()
+		st, unlock, err = lockedState(ctx)
+		if err == nil {
+			defer unlock()
+		}
+	}
 	if err != nil {
 		return err
 	}

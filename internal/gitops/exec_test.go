@@ -82,18 +82,19 @@ func TestGit_RevParse(t *testing.T) {
 func TestIsLocked(t *testing.T) {
 	dir := setupTestRepo(t)
 
-	locked, _ := gitops.IsLocked(dir)
+	ctx := context.Background()
+	locked, _ := gitops.IsLocked(ctx, dir)
 	if locked {
 		t.Error("expected repo to not be locked initially")
 	}
 
 	os.WriteFile(filepath.Join(dir, ".git", "index.lock"), []byte(""), 0644)
-	locked, file := gitops.IsLocked(dir)
+	locked, file := gitops.IsLocked(ctx, dir)
 	if !locked {
 		t.Error("expected repo to be locked")
 	}
-	if file != ".git/index.lock" {
-		t.Errorf("expected .git/index.lock, got %s", file)
+	if file != "index.lock" {
+		t.Errorf("expected index.lock, got %s", file)
 	}
 }
 

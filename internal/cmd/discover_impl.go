@@ -8,6 +8,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/pathtemplate"
+	"github.com/ashtonian/git-mgr/internal/state"
 )
 
 func (c *DiscoverCmd) Run(ctx *Context) error {
@@ -15,7 +16,19 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	st, err := ctx.LoadState()
+
+	// --apply mutates and saves state, so hold the lock (and re-read under it)
+	// for that path; a dry-run preview stays lock-free.
+	var st *state.State
+	if c.Apply {
+		var unlock func()
+		st, unlock, err = lockedState(ctx)
+		if err == nil {
+			defer unlock()
+		}
+	} else {
+		st, err = ctx.LoadState()
+	}
 	if err != nil {
 		return err
 	}

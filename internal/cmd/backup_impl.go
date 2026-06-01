@@ -35,17 +35,26 @@ func (c *BackupCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	st, err := ctx.LoadState()
+
+	// --list and --restore are read-only; load without the lock so they don't
+	// fail while a sync is running.
+	if c.List || c.Restore != "" {
+		st, err := ctx.LoadState()
+		if err != nil {
+			return err
+		}
+		if c.List {
+			return c.runList(ctx, st)
+		}
+		return c.runRestore(ctx, st)
+	}
+
+	// The backup path writes per-repo backup metadata, so take the lock.
+	st, unlock, err := lockedState(ctx)
 	if err != nil {
 		return err
 	}
-
-	if c.List {
-		return c.runList(ctx, st)
-	}
-	if c.Restore != "" {
-		return c.runRestore(ctx, st)
-	}
+	defer unlock()
 
 	// Run backup on matching repos
 	backed := 0
