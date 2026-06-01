@@ -57,19 +57,15 @@ func (c *BackupCmd) Run(ctx *Context) error {
 	}
 	defer unlock()
 
+	pass, err := selection{c.Repos, c.Tag, c.Set}.predicate(cfg)
+	if err != nil {
+		return err
+	}
+
 	// Run backup on matching repos
 	backed := 0
 	for key, repo := range st.Repos {
-		if c.Repos != "" {
-			matched, _ := filepath.Match(c.Repos, key)
-			if !matched {
-				continue
-			}
-		}
-		if c.Tag != "" && !repo.HasTag(c.Tag) {
-			continue
-		}
-		if !repo.Cloned {
+		if !pass(key, repo) || !repo.Cloned {
 			continue
 		}
 
@@ -108,17 +104,16 @@ func (c *BackupCmd) Run(ctx *Context) error {
 }
 
 func (c *BackupCmd) runList(ctx *Context, st *state.State) error {
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return err
+	}
+	pass, err := selection{c.Repos, c.Tag, c.Set}.predicate(cfg)
+	if err != nil {
+		return err
+	}
 	for key, repo := range st.Repos {
-		if c.Repos != "" {
-			matched, _ := filepath.Match(c.Repos, key)
-			if !matched {
-				continue
-			}
-		}
-		if c.Tag != "" && !repo.HasTag(c.Tag) {
-			continue
-		}
-		if !repo.Cloned {
+		if !pass(key, repo) || !repo.Cloned {
 			continue
 		}
 
@@ -136,18 +131,14 @@ func (c *BackupCmd) runList(ctx *Context, st *state.State) error {
 }
 
 func (c *BackupCmd) runRestore(ctx *Context, cfg *config.Config, st *state.State) error {
+	pass, err := selection{c.Repos, c.Tag, c.Set}.predicate(cfg)
+	if err != nil {
+		return err
+	}
 	id := c.Restore
 	printed := 0
 	for key, repo := range st.Repos {
-		if c.Repos != "" {
-			if matched, _ := filepath.Match(c.Repos, key); !matched {
-				continue
-			}
-		}
-		if c.Tag != "" && !repo.HasTag(c.Tag) {
-			continue
-		}
-		if !repo.Cloned {
+		if !pass(key, repo) || !repo.Cloned {
 			continue
 		}
 

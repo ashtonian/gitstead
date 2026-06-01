@@ -1,0 +1,88 @@
+package cmd
+
+import (
+	"fmt"
+	"path/filepath"
+	"sort"
+
+	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/git-mgr/internal/state"
+)
+
+// selection narrows tracked repos by a glob over keys, a tag, and/or a named
+// set. The three filters all narrow (AND): a repo must satisfy each one given.
+type selection struct {
+	repos string // glob over repo keys (filepath.Match)
+	tag   string
+	set   string // name of a config.RepoSet
+}
+
+// empty reports whether no selection filter is set (i.e. "all repos").
+func (s selection) empty() bool { return s.repos == "" && s.tag == "" && s.set == "" }
+
+// predicate compiles sel into a per-repo membership test. A named set's Repos
+// globs and Tags are unioned; the set and the inline glob/tag filters then all
+// narrow (AND). Commands build this once and call it in their repo loop instead
+// of re-implementing the filter.
+func (sel selection) predicate(cfg *config.Config) (func(key string, repo *state.RepoState) bool, error) {
+	var set *config.RepoSet
+	if sel.set != "" {
+		s, ok := cfg.FindSet(sel.set)
+		if !ok {
+			return nil, fmt.Errorf("unknown set %q (define it under `sets:` in config)", sel.set)
+		}
+		set = s
+	}
+	return func(key string, repo *state.RepoState) bool {
+		if set != nil && !matchesSet(set, key, repo) {
+			return false
+		}
+		if sel.repos != "" {
+			if m, _ := filepath.Match(sel.repos, key); !m {
+				return false
+			}
+		}
+		if sel.tag != "" && !repo.HasTag(sel.tag) {
+			return false
+		}
+		return true
+	}, nil
+}
+
+// selectRepos returns the sorted keys of tracked repos matching sel.
+func selectRepos(cfg *config.Config, st *state.State, sel selection) ([]string, error) {
+	pass, err := sel.predicate(cfg)
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for key, repo := range st.Repos {
+		if pass(key, repo) {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+
+// matchesSet reports whether a repo belongs to a set: it must survive
+// ExcludeArchived, then match any Repos glob or any Tag (both empty = all).
+func matchesSet(set *config.RepoSet, key string, repo *state.RepoState) bool {
+	if set.ExcludeArchived && repo.IsArchived {
+		return false
+	}
+	if len(set.Repos) == 0 && len(set.Tags) == 0 {
+		return true
+	}
+	for _, g := range set.Repos {
+		if m, _ := filepath.Match(g, key); m {
+			return true
+		}
+	}
+	for _, t := range set.Tags {
+		if repo.HasTag(t) {
+			return true
+		}
+	}
+	return false
+}
