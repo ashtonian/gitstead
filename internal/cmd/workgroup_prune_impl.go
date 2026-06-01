@@ -11,7 +11,7 @@ import (
 // WGPruneCmd reaps workgroup members that hold no unique work, so a fleet's
 // finished/idle agents self-clean without anyone hand-removing them.
 type WGPruneCmd struct {
-	Name   string `arg:"" optional:"" help:"Workgroup to prune (omit with --all)."`
+	Name   string `arg:"" optional:"" help:"Workgroup to prune (omit with --all)." predictor:"workgroup"`
 	All    bool   `help:"Prune every created workgroup."`
 	DryRun bool   `help:"Show what would be reaped without removing." name:"dry-run"`
 	Yes    bool   `help:"Skip confirmation."`

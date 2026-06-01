@@ -29,9 +29,9 @@ type DiscoverCmd struct {
 // SyncCmd fetches all tracked repos and backs up uncommitted changes.
 // Run method is in sync_impl.go
 type SyncCmd struct {
-	Repos      string `help:"Filter to repos matching glob." default:""`
-	Tag        string `help:"Filter to repos with this tag." default:""`
-	Set        string `help:"Filter by named set (from config 'sets:')." default:""`
+	Repos      string `help:"Filter to repos matching glob." default:"" predictor:"repo"`
+	Tag        string `help:"Filter to repos with this tag." default:"" predictor:"tag"`
+	Set        string `help:"Filter by named set (from config 'sets:')." default:"" predictor:"set"`
 	NoBackup   bool   `help:"Skip the backup step." default:"false" name:"no-backup"`
 	NoFetch    bool   `help:"Skip fetching, only backup." default:"false" name:"no-fetch"`
 	NoDiscover bool   `help:"Skip auto-discovery." default:"false" name:"no-discover"`
@@ -42,9 +42,9 @@ type SyncCmd struct {
 // BackupCmd backs up uncommitted changes.
 // Run method is in backup_impl.go
 type BackupCmd struct {
-	Repos      string `help:"Filter to specific repos." default:""`
-	Tag        string `help:"Filter by tag." default:""`
-	Set        string `help:"Filter by named set (from config 'sets:')." default:""`
+	Repos      string `help:"Filter to specific repos." default:"" predictor:"repo"`
+	Tag        string `help:"Filter by tag." default:"" predictor:"tag"`
+	Set        string `help:"Filter by named set (from config 'sets:')." default:"" predictor:"set"`
 	List       bool   `help:"List existing backups." default:"false"`
 	Restore    string `help:"Show restore instructions for a backup." default:""`
 	PushBranch bool   `help:"Also push WIP to a recoverable remote branch (git-mgr/wip/<branch>)." default:"false" name:"push-branch"`
@@ -54,7 +54,7 @@ type BackupCmd struct {
 // RestoreCmd recovers a backup for a repo.
 // Run method is in restore_impl.go
 type RestoreCmd struct {
-	Repo  string `arg:"" help:"Repo key (or glob matching exactly one repo)."`
+	Repo  string `arg:"" help:"Repo key (or glob matching exactly one repo)." predictor:"repo"`
 	ID    string `arg:"" optional:"" default:"latest" help:"Backup id (timestamp) or 'latest'."`
 	Into  string `help:"Clone + apply the backup into this scratch dir (safe inspection)." default:""`
 	Apply bool   `help:"Apply the backup onto the repo's working tree (refuses a dirty tree without --force)."`
@@ -65,9 +65,9 @@ type RestoreCmd struct {
 type StatusCmd struct {
 	JSON   bool   `help:"JSON output." default:"false"`
 	Live   bool   `help:"Inspect working trees live (dirty + ahead/behind), not the cached state." default:"false"`
-	Repos  string `help:"Filter by glob." default:""`
-	Tag    string `help:"Filter by tag." default:""`
-	Set    string `help:"Filter by named set (from config 'sets:')." default:""`
+	Repos  string `help:"Filter by glob." default:"" predictor:"repo"`
+	Tag    string `help:"Filter by tag." default:"" predictor:"tag"`
+	Set    string `help:"Filter by named set (from config 'sets:')." default:"" predictor:"set"`
 	Dirty  bool   `help:"Only show dirty repos." default:"false"`
 	Stale  bool   `help:"Only show stale repos." default:"false"`
 	Errors bool   `help:"Only show repos in error state." default:"false"`
@@ -233,9 +233,9 @@ type ManifestCmd struct {
 // Run method is in manifest_impl.go
 type ManifestExportCmd struct {
 	Out   string `help:"Write to this file instead of stdout." default:""`
-	Repos string `help:"Filter by glob." default:""`
-	Tag   string `help:"Filter by tag." default:""`
-	Set   string `help:"Filter by named set." default:""`
+	Repos string `help:"Filter by glob." default:"" predictor:"repo"`
+	Tag   string `help:"Filter by tag." default:"" predictor:"tag"`
+	Set   string `help:"Filter by named set." default:"" predictor:"set"`
 }
 
 // ManifestImportCmd clones + tracks repos from a manifest.
@@ -260,9 +260,9 @@ type LogCmd struct {
 // RunCmd runs a command in each matching tracked repo.
 // Run method is in run_impl.go
 type RunCmd struct {
-	Repos    string   `help:"Filter by glob." default:""`
-	Tag      string   `help:"Filter by tag." default:""`
-	Set      string   `help:"Filter by named set (from config 'sets:')." default:""`
+	Repos    string   `help:"Filter by glob." default:"" predictor:"repo"`
+	Tag      string   `help:"Filter by tag." default:"" predictor:"tag"`
+	Set      string   `help:"Filter by named set (from config 'sets:')." default:"" predictor:"set"`
 	FailFast bool     `help:"Stop at the first repo whose command fails." default:"false" name:"fail-fast"`
 	Command  []string `arg:"" help:"Command to run in each repo directory (after --)."`
 }
@@ -287,9 +287,9 @@ type AdoptCmd struct {
 // RemoveCmd stops tracking repos.
 // Run method is in remaining_impl.go
 type RemoveCmd struct {
-	Pattern string `arg:"" optional:"" help:"Repo key glob to remove (or use --tag/--set)."`
-	Tag     string `help:"Remove repos with this tag." default:""`
-	Set     string `help:"Remove repos in this named set (from config 'sets:')." default:""`
+	Pattern string `arg:"" optional:"" help:"Repo key glob to remove (or use --tag/--set)." predictor:"repo"`
+	Tag     string `help:"Remove repos with this tag." default:"" predictor:"tag"`
+	Set     string `help:"Remove repos in this named set (from config 'sets:')." default:"" predictor:"set"`
 	Delete  bool   `help:"Also delete from disk." default:"false"`
 	Yes     bool   `help:"Skip confirmation." default:"false"`
 }
@@ -297,9 +297,9 @@ type RemoveCmd struct {
 // RemoteSyncCmd pushes backup refs to remotes.
 // Run method is in remaining_impl.go
 type RemoteSyncCmd struct {
-	Repos  string `help:"Filter by glob." default:""`
-	Tag    string `help:"Filter by tag." default:""`
-	Set    string `help:"Filter by named set (from config 'sets:')." default:""`
+	Repos  string `help:"Filter by glob." default:"" predictor:"repo"`
+	Tag    string `help:"Filter by tag." default:"" predictor:"tag"`
+	Set    string `help:"Filter by named set (from config 'sets:')." default:"" predictor:"set"`
 	DryRun bool   `help:"Show what would be pushed." default:"false" name:"dry-run"`
 }
 
