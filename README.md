@@ -61,13 +61,17 @@ git-mgr wg create scratch --source ~/code/app --count 4 --open --agent claude
 ```
 
 To **auto-discover** repos from a provider (the one thing that needs to know
-*what* to fetch), add one to config — `gh auth token` makes auth a one-liner:
+*what* to fetch): if you're logged into the `gh` CLI, `init` detects it and
+writes a ready GitHub provider + rule — so this is zero-edit:
 
 ```bash
-git-mgr init                 # starter config (uncomment a provider stub)
+git-mgr init                 # logged into gh? auto-configures GitHub. else: uncomment a stub
 git-mgr discover --apply     # clone everything the rules match
 git-mgr install-agent        # optional: periodic background sync
 ```
+
+`git-mgr bootstrap` runs all of that in one command (init → doctor → discover →
+sync → agent), so on a gh-authed machine it's a true one-liner.
 
 ## Commands
 
