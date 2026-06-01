@@ -245,10 +245,12 @@ func detectGitHubCLI(ctx *Context) (string, bool) {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return "", false
 	}
-	if exec.CommandContext(ctx.GoCtx(), "gh", "auth", "token").Run() != nil {
+	// Pin to github.com: a user whose gh default host is GitHub Enterprise would
+	// otherwise get a github.com provider pointed at the wrong account/host.
+	if exec.CommandContext(ctx.GoCtx(), "gh", "auth", "token", "--hostname", "github.com").Run() != nil {
 		return "", false
 	}
-	out, err := exec.CommandContext(ctx.GoCtx(), "gh", "api", "user", "--jq", ".login").Output()
+	out, err := exec.CommandContext(ctx.GoCtx(), "gh", "api", "user", "--hostname", "github.com", "--jq", ".login").Output()
 	if err != nil {
 		return "", false
 	}
