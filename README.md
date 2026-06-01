@@ -57,6 +57,7 @@ git-mgr status               # table of all managed repos
 | `git-mgr discover` | Discover repos from providers (dry-run; `--apply` to clone). `--rule`, `--tag` to scope. |
 | `git-mgr sync` | Fetch all repos + back up uncommitted changes (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`, `--push-branch`. |
 | `git-mgr backup` | Back up only (no fetch). `--list` to see backups, `--restore <id>` for instructions, `--push-branch` to also save WIP to a remote branch. |
+| `git-mgr restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` to clone+apply into a scratch dir, or `--apply` onto the tree (dirty-guarded). |
 | `git-mgr status` | Table of managed repos. `--live` inspects working trees now (dirty + ahead/behind, no network); `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
 | `git-mgr doctor` | Diagnose tooling, auth (tokens/SSH keys), config, and repo-on-disk health. `--fix` for safe repairs. |
 | `git-mgr clone <url>` | Clone and track a single repo by SSH URL. `--tag`, `--path`. |
