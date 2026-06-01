@@ -170,7 +170,16 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 		return nil
 	}
 
-	// Print full resolved config
+	// Print full resolved config (--redact blanks inline provider tokens so the
+	// output is safe to share / carry to another machine; token_env and
+	// token_command are references, not secrets, so they're kept).
+	if c.Redact {
+		for i := range cfg.Providers {
+			if cfg.Providers[i].Token != "" {
+				cfg.Providers[i].Token = "REDACTED"
+			}
+		}
+	}
 	out, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err

@@ -201,6 +201,28 @@ func timeAgo(t time.Time) string {
 	}
 }
 
+// ManifestCmd groups portable export/import of the tracked repo set.
+type ManifestCmd struct {
+	Export ManifestExportCmd `cmd:"" help:"Export tracked repos to a portable manifest (stdout or --out)."`
+	Import ManifestImportCmd `cmd:"" help:"Clone + track repos listed in a manifest (idempotent)."`
+}
+
+// ManifestExportCmd writes a portable manifest of tracked repos.
+// Run method is in manifest_impl.go
+type ManifestExportCmd struct {
+	Out   string `help:"Write to this file instead of stdout." default:""`
+	Repos string `help:"Filter by glob." default:""`
+	Tag   string `help:"Filter by tag." default:""`
+	Set   string `help:"Filter by named set." default:""`
+}
+
+// ManifestImportCmd clones + tracks repos from a manifest.
+// Run method is in manifest_impl.go
+type ManifestImportCmd struct {
+	File   string `arg:"" help:"Manifest file to import."`
+	DryRun bool   `help:"Show what would be cloned without doing it." default:"false" name:"dry-run"`
+}
+
 // RunCmd runs a command in each matching tracked repo.
 // Run method is in run_impl.go
 type RunCmd struct {
@@ -254,4 +276,5 @@ type ConfigCmd struct {
 	Validate bool   `help:"Validate config and exit." default:"false"`
 	ShowPath bool   `help:"Print config file path." default:"false" name:"path"`
 	ForRepo  string `help:"Show resolved config for a specific repo key." default:"" name:"for-repo"`
+	Redact   bool   `help:"When printing the full config, blank inline provider tokens." default:"false"`
 }

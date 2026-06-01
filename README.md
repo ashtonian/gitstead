@@ -60,7 +60,9 @@ git-mgr status               # table of all managed repos
 | `git-mgr doctor` | Diagnose tooling, auth (tokens/SSH keys), config, and repo-on-disk health. `--fix` for safe repairs. |
 | `git-mgr clone <url>` | Clone and track a single repo by SSH URL. `--tag`, `--path`. |
 | `git-mgr adopt <path>` | Import an existing clone. `--scan` for batch, `--dry-run`, `--tag`. |
-| `git-mgr remove <pattern>` | Stop tracking repos. `--delete` to also remove from disk, `--yes`. |
+| `git-mgr remove <pattern>` | Stop tracking repos. `--tag`/`--set`, `--delete` to also remove from disk, `--yes`. |
+| `git-mgr run -- <cmd>` | Run a command in each matching repo (parallel). `--repos`/`--tag`/`--set`, `--fail-fast`. |
+| `git-mgr manifest export\|import` | Portable `{url,tags,path}` manifest to rehydrate the repo set on a new machine. |
 | `git-mgr remote-sync` | Push backup refs to remotes. `--repos`, `--tag`, `--dry-run`. |
 | `git-mgr config` | Print resolved config. `--validate`, `--edit`, `--path`, `--for-repo <key>`. |
 | `git-mgr workgroup` (`wg`) | Manage workgroups: parallel worktrees or multi-repo bundles. `wg create` builds one from flags or config; `--save`, `--sync`, `open`, `ensure`, `check`. |
