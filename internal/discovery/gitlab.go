@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
@@ -36,6 +37,9 @@ func (g *GitLabProvider) Discover(ctx context.Context, rule config.DiscoveryRule
 	var repos []Repo
 	var err error
 	switch scope.Kind {
+	case ScopeQuery:
+		repos, err = g.search(ctx, scope.Value)
+		applied = allFiltersApplied()
 	case ScopeGroup:
 		repos, err = g.listByGroup(ctx, scope.Value, rule, applied)
 	case ScopeUser:
@@ -81,10 +85,10 @@ func commonProjectFilters(rule config.DiscoveryRule, applied FilterSet) (vis *gi
 		applied[FilterArchived] = true
 	}
 	if len(rule.Topics) > 0 {
-		topic = gitlab.Ptr(rule.Topics[0])
-		if len(rule.Topics) == 1 {
-			applied[FilterTopics] = true
-		}
+		// GitLab's topic param is a comma-separated AND list, so all requested
+		// topics can be pushed server-side.
+		topic = gitlab.Ptr(strings.Join(rule.Topics, ","))
+		applied[FilterTopics] = true
 	}
 	return vis, archived, topic
 }
@@ -125,8 +129,12 @@ func (g *GitLabProvider) listByUser(ctx context.Context, user string, rule confi
 		Archived:    archived,
 		Topic:       topic,
 	}
-	// Language for the user-projects endpoint is handled via enrichment to avoid
-	// relying on a server param that endpoint may not honor.
+	// /users/:user/projects honors with_programming_language; push a single
+	// requested language server-side (multiple need client-side any-match).
+	if len(rule.Languages) == 1 {
+		opts.WithProgrammingLanguage = gitlab.Ptr(rule.Languages[0])
+		applied[FilterLanguage] = true
+	}
 	var all []Repo
 	for {
 		projects, resp, err := g.client.Projects.ListUserProjects(user, opts, gitlab.WithContext(ctx))
@@ -205,21 +213,40 @@ func (g *GitLabProvider) toRepo(p *gitlab.Project) Repo {
 	}
 }
 
-// EnrichLanguages fills Repo.Languages via the per-project languages endpoint.
-func (g *GitLabProvider) EnrichLanguages(ctx context.Context, repos []Repo) error {
-	for i := range repos {
-		langs, _, err := g.client.Projects.GetProjectLanguages(repos[i].FullName, gitlab.WithContext(ctx))
+// search runs a raw GitLab project search across everything the token can see.
+func (g *GitLabProvider) search(ctx context.Context, query string) ([]Repo, error) {
+	var all []Repo
+	opts := &gitlab.SearchOptions{ListOptions: gitlab.ListOptions{PerPage: 100}}
+	for {
+		projects, resp, err := g.client.Search.Projects(query, opts, gitlab.WithContext(ctx))
 		if err != nil {
-			return fmt.Errorf("listing languages for %s: %w", repos[i].FullName, err)
+			return nil, fmt.Errorf("searching projects: %w", err)
 		}
-		ls := make([]string, 0, len(*langs))
-		for l := range *langs {
-			ls = append(ls, l)
+		for _, p := range projects {
+			all = append(all, g.toRepo(p))
 		}
-		repos[i].Languages = ls
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
 	}
-	return nil
+	return all, nil
+}
+
+// EnrichLanguages fills Repo.Languages via the per-project languages endpoint,
+// concurrently and best-effort.
+func (g *GitLabProvider) EnrichLanguages(ctx context.Context, repos []Repo, concurrency int) error {
+	return enrichConcurrent(ctx, repos, concurrency, func(ctx context.Context, r *Repo) error {
+		langs, _, err := g.client.Projects.GetProjectLanguages(r.FullName, gitlab.WithContext(ctx))
+		if err != nil {
+			return fmt.Errorf("listing languages: %w", err)
+		}
+		r.Languages = mapKeys(*langs)
+		return nil
+	})
 }
 
 // EnrichTopics is a no-op for GitLab; topics are returned inline.
-func (g *GitLabProvider) EnrichTopics(ctx context.Context, repos []Repo) error { return nil }
+func (g *GitLabProvider) EnrichTopics(ctx context.Context, repos []Repo, concurrency int) error {
+	return nil
+}

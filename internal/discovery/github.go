@@ -7,48 +7,44 @@ import (
 	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/google/go-github/v68/github"
-	"golang.org/x/oauth2"
+	"github.com/google/go-github/v88/github"
 )
 
-// ghCore is the shared go-github listing + mapping core used by both the GitHub
-// and Gitea/Forgejo providers, since Gitea exposes a GitHub-compatible REST API.
+// ghCore is the shared go-github listing + mapping core used by the GitHub
+// provider (and, via the legacy shim, GitHub-API-compatible servers).
 type ghCore struct {
 	name               string
 	client             *github.Client
 	host               string
-	inlineTopics       bool // GitHub returns topics inline; Gitea must enrich them
-	pushSelfVisibility bool // GitHub's authenticated endpoint honors ?visibility=; Gitea may not
+	inlineTopics       bool // GitHub returns topics inline
+	pushSelfVisibility bool // GitHub's authenticated endpoint honors ?visibility=
 }
 
-// newGHClient builds a go-github client for the given token and base URL.
-// A URL containing an API path (e.g. /api/v1/ for Gitea/Forgejo) sets BaseURL
-// directly; a bare host uses WithEnterpriseURLs (which appends /api/v3/).
+// newGHClient builds a go-github (v88) client for the given token and base URL.
+// A bare host (GHES) uses WithEnterpriseURLs (which appends /api/v3/); a URL that
+// already contains an API path is set as the base URL via WithURLs (the legacy
+// Gitea/Forgejo shim — new configs should use type: gitea). The client is built
+// on our retrying http.Client so GitHub/GHES get the rate-limit resilience the
+// GitLab SDK has built in; WithAuthToken layers Bearer auth over that transport.
 func newGHClient(token, rawURL string) (*github.Client, error) {
-	var client *github.Client
+	opts := []github.ClientOptionsFunc{github.WithHTTPClient(newRetryClient(nil))}
 	if token != "" {
-		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-		client = github.NewClient(oauth2.NewClient(context.Background(), ts))
-	} else {
-		client = github.NewClient(nil)
+		opts = append(opts, github.WithAuthToken(token))
 	}
-	if rawURL == "" {
-		return client, nil
-	}
-	if strings.Contains(rawURL, "/api/") {
-		u, err := url.Parse(rawURL)
-		if err != nil {
-			return nil, fmt.Errorf("parsing API URL: %w", err)
+	if rawURL != "" {
+		if strings.Contains(rawURL, "/api/") {
+			base := rawURL
+			if !strings.HasSuffix(base, "/") {
+				base += "/"
+			}
+			opts = append(opts, github.WithURLs(&base, &base))
+		} else {
+			opts = append(opts, github.WithEnterpriseURLs(rawURL, rawURL))
 		}
-		if !strings.HasSuffix(u.Path, "/") {
-			u.Path += "/"
-		}
-		client.BaseURL = u
-		return client, nil
 	}
-	client, err := client.WithEnterpriseURLs(rawURL, rawURL)
+	client, err := github.NewClient(opts...)
 	if err != nil {
-		return nil, fmt.Errorf("configuring enterprise URL: %w", err)
+		return nil, fmt.Errorf("creating github client: %w", err)
 	}
 	return client, nil
 }
@@ -65,29 +61,32 @@ func hostFromURL(rawURL, fallback string) string {
 }
 
 // discover lists repos for the rule's scope and maps them to Repo, reporting any
-// filters it applied server-side.
-func (c *ghCore) discover(ctx context.Context, rule config.DiscoveryRule) ([]Repo, FilterSet, error) {
+// filters it applied server-side plus any non-fatal warnings.
+func (c *ghCore) discover(ctx context.Context, rule config.DiscoveryRule) ([]Repo, FilterSet, []string, error) {
 	scope := ruleScope(rule)
-	ghRepos, applied, err := c.list(ctx, scope, rule)
+	ghRepos, applied, warnings, err := c.list(ctx, scope, rule)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	repos := make([]Repo, 0, len(ghRepos))
 	for _, r := range ghRepos {
 		repos = append(repos, c.toRepo(r))
 	}
-	return repos, applied, nil
+	return repos, applied, warnings, nil
 }
 
-func (c *ghCore) list(ctx context.Context, scope Scope, rule config.DiscoveryRule) ([]*github.Repository, FilterSet, error) {
+func (c *ghCore) list(ctx context.Context, scope Scope, rule config.DiscoveryRule) ([]*github.Repository, FilterSet, []string, error) {
 	applied := FilterSet{}
 	switch scope.Kind {
+	case ScopeQuery:
+		repos, warnings, err := c.searchRepos(ctx, scope.Value)
+		return repos, allFiltersApplied(), warnings, err
 	case ScopeOrg:
 		repos, err := c.listByOrg(ctx, scope.Value)
-		return repos, applied, err
+		return repos, applied, nil, err
 	case ScopeUser:
 		repos, err := c.listByUser(ctx, scope.Value)
-		return repos, applied, err
+		return repos, applied, nil, err
 	default: // ScopeSelf
 		// GitHub's authenticated-user endpoint supports a server-side visibility
 		// filter (all/public/private). Push it when the rule wants public or
@@ -98,8 +97,42 @@ func (c *ghCore) list(ctx context.Context, scope Scope, rule config.DiscoveryRul
 			applied[FilterVisibility] = true
 		}
 		repos, err := c.listAuthenticated(ctx, vis)
-		return repos, applied, err
+		return repos, applied, nil, err
 	}
+}
+
+// searchRepos runs a raw GitHub repository-search query. GitHub caps search
+// results at 1000 and stops paginating there; when the reported total exceeds
+// what we retrieved (or results are flagged incomplete), we return a warning.
+func (c *ghCore) searchRepos(ctx context.Context, query string) ([]*github.Repository, []string, error) {
+	var all []*github.Repository
+	opts := &github.SearchOptions{ListOptions: github.ListOptions{PerPage: 100}}
+	var total int
+	incomplete := false
+	for {
+		result, resp, err := c.client.Search.Repositories(ctx, query, opts)
+		if err != nil {
+			return nil, nil, fmt.Errorf("searching repos: %w", err)
+		}
+		all = append(all, result.Repositories...)
+		total = result.GetTotal()
+		if result.GetIncompleteResults() {
+			incomplete = true
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	var warnings []string
+	if total > len(all) {
+		warnings = append(warnings, fmt.Sprintf(
+			"GitHub search matched %d repos but the API caps results at %d; %d repos were not retrieved",
+			total, len(all), total-len(all)))
+	} else if incomplete {
+		warnings = append(warnings, "GitHub reported incomplete search results (query timed out); some repos may be missing")
+	}
+	return all, warnings, nil
 }
 
 func (c *ghCore) listByOrg(ctx context.Context, org string) ([]*github.Repository, error) {
@@ -190,32 +223,17 @@ func (c *ghCore) toRepo(r *github.Repository) Repo {
 	return repo
 }
 
-// enrichLanguages fills Repo.Languages from the per-repo languages endpoint.
-func (c *ghCore) enrichLanguages(ctx context.Context, repos []Repo) error {
-	for i := range repos {
-		langs, _, err := c.client.Repositories.ListLanguages(ctx, repos[i].Owner, repos[i].Name)
+// enrichLanguages fills Repo.Languages from the per-repo languages endpoint,
+// concurrently and best-effort (per-repo failures are joined, not fatal).
+func (c *ghCore) enrichLanguages(ctx context.Context, repos []Repo, concurrency int) error {
+	return enrichConcurrent(ctx, repos, concurrency, func(ctx context.Context, r *Repo) error {
+		langs, _, err := c.client.Repositories.ListLanguages(ctx, r.Owner, r.Name)
 		if err != nil {
-			return fmt.Errorf("listing languages for %s: %w", repos[i].FullName, err)
+			return fmt.Errorf("listing languages: %w", err)
 		}
-		ls := make([]string, 0, len(langs))
-		for l := range langs {
-			ls = append(ls, l)
-		}
-		repos[i].Languages = ls
-	}
-	return nil
-}
-
-// enrichTopics fills Repo.Topics from the per-repo topics endpoint.
-func (c *ghCore) enrichTopics(ctx context.Context, repos []Repo) error {
-	for i := range repos {
-		topics, _, err := c.client.Repositories.ListAllTopics(ctx, repos[i].Owner, repos[i].Name)
-		if err != nil {
-			return fmt.Errorf("listing topics for %s: %w", repos[i].FullName, err)
-		}
-		repos[i].Topics = topics
-	}
-	return nil
+		r.Languages = mapKeys(langs)
+		return nil
+	})
 }
 
 // GitHubProvider discovers repos from GitHub or GitHub Enterprise.
@@ -241,7 +259,7 @@ func NewGitHubProvider(cfg config.Provider) (*GitHubProvider, error) {
 func (g *GitHubProvider) Name() string { return g.core.name }
 
 func (g *GitHubProvider) Discover(ctx context.Context, rule config.DiscoveryRule) (ProviderResult, error) {
-	repos, applied, err := g.core.discover(ctx, rule)
+	repos, applied, warnings, err := g.core.discover(ctx, rule)
 	if err != nil {
 		return ProviderResult{}, err
 	}
@@ -249,12 +267,15 @@ func (g *GitHubProvider) Discover(ctx context.Context, rule config.DiscoveryRule
 		Repos:        repos,
 		Applied:      applied,
 		Capabilities: Capabilities{CanEnrichLanguages: true},
+		Warnings:     warnings,
 	}, nil
 }
 
-func (g *GitHubProvider) EnrichLanguages(ctx context.Context, repos []Repo) error {
-	return g.core.enrichLanguages(ctx, repos)
+func (g *GitHubProvider) EnrichLanguages(ctx context.Context, repos []Repo, concurrency int) error {
+	return g.core.enrichLanguages(ctx, repos, concurrency)
 }
 
 // EnrichTopics is a no-op for GitHub; topics are returned inline.
-func (g *GitHubProvider) EnrichTopics(ctx context.Context, repos []Repo) error { return nil }
+func (g *GitHubProvider) EnrichTopics(ctx context.Context, repos []Repo, concurrency int) error {
+	return nil
+}

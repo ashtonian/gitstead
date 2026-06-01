@@ -60,7 +60,7 @@ func (c *WGStatusCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	h := workgroup.ComputeHealth(context.Background(), spec)
+	h := workgroup.ComputeHealth(ctx.GoCtx(), spec)
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "MEMBER\tBRANCH\tSTATE\tUPSTREAM\tAHEAD/BEHIND\tNOTES")
@@ -90,7 +90,7 @@ func (c *WGCheckCmd) Run(ctx *Context) error {
 			return fmt.Errorf("no member %q in workgroup %q", c.Member, c.Name)
 		}
 	}
-	h := workgroup.ComputeHealth(context.Background(), spec)
+	h := workgroup.ComputeHealth(ctx.GoCtx(), spec)
 	for _, m := range h.Members {
 		if len(m.Issues) == 0 {
 			if !ctx.Quiet {
@@ -126,7 +126,7 @@ func (c *WGFetchCmd) Run(ctx *Context) error {
 		if src == "" && len(spec.Members) > 0 {
 			src = spec.Members[0].Path
 		}
-		if err := gitops.Fetch(context.Background(), src, ""); err != nil {
+		if err := gitops.Fetch(ctx.GoCtx(), src, ""); err != nil {
 			return fmt.Errorf("%s: fetch failed: %w", c.Name, err)
 		}
 		if !ctx.Quiet {
@@ -135,7 +135,7 @@ func (c *WGFetchCmd) Run(ctx *Context) error {
 		return nil
 	}
 	keyFor := wgSSHKeyFor(cfg, st)
-	results := workgroup.ForEach(context.Background(), spec, cfg.Concurrency,
+	results := workgroup.ForEach(ctx.GoCtx(), spec, cfg.Concurrency,
 		func(ctx context.Context, m workgroup.Member) (string, bool, error) {
 			return "", false, gitops.Fetch(ctx, m.Path, keyFor(m))
 		})
@@ -157,7 +157,7 @@ func (c *WGCommitCmd) Run(ctx *Context) error {
 			return fmt.Errorf("no member %q in workgroup %q", c.Member, c.Name)
 		}
 	}
-	results := workgroup.ForEach(context.Background(), spec, cfg.Concurrency,
+	results := workgroup.ForEach(ctx.GoCtx(), spec, cfg.Concurrency,
 		func(ctx context.Context, m workgroup.Member) (string, bool, error) {
 			committed, err := gitops.Commit(ctx, m.Path, c.Message, c.AddAll)
 			if err != nil {
@@ -181,7 +181,7 @@ func (c *WGPullCmd) Run(ctx *Context) error {
 		return err
 	}
 	keyFor := wgSSHKeyFor(cfg, st)
-	results := workgroup.ForEach(context.Background(), spec, cfg.Concurrency,
+	results := workgroup.ForEach(ctx.GoCtx(), spec, cfg.Concurrency,
 		func(ctx context.Context, m workgroup.Member) (string, bool, error) {
 			out, err := gitops.Pull(ctx, m.Path, keyFor(m), !c.Rebase, c.Rebase)
 			return lastLine(out), false, err
@@ -199,7 +199,7 @@ func (c *WGPushCmd) Run(ctx *Context) error {
 		return err
 	}
 	keyFor := wgSSHKeyFor(cfg, st)
-	results := workgroup.ForEach(context.Background(), spec, cfg.Concurrency,
+	results := workgroup.ForEach(ctx.GoCtx(), spec, cfg.Concurrency,
 		func(ctx context.Context, m workgroup.Member) (string, bool, error) {
 			out, err := gitops.Push(ctx, m.Path, keyFor(m), c.SetUpstream)
 			return lastLine(out), false, err
@@ -220,7 +220,7 @@ func (c *WGExecCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	results := workgroup.ForEach(context.Background(), spec, concurrency,
+	results := workgroup.ForEach(ctx.GoCtx(), spec, concurrency,
 		func(ctx context.Context, m workgroup.Member) (string, bool, error) {
 			cmd := exec.CommandContext(ctx, c.Command[0], c.Command[1:]...)
 			cmd.Dir = m.Path

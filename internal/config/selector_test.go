@@ -38,3 +38,29 @@ func TestNormalizeProviderType(t *testing.T) {
 		t.Errorf("github -> %q, want github", got)
 	}
 }
+
+func TestValidateQueryMutualExclusion(t *testing.T) {
+	cases := []struct {
+		name    string
+		rule    DiscoveryRule
+		wantErr bool
+	}{
+		{"query alone ok", DiscoveryRule{Name: "r", Provider: "p", Query: "stars:>1"}, false},
+		{"query + org", DiscoveryRule{Name: "r", Provider: "p", Query: "x", Org: "a"}, true},
+		{"query + user", DiscoveryRule{Name: "r", Provider: "p", Query: "x", User: "u"}, true},
+		{"query + group", DiscoveryRule{Name: "r", Provider: "p", Query: "x", Group: "g"}, true},
+		{"query + languages", DiscoveryRule{Name: "r", Provider: "p", Query: "x", Languages: []string{"Go"}}, true},
+		{"query + topics", DiscoveryRule{Name: "r", Provider: "p", Query: "x", Topics: []string{"t"}}, true},
+		{"query + visibility", DiscoveryRule{Name: "r", Provider: "p", Query: "x", Visibility: "public"}, true},
+		{"query + name_pattern", DiscoveryRule{Name: "r", Provider: "p", Query: "x", NamePattern: "^a"}, true},
+	}
+	for _, c := range cases {
+		cfg := Defaults()
+		cfg.Providers = []Provider{{Name: "p", Type: "github"}}
+		cfg.Discovery = []DiscoveryRule{c.rule}
+		err := Validate(cfg)
+		if (err != nil) != c.wantErr {
+			t.Errorf("%s: got err=%v, wantErr=%v", c.name, err, c.wantErr)
+		}
+	}
+}

@@ -8,7 +8,7 @@
 
 ## Goals
 
-1. **Discover** repos from multiple GitHub/GitLab instances based on configurable rules (user, org, group, language, topics, tags, etc.)
+1. **Discover** repos from multiple GitHub, GitLab, and Gitea/Forgejo instances based on configurable rules (user, org, group, language, topics, tags, etc.)
 2. **Clone** repos into a templated directory structure (e.g., `github.com/owner/repo`)
 3. **Sync** (fetch-only) all tracked repos periodically -- safe to run every 15 minutes via cron. Optionally auto-discovers new repos before fetching.
 4. **Backup** uncommitted changes transparently without interfering with any git operations in progress
@@ -110,7 +110,7 @@ $ git-mgr init
 Config file: ~/.config/git-mgr/config.yaml
 Base directory for repos [~/repos]: ~/projects
 Add a provider? (y/n): y
-  Provider type (github/gitlab): github
+  Provider type (github/gitlab/gitea/forgejo): github
   Instance name [github.com]: github.com
   API URL (leave empty for github.com): 
   Token command [gh auth token]: 
@@ -348,12 +348,12 @@ concurrency: 8
 # Provider Instances
 # ============================================================================
 
-# Named provider instances. Supports multiple GitHub and GitLab instances
-# (e.g., github.com + GitHub Enterprise + self-hosted GitLab).
+# Named provider instances. Supports multiple GitHub, GitLab, and Gitea/Forgejo instances
+# (e.g., github.com + GitHub Enterprise + self-hosted GitLab + Gitea).
 # Each discovery rule references a provider by name.
 providers:
   - name: "github.com"            # Unique name, referenced by discovery rules
-    type: "github"                # "github" or "gitlab"
+    type: "github"                # "github", "gitlab", "gitea", or "forgejo"
     # API URL. Leave empty for github.com / gitlab.com defaults.
     url: ""                       # e.g., "https://ghes.company.com" for GitHub Enterprise
     # Auth token. Resolved in order: token field > env var > token_command output.
@@ -400,11 +400,16 @@ discovery:
     user: ""                      # GitHub username (uses authenticated user if empty)
     org: ""                       # GitHub organization
 
+    # Raw provider search query. Mutually exclusive with user/org/group and the
+    # structured filters below; routed to the provider's native search API.
+    # GitHub caps search results at 1000 (discover warns when exceeded).
+    query: ""                     # e.g., "org:acme language:go stars:>50"
+
     # Filters (all optional, empty = no filter)
     include_forks: false
     include_archived: false
-    visibility: "all"             # "all", "public", "private"
-    languages: []                 # e.g., ["Go", "Rust"] -- matches repo primary language
+    visibility: "all"             # "all", "public", "private", "internal"
+    languages: []                 # e.g., ["Go", "Rust"] -- any of the repo's languages, case-insensitive
     topics: []                    # e.g., ["backend"] -- repo must have ALL listed topics
     name_pattern: ""              # Regex filter on repo name (e.g., "^api-")
 
@@ -850,7 +855,7 @@ type Provider interface {
 ```go
 // internal/discovery/github.go
 
-// Uses google/go-github/v68 (official Google-maintained SDK).
+// Uses google/go-github/v88 (official Google-maintained SDK).
 // Supports github.com and GitHub Enterprise (custom URL).
 // Token resolution: provider.Token > provider.TokenEnv env var > provider.TokenCommand output.
 
@@ -1238,7 +1243,8 @@ github.com/knadh/koanf/providers/env
 github.com/go-playground/validator/v10  # Struct validation
 
 # Provider APIs
-github.com/google/go-github/v68     # GitHub API (official, Google-maintained)
+github.com/google/go-github/v88     # GitHub API (official, Google-maintained)
+code.gitea.io/sdk/gitea             # Gitea/Forgejo API (official)
 gitlab.com/gitlab-org/api/client-go  # GitLab API (official, GitLab-maintained)
 golang.org/x/oauth2                  # Token-based HTTP auth
 

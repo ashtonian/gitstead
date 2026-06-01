@@ -256,9 +256,18 @@ func uninstallSystemd(dryRun bool) ([]string, error) {
 		return actions, nil
 	}
 	_ = exec.Command("systemctl", "--user", "disable", "--now", "git-mgr.timer").Run()
-	_ = os.Remove(timer)
-	_ = os.Remove(service)
-	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
+	// Removing the unit files is the part that actually matters: if they linger,
+	// systemd may reload the timer on next daemon-reload/boot. A "not found"
+	// error is the expected idempotent case; anything else is reported.
+	if err := os.Remove(timer); err != nil && !os.IsNotExist(err) {
+		return actions, fmt.Errorf("removing %s: %w", timer, err)
+	}
+	if err := os.Remove(service); err != nil && !os.IsNotExist(err) {
+		return actions, fmt.Errorf("removing %s: %w", service, err)
+	}
+	if out, err := exec.Command("systemctl", "--user", "daemon-reload").CombinedOutput(); err != nil {
+		return actions, fmt.Errorf("systemctl daemon-reload: %v: %s", err, strings.TrimSpace(string(out)))
+	}
 	return actions, nil
 }
 

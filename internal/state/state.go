@@ -47,6 +47,7 @@ type RepoState struct {
 	IsFork       bool     `yaml:"is_fork"`
 	IsArchived   bool     `yaml:"is_archived"`
 	Language     string   `yaml:"language"`
+	Languages    []string `yaml:"languages,omitempty"`
 	Topics       []string `yaml:"topics"`
 	Tags         []string `yaml:"tags"`
 	Description  string   `yaml:"description"`

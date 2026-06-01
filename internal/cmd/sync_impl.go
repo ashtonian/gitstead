@@ -57,7 +57,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		if !ctx.Quiet {
 			fmt.Println("Discovering repos (auto-discover enabled)...")
 		}
-		_, discovered, err := discovery.RunDiscovery(context.Background(), cfg, "", c.Tag)
+		results, discovered, err := discovery.RunDiscovery(ctx.GoCtx(), cfg, "", c.Tag)
 		if err != nil {
 			log.Warn("auto-discovery failed", "error", err)
 		} else {
@@ -75,7 +75,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 					}
 					destPath := filepath.Join(cfg.BaseDir, relPath)
 					sshKey := cfg.ResolveSSHKey(key, "")
-					if err := gitops.Clone(context.Background(), repo.SSHURL, destPath, sshKey); err != nil {
+					if err := gitops.Clone(ctx.GoCtx(), repo.SSHURL, destPath, sshKey); err != nil {
 						log.Warn("clone failed", "repo", key, "error", err)
 						continue
 					}
@@ -83,12 +83,19 @@ func (c *SyncCmd) Run(ctx *Context) error {
 				}
 			}
 
-			// Detect stale
-			discoveredKeys := make(map[string]bool)
-			for k := range discovered {
-				discoveredKeys[k] = true
+			// Detect stale — but only if every rule succeeded. On a partial
+			// failure the discovered set is incomplete, and marking the missing
+			// repos stale (or deleting them under remove_and_delete) would be
+			// destructive on a transient provider outage.
+			if discovery.AnyFailed(results) {
+				log.Warn("skipping stale detection: one or more discovery rules failed")
+			} else {
+				discoveredKeys := make(map[string]bool)
+				for k := range discovered {
+					discoveredKeys[k] = true
+				}
+				discovery.DetectStale(st, discoveredKeys, cfg.Cleanup)
 			}
-			discovery.DetectStale(st, discoveredKeys, cfg.Cleanup)
 		}
 	}
 
@@ -96,7 +103,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	result := &syncResult{}
 	sem := make(chan struct{}, cfg.Concurrency)
 	var mu sync.Mutex
-	g, gctx := errgroup.WithContext(context.Background())
+	g, gctx := errgroup.WithContext(ctx.GoCtx())
 
 	for key, repo := range st.Repos {
 		key, repo := key, repo

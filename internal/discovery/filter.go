@@ -17,7 +17,12 @@ import (
 func FilterRepos(repos []Repo, rule config.DiscoveryRule, excludes []config.ExcludeRule, applied FilterSet) []Repo {
 	var nameRe *regexp.Regexp
 	if rule.NamePattern != "" && !applied.Has(FilterName) {
-		nameRe = regexp.MustCompile(rule.NamePattern) // validated at config load
+		// Compile defensively: RunDiscovery can be driven with rules that never
+		// went through config.Validate (e.g. tests), so a bad pattern must not
+		// panic — an invalid regex simply applies no name filter.
+		if re, err := regexp.Compile(rule.NamePattern); err == nil {
+			nameRe = re
+		}
 	}
 
 	var result []Repo

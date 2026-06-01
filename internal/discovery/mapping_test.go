@@ -3,7 +3,7 @@ package discovery
 import (
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v88/github"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 

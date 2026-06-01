@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -73,7 +72,7 @@ func (c *WGCreateCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	statuses, err := workgroup.Ensure(context.Background(), spec, wgSSHKeyFor(cfg, st))
+	statuses, err := workgroup.Ensure(ctx.GoCtx(), spec, wgSSHKeyFor(cfg, st))
 	if err != nil {
 		return err
 	}
@@ -125,7 +124,7 @@ func (c *WGEnsureCmd) Run(ctx *Context) error {
 		if !ctx.Quiet {
 			fmt.Printf("%s:\n", name)
 		}
-		statuses, err := workgroup.Ensure(context.Background(), spec, wgSSHKeyFor(cfg, st))
+		statuses, err := workgroup.Ensure(ctx.GoCtx(), spec, wgSSHKeyFor(cfg, st))
 		if err != nil {
 			return err
 		}
@@ -247,7 +246,7 @@ func (c *WGRemoveCmd) Run(ctx *Context) error {
 		}
 	}
 
-	for _, a := range workgroup.Remove(context.Background(), spec, c.Delete) {
+	for _, a := range workgroup.Remove(ctx.GoCtx(), spec, c.Delete) {
 		fmt.Printf("  %s\n", a)
 	}
 	delete(st.Workgroups, c.Name)

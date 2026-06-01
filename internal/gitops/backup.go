@@ -37,12 +37,24 @@ func NewBackupConfig(opts ...BackupOption) BackupConfig {
 	return cfg
 }
 
+// WithStrategy sets the backup strategy ("stash-ref", "patch", or "both").
 func WithStrategy(s string) BackupOption { return func(c *BackupConfig) { c.Strategy = s } }
+
+// WithPatchDir sets the directory where patch-strategy backups are written.
 func WithPatchDir(d string) BackupOption { return func(c *BackupConfig) { c.PatchDir = d } }
-func WithMaxPerRepo(n int) BackupOption  { return func(c *BackupConfig) { c.MaxPerRepo = n } }
+
+// WithMaxPerRepo caps how many backups are retained per repo (0 = unlimited).
+func WithMaxPerRepo(n int) BackupOption { return func(c *BackupConfig) { c.MaxPerRepo = n } }
+
+// WithIncludeUntracked controls whether untracked files are included in patch backups.
 func WithIncludeUntracked(b bool) BackupOption {
 	return func(c *BackupConfig) { c.IncludeUntracked = b }
 }
+
+// backupRefPrefix is the ref namespace for transparent stash-ref backups. It is
+// deliberately outside refs/heads and refs/stash so it stays invisible to
+// git branch, git stash list, git log, and IDEs.
+const backupRefPrefix = "refs/git-mgr/backups/"
 
 // BackupMetadata stores context about a backup for restoration.
 type BackupMetadata struct {
@@ -111,7 +123,7 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 	if cfg.Strategy == "stash-ref" || cfg.Strategy == "both" {
 		stashOID, err := Git(ctx, repoPath, "stash", "create")
 		if err == nil && stashOID != "" {
-			refName := "refs/git-mgr/backups/" + timestamp
+			refName := backupRefPrefix + timestamp
 			if _, err := Git(ctx, repoPath, "update-ref", refName, stashOID); err != nil {
 				slog.Warn("failed to create backup ref", "repo", repoPath, "error", err)
 			} else {
@@ -133,6 +145,12 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 	if cfg.MaxPerRepo > 0 {
 		pruneRefs(ctx, repoPath, cfg.MaxPerRepo)
 		prunePatchDirs(repoPath, cfg)
+	}
+
+	// A dirty repo for which no strategy produced a backup is a silent
+	// data-loss risk: the caller would otherwise record it as backed up.
+	if result.IsDirty && result.RefName == "" && !result.HasPatch {
+		return result, fmt.Errorf("backup failed: no backup strategy succeeded for dirty repo %s", repoPath)
 	}
 
 	return result, nil
@@ -263,7 +281,7 @@ func createTar(ctx context.Context, repoPath, tarPath string, files []string) er
 
 // pruneRefs removes old backup refs, keeping only the most recent N.
 func pruneRefs(ctx context.Context, repoPath string, keep int) {
-	out, err := Git(ctx, repoPath, "for-each-ref", "--format=%(refname)", "refs/git-mgr/backups/")
+	out, err := Git(ctx, repoPath, "for-each-ref", "--format=%(refname)", backupRefPrefix)
 	if err != nil || out == "" {
 		return
 	}
@@ -307,7 +325,7 @@ func prunePatchDirs(repoPath string, cfg BackupConfig) {
 
 // ListBackupRefs lists all backup refs for a repo.
 func ListBackupRefs(ctx context.Context, repoPath string) ([]string, error) {
-	out, err := Git(ctx, repoPath, "for-each-ref", "--format=%(refname) %(objectname:short)", "refs/git-mgr/backups/")
+	out, err := Git(ctx, repoPath, "for-each-ref", "--format=%(refname) %(objectname:short)", backupRefPrefix)
 	if err != nil || out == "" {
 		return nil, err
 	}

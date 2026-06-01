@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,7 +37,7 @@ func (c *AdoptCmd) adoptSingle(ctx *Context, st *state.State, repoPath string) e
 		return fmt.Errorf("%s is not a git repository", absPath)
 	}
 
-	identity, err := gitops.ParseRemoteURL(context.Background(), absPath)
+	identity, err := gitops.ParseRemoteURL(ctx.GoCtx(), absPath)
 	if err != nil {
 		return fmt.Errorf("parsing remote URL: %w", err)
 	}
