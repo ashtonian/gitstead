@@ -31,6 +31,7 @@ type WorkgroupCmd struct {
 	Exec     WGExecCmd     `cmd:"" help:"Run a command in each member directory."`
 	Open     WGOpenCmd     `cmd:"" aliases:"tmux" help:"Open/attach a tmux session with one pane per member."`
 	Backup   WGBackupCmd   `cmd:"" help:"Back up every member's uncommitted work (agent WIP safety net)."`
+	Recover  WGRecoverCmd  `cmd:"" help:"Recover a member's backed-up WIP (print/--into/--apply)."`
 	Remove   WGRemoveCmd   `cmd:"" name:"rm" help:"Tear down a workgroup."`
 }
 

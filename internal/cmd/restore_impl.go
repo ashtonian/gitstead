@@ -13,9 +13,9 @@ import (
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
-// backupArtifacts is what a backup left behind for a repo+id: a stash ref and/or
-// patch files. The stash ref captures staged+unstaged tracked changes; the patch
-// set captures the same plus untracked files.
+// backupArtifacts is what a backup left behind for a working tree + id: a stash
+// ref and/or patch files. The stash ref captures staged+unstaged tracked
+// changes; the patch set captures the same plus untracked files.
 type backupArtifacts struct {
 	id        string
 	ref       string // refs/git-mgr/backups/<id>
@@ -29,11 +29,17 @@ func (a backupArtifacts) any() bool {
 	return a.hasRef || a.staged != "" || a.unstaged != "" || a.untracked != ""
 }
 
-// locateBackup finds the stash ref and patch files for a repo's backup id.
-func locateBackup(ctx *Context, repo *state.RepoState, repoCfg *config.Config, id string) backupArtifacts {
+// patchBaseFor returns the patch directory base for a working tree, mirroring
+// how createPatchBackup lays them out (<patch_dir>/<parent>/<repo>).
+func patchBaseFor(localPath, patchDir string) string {
+	return filepath.Join(patchDir, filepath.Base(filepath.Dir(localPath)), filepath.Base(localPath))
+}
+
+// locateBackup finds the stash ref and patch files for a working tree's backup.
+func locateBackup(ctx *Context, localPath, patchDir, id string) backupArtifacts {
 	a := backupArtifacts{id: id, ref: "refs/git-mgr/backups/" + id}
-	a.hasRef = gitops.GitExitCode(ctx.GoCtx(), repo.LocalPath, "rev-parse", "--verify", "--quiet", a.ref) == 0
-	pd := filepath.Join(repoCfg.Backup.PatchDir, filepath.Base(filepath.Dir(repo.LocalPath)), filepath.Base(repo.LocalPath), id)
+	a.hasRef = gitops.GitExitCode(ctx.GoCtx(), localPath, "rev-parse", "--verify", "--quiet", a.ref) == 0
+	pd := filepath.Join(patchBaseFor(localPath, patchDir), id)
 	if p := filepath.Join(pd, "staged.patch"); fileExists(p) {
 		a.staged = p
 	}
@@ -48,17 +54,15 @@ func locateBackup(ctx *Context, repo *state.RepoState, repoCfg *config.Config, i
 
 // latestBackupID returns the newest backup id (timestamps sort lexicographically)
 // across both stash refs and patch dirs, or "" if there are none.
-func latestBackupID(ctx *Context, repo *state.RepoState, repoCfg *config.Config) string {
+func latestBackupID(ctx *Context, localPath, patchDir string) string {
 	ids := map[string]bool{}
-	refs, _ := gitops.ListBackupRefs(ctx.GoCtx(), repo.LocalPath)
+	refs, _ := gitops.ListBackupRefs(ctx.GoCtx(), localPath)
 	for _, line := range refs {
-		fields := strings.Fields(line)
-		if len(fields) > 0 {
+		if fields := strings.Fields(line); len(fields) > 0 {
 			ids[filepath.Base(fields[0])] = true
 		}
 	}
-	patchBase := filepath.Join(repoCfg.Backup.PatchDir, filepath.Base(filepath.Dir(repo.LocalPath)), filepath.Base(repo.LocalPath))
-	if entries, err := os.ReadDir(patchBase); err == nil {
+	if entries, err := os.ReadDir(patchBaseFor(localPath, patchDir)); err == nil {
 		for _, e := range entries {
 			if e.IsDir() {
 				ids[e.Name()] = true
@@ -78,8 +82,8 @@ func latestBackupID(ctx *Context, repo *state.RepoState, repoCfg *config.Config)
 
 // printRestoreSteps prints the exact commands to recover a backup by hand --
 // only the steps whose artifacts actually exist.
-func printRestoreSteps(localPath, key string, a backupArtifacts) {
-	fmt.Printf("To restore backup %s for %s (apply onto a clean tree):\n", a.id, key)
+func printRestoreSteps(localPath, label string, a backupArtifacts) {
+	fmt.Printf("To restore backup %s for %s (apply onto a clean tree):\n", a.id, label)
 	fmt.Printf("  cd %s\n", localPath)
 	if a.hasRef {
 		fmt.Printf("  git stash apply %s\n", a.ref)
@@ -110,25 +114,24 @@ func (c *RestoreCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	repoCfg := cfg.ResolveForRepo(key)
+	patchDir := cfg.ResolveForRepo(key).Backup.PatchDir
 
 	id := c.ID
 	if id == "" || id == "latest" {
-		id = latestBackupID(ctx, repo, repoCfg)
-		if id == "" {
+		if id = latestBackupID(ctx, repo.LocalPath, patchDir); id == "" {
 			return fmt.Errorf("no backups found for %s", key)
 		}
 	}
-	a := locateBackup(ctx, repo, repoCfg, id)
+	a := locateBackup(ctx, repo.LocalPath, patchDir, id)
 	if !a.any() {
 		return fmt.Errorf("no backup %q found for %s", id, key)
 	}
 
 	switch {
 	case c.Into != "":
-		return c.restoreInto(ctx, key, repo, a)
+		return restoreBackupInto(ctx, repo.LocalPath, config.ExpandHome(c.Into), key, a)
 	case c.Apply:
-		return c.applyToWorkTree(ctx, key, repo, a)
+		return applyBackupToTree(ctx, repo.LocalPath, key, c.Force, a)
 	default:
 		printRestoreSteps(repo.LocalPath, key, a)
 		return nil
@@ -157,55 +160,52 @@ func resolveOneRepo(st *state.State, ref string) (string, *state.RepoState, erro
 	}
 }
 
-// restoreInto clones the repo into a scratch dir and applies the backup there,
-// for safe inspection without touching the original working tree.
-func (c *RestoreCmd) restoreInto(ctx *Context, key string, repo *state.RepoState, a backupArtifacts) error {
-	dest := config.ExpandHome(c.Into)
-	if entries, err := os.ReadDir(dest); err == nil && len(entries) > 0 {
-		return fmt.Errorf("--into target %s exists and is not empty", dest)
+// restoreBackupInto clones srcPath into a scratch dir and applies the backup
+// there, for safe inspection without touching the original working tree.
+func restoreBackupInto(ctx *Context, srcPath, into, label string, a backupArtifacts) error {
+	if entries, err := os.ReadDir(into); err == nil && len(entries) > 0 {
+		return fmt.Errorf("--into target %s exists and is not empty", into)
 	}
-	if _, err := gitops.GitClone(ctx.GoCtx(), repo.LocalPath, dest, ""); err != nil {
-		return fmt.Errorf("cloning into %s: %w", dest, err)
+	if _, err := gitops.GitClone(ctx.GoCtx(), srcPath, into, ""); err != nil {
+		return fmt.Errorf("cloning into %s: %w", into, err)
 	}
 	if a.hasRef {
 		// The stash commit lives in the source object store; fetch it, then apply.
-		if _, err := gitops.Git(ctx.GoCtx(), dest, "fetch", repo.LocalPath, a.ref); err != nil {
+		if _, err := gitops.Git(ctx.GoCtx(), into, "fetch", srcPath, a.ref); err != nil {
 			return fmt.Errorf("fetching backup ref: %w", err)
 		}
-		if _, err := gitops.Git(ctx.GoCtx(), dest, "stash", "apply", "FETCH_HEAD"); err != nil {
+		if _, err := gitops.Git(ctx.GoCtx(), into, "stash", "apply", "FETCH_HEAD"); err != nil {
 			return fmt.Errorf("applying stash: %w", err)
 		}
-	} else {
-		if err := applyPatches(ctx, dest, a); err != nil {
-			return err
-		}
-	}
-	if a.untracked != "" {
-		_ = untar(ctx, a.untracked, dest)
-	}
-	fmt.Printf("Restored backup %s of %s into %s (for inspection).\n", a.id, key, dest)
-	return nil
-}
-
-// applyToWorkTree applies the backup onto the repo's own working tree, refusing
-// a dirty tree without --force (so it never silently clobbers current work).
-func (c *RestoreCmd) applyToWorkTree(ctx *Context, key string, repo *state.RepoState, a backupArtifacts) error {
-	if !c.Force {
-		if rs, err := gitops.GetStatus(ctx.GoCtx(), repo.LocalPath); err == nil && rs.StatusString() != "clean" {
-			return fmt.Errorf("%s has uncommitted changes; commit/stash them or pass --force", key)
-		}
-	}
-	if a.hasRef {
-		if _, err := gitops.Git(ctx.GoCtx(), repo.LocalPath, "stash", "apply", a.ref); err != nil {
-			return fmt.Errorf("applying stash: %w", err)
-		}
-	} else if err := applyPatches(ctx, repo.LocalPath, a); err != nil {
+	} else if err := applyPatches(ctx, into, a); err != nil {
 		return err
 	}
 	if a.untracked != "" {
-		_ = untar(ctx, a.untracked, repo.LocalPath)
+		_ = untar(ctx, a.untracked, into)
 	}
-	fmt.Printf("Applied backup %s onto %s.\n", a.id, key)
+	fmt.Printf("Restored backup %s of %s into %s (for inspection).\n", a.id, label, into)
+	return nil
+}
+
+// applyBackupToTree applies the backup onto a working tree, refusing a dirty tree
+// without force (so it never silently clobbers current work).
+func applyBackupToTree(ctx *Context, localPath, label string, force bool, a backupArtifacts) error {
+	if !force {
+		if rs, err := gitops.GetStatus(ctx.GoCtx(), localPath); err == nil && rs.StatusString() != "clean" {
+			return fmt.Errorf("%s has uncommitted changes; commit/stash them or pass --force", label)
+		}
+	}
+	if a.hasRef {
+		if _, err := gitops.Git(ctx.GoCtx(), localPath, "stash", "apply", a.ref); err != nil {
+			return fmt.Errorf("applying stash: %w", err)
+		}
+	} else if err := applyPatches(ctx, localPath, a); err != nil {
+		return err
+	}
+	if a.untracked != "" {
+		_ = untar(ctx, a.untracked, localPath)
+	}
+	fmt.Printf("Applied backup %s onto %s.\n", a.id, label)
 	return nil
 }
 
@@ -224,6 +224,5 @@ func applyPatches(ctx *Context, dir string, a backupArtifacts) error {
 }
 
 func untar(ctx *Context, tarPath, dir string) error {
-	cmd := exec.CommandContext(ctx.GoCtx(), "tar", "-xzf", tarPath, "-C", dir)
-	return cmd.Run()
+	return exec.CommandContext(ctx.GoCtx(), "tar", "-xzf", tarPath, "-C", dir).Run()
 }
