@@ -81,7 +81,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 					}
 					destPath := filepath.Join(cfg.BaseDir, relPath)
 					sshKey := cfg.ResolveSSHKey(key, "")
-					cloneURL, cloneKey := cloneTarget(repo, repoCfg.CloneProtocol, sshKey)
+					cloneURL, cloneKey := cloneTarget(repo, cfg.CloneProtocolFor(key, repo.DiscoveredBy), sshKey)
 					if err := gitops.Clone(ctx.GoCtx(), cloneURL, destPath, cloneKey); err != nil {
 						log.Warn("clone failed", "repo", key, "error", err)
 						continue

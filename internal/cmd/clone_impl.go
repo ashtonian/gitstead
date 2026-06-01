@@ -50,11 +50,12 @@ func (c *CloneCmd) Run(ctx *Context) error {
 		destPath = filepath.Join(cfg.BaseDir, relPath)
 	}
 
-	// Honor the transport the user gave: an https URL clones over https (auth via
-	// git's credential helper), otherwise SSH with the resolved key.
-	cloneURL, cloneKey := identity.SSHURL, cfg.ResolveSSHKey(key, "")
-	if isHTTPURL(c.URL) {
-		cloneURL, cloneKey = c.URL, ""
+	// Clone exactly the URL the user gave (preserving scheme/port), and use an SSH
+	// key only for SSH transports -- https auth flows through git's credential
+	// helper.
+	cloneURL, cloneKey := c.URL, ""
+	if !isHTTPURL(c.URL) {
+		cloneKey = cfg.ResolveSSHKey(key, "")
 	}
 
 	fmt.Printf("Cloning %s ...\n", key)

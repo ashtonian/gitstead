@@ -40,10 +40,13 @@ type Provider struct {
 	Name         string `koanf:"name"          yaml:"name"                    validate:"required"`
 	Type         string `koanf:"type"          yaml:"type"                    validate:"required,oneof=github gitlab gitea forgejo"`
 	URL          string `koanf:"url"           yaml:"url,omitempty"`
-	Token        string `koanf:"token"         yaml:"token,omitempty"         sensitive:"true"`
-	TokenEnv     string `koanf:"token_env"     yaml:"token_env,omitempty"`
-	TokenCommand string `koanf:"token_command" yaml:"token_command,omitempty"`
-	SSHKey       string `koanf:"ssh_key"       yaml:"ssh_key,omitempty"`
+	Token        string `koanf:"token"          yaml:"token,omitempty"          sensitive:"true"`
+	TokenEnv     string `koanf:"token_env"      yaml:"token_env,omitempty"`
+	TokenCommand string `koanf:"token_command"  yaml:"token_command,omitempty"`
+	SSHKey       string `koanf:"ssh_key"        yaml:"ssh_key,omitempty"`
+	// CloneProtocol sets the transport for repos discovered from this provider
+	// ("ssh" or "https"); empty falls back to the top-level clone_protocol.
+	CloneProtocol string `koanf:"clone_protocol" yaml:"clone_protocol,omitempty" validate:"omitempty,oneof=ssh https"`
 }
 
 // DiscoveryRule defines how to find repos from a provider.

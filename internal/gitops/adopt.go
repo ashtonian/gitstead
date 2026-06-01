@@ -13,7 +13,8 @@ type RepoIdentity struct {
 	Owner    string // "ashtonian"
 	Name     string // "git-mgr"
 	FullName string // "ashtonian/git-mgr"
-	SSHURL   string // "git@github.com:ashtonian/git-mgr.git"
+	SSHURL   string // canonical "git@github.com:ashtonian/git-mgr.git"
+	URL      string // the original input URL, verbatim (preserves scheme/port)
 }
 
 // ParseRemoteURL parses a repo's origin remote URL into identity components.
@@ -38,6 +39,15 @@ func ParseRemoteURL(ctx context.Context, repoPath string) (*RepoIdentity, error)
 // Name is the repo dir — enough to form a stable tracking key.
 func ParseURL(rawURL string) (*RepoIdentity, error) {
 	rawURL = strings.TrimSpace(rawURL)
+	id, err := parseURLInner(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	id.URL = rawURL // preserve exactly what was given (scheme, port, host form)
+	return id, nil
+}
+
+func parseURLInner(rawURL string) (*RepoIdentity, error) {
 	if rawURL == "" {
 		return nil, fmt.Errorf("empty remote URL")
 	}

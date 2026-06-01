@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/git-mgr/internal/gitops"
 )
 
 // ProviderForConfig creates the right Provider for a given provider config.
@@ -219,21 +221,29 @@ func applyFilters(ctx context.Context, provider Provider, res ProviderResult, ru
 	return repos, warnings
 }
 
-// parseManualRepo converts a ManualRepo config entry into a Repo.
+// parseManualRepo converts a ManualRepo config entry into a Repo. It accepts any
+// URL form git does (ssh, scp, https, git://, local) via gitops.ParseURL and
+// records it under the matching transport, so a `repos:` entry given as https is
+// cloned over https -- the URL's scheme decides, no clone_protocol needed.
 func parseManualRepo(mr config.ManualRepo) (*Repo, error) {
-	parts := parseGitURL(mr.URL)
-	if parts == nil {
-		return nil, fmt.Errorf("unsupported URL format (expected git@host:owner/repo.git or ssh://git@host[:port]/owner/repo.git): %s", mr.URL)
+	id, err := gitops.ParseURL(mr.URL)
+	if err != nil {
+		return nil, fmt.Errorf("%q: %w", mr.URL, err)
 	}
-	return &Repo{
-		Host:         parts.host,
-		Owner:        parts.owner,
-		Name:         parts.name,
-		FullName:     parts.owner + "/" + parts.name,
-		SSHURL:       mr.URL,
+	r := &Repo{
+		Host:         id.Host,
+		Owner:        id.Owner,
+		Name:         id.Name,
+		FullName:     id.FullName,
 		Tags:         mr.Tags,
 		DiscoveredBy: "_manual",
-	}, nil
+	}
+	if strings.HasPrefix(mr.URL, "http://") || strings.HasPrefix(mr.URL, "https://") {
+		r.HTTPURL = mr.URL
+	} else {
+		r.SSHURL = mr.URL
+	}
+	return r, nil
 }
 
 // mergeTags returns the de-duplicated union of two tag slices, preserving order.
