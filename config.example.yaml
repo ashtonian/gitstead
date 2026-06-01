@@ -310,6 +310,12 @@ log:
 # an existing entry), and --sync to also track its underlying repo(s) for sync.
 # Reconcile with `git-mgr wg ensure`; open a tmux layout with `git-mgr wg open`.
 
+# Named agent commands for `wg open --agent <name>` (and `wg create --agent`):
+# each pane runs the command, so one command spins up an isolated agent per member.
+agents: {}
+  # claude: "claude"
+  # aider:  "aider --no-auto-commits"
+
 # Parent directory for all workgroups (each lives at <workgroup_base_dir>/<name>).
 workgroup_base_dir: "~/workgroups"
 

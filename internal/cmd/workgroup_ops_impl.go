@@ -117,8 +117,9 @@ type WGCommitCmd struct {
 
 // WGPullCmd pulls every member.
 type WGPullCmd struct {
-	Name   string `arg:"" help:"Workgroup name."`
-	Rebase bool   `help:"Use --rebase instead of the default --ff-only."`
+	Name        string `arg:"" help:"Workgroup name."`
+	Rebase      bool   `help:"Use --rebase instead of the default --ff-only."`
+	BackupFirst bool   `help:"Back up dirty members before pulling." default:"true" name:"backup-first"`
 }
 
 // WGPushCmd pushes every member.
@@ -266,6 +267,9 @@ func (c *WGPullCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	if c.BackupFirst {
+		backupDirtyMembers(ctx, cfg, spec)
+	}
 	keyFor := wgSSHKeyFor(cfg, st)
 	results := workgroup.ForEach(ctx.GoCtx(), spec, cfg.Concurrency,
 		func(ctx context.Context, m workgroup.Member) (string, bool, error) {
@@ -273,6 +277,24 @@ func (c *WGPullCmd) Run(ctx *Context) error {
 			return lastLine(out), false, err
 		})
 	return reportOps(c.Name, "pulled", results, ctx.Quiet)
+}
+
+// backupDirtyMembers backs up every dirty/untracked member before a mutating
+// group op, so a bad pull never loses WIP. Best-effort per member.
+func backupDirtyMembers(ctx *Context, cfg *config.Config, spec *workgroup.Spec) {
+	bcfg := backupConfigFor(cfg, cfg.ResolveForRepo(""), "", "", false, "")
+	for _, m := range spec.Members {
+		if !gitops.HasGitDir(m.Path) {
+			continue
+		}
+		rs, err := gitops.GetStatus(ctx.GoCtx(), m.Path)
+		if err != nil || rs.StatusString() == "clean" {
+			continue
+		}
+		if br, _ := gitops.Backup(ctx.GoCtx(), m.Path, bcfg); br != nil && br.IsDirty && !ctx.Quiet {
+			fmt.Printf("  safety backup: %s (%s)\n", m.Name, br.RefName)
+		}
+	}
 }
 
 func (c *WGPushCmd) Run(ctx *Context) error {

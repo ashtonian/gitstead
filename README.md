@@ -309,11 +309,12 @@ and `wg backup` (plus the scheduled `sync`) keeps every member's WIP safe.
 
 | `wg` subcommand | Description |
 |---|---|
-| `create <name>` | Build from flags (one-off) or a config declaration. `--kind`, `--repo`, `--from-tag`, `--source`, `--count`, `--member`, `--base-ref`, `--save`, `--force`, `--sync`. |
+| `create <name>` | Build from flags (one-off) or config. `--kind`, `--repo`, `--from-tag`, `--from-set`, `--source`, `--count`, `--member`, `--save`, `--sync`, `--open`, `--cmd`/`--agent`. |
 | `ensure <name>` | Reconcile disk to the declared/created state (idempotent). |
-| `open <name>` | Build/attach a tmux session, one pane per member. `--cmd <command>` runs it in each pane (e.g. an agent); `--no-check`, `--print`, `--recreate`, `--no-attach`. |
+| `open <name>` | Build/attach a tmux session, one pane per member. `--cmd <command>` (or `--agent <name>` from config) runs it per pane; `--no-check`, `--print`, `--recreate`, `--no-attach`. |
 | `check <name>` | Assert health; non-zero exit on drift. |
-| `backup <name>` | Back up every member's uncommitted work (`--push-branch`). |
+| `backup <name>` / `recover <name>` | Back up / restore each member's WIP (`--push-branch`; `recover --into`/`--apply`). |
+| `prune <name>` | Reap members with no unique work (clean + merged); never touches dirty WIP. `--dry-run`, `--all`. |
 | `ls` / `status <name>` | List workgroups / show member status (`--json`). |
 | `overview` | Member health across all workgroups — the fleet supervisor view (`--json`). |
 | `rm <name>` | Tear down (backs up dirty members first unless `--force`). |

@@ -45,6 +45,7 @@ type WGCreateCmd struct {
 	Kind    string   `help:"Kind: clone (independent repos, the default) or worktree (shared source)." enum:"clone,worktree" default:"clone"`
 	Repo    []string `help:"Clone member: a repo URL or tracked key; repeatable. With --count, N clones of a single repo."`
 	FromTag string   `help:"Clone members from tracked repos carrying this tag." name:"from-tag"`
+	FromSet string   `help:"Clone members from tracked repos in this named set." name:"from-set"`
 	Source  string   `help:"Worktree source repo (tracked key or local path); implies --kind worktree."`
 	Count   int      `help:"Number of members to create, named agent-1..N."`
 	Member  []string `help:"Explicit member; repeatable. worktree: name[:branch]. clone: a repo URL/key. Overrides --count."`
@@ -54,13 +55,14 @@ type WGCreateCmd struct {
 	Force   bool     `help:"With --save, overwrite an existing config workgroup of the same name."`
 	Open    bool     `help:"After creating, open a tmux session with one pane per member."`
 	Cmd     string   `help:"With --open, run this command in each pane (e.g. 'claude')."`
+	Agent   string   `help:"With --open, run the named agent command from config 'agents:'."`
 	NoCheck bool     `name:"no-check" help:"With --open, skip the per-pane 'wg check'."`
 }
 
 // synthesized reports whether any workgroup-defining flag was given (vs. the
 // legacy config-lookup path). --kind alone (it has a default) does not count.
 func (c *WGCreateCmd) synthesized() bool {
-	return c.Source != "" || c.Count > 0 || len(c.Member) > 0 || c.FromTag != "" || len(c.Repo) > 0
+	return c.Source != "" || c.Count > 0 || len(c.Member) > 0 || c.FromTag != "" || len(c.Repo) > 0 || c.FromSet != ""
 }
 
 // toWorkgroup builds a config.Workgroup from the CLI flags. Clone is the default
@@ -240,7 +242,7 @@ func (c *WGCreateCmd) Run(ctx *Context) error {
 		return err
 	}
 	if c.Open {
-		open := &WGOpenCmd{Name: c.Name, Cmd: c.Cmd, NoCheck: c.NoCheck}
+		open := &WGOpenCmd{Name: c.Name, Cmd: c.Cmd, Agent: c.Agent, NoCheck: c.NoCheck}
 		return open.Run(ctx)
 	}
 	return nil
@@ -256,6 +258,19 @@ func (c *WGCreateCmd) materialize(ctx *Context) error {
 		return err
 	}
 	defer unlock()
+
+	// --from-set expands to clone members from a named set's tracked repos.
+	if c.FromSet != "" {
+		keys, serr := selectRepos(cfg, st, selection{set: c.FromSet})
+		if serr != nil {
+			return serr
+		}
+		if len(keys) == 0 {
+			return fmt.Errorf("set %q matched no tracked repos", c.FromSet)
+		}
+		c.Repo = append(c.Repo, keys...)
+	}
+
 	// A workgroup already materialized in state can't be re-created -- but with
 	// --save the intent may be to (re)persist its declaration to config, which is
 	// still useful, so allow that path through (Ensure is idempotent).
