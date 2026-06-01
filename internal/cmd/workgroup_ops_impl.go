@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/state"
 	"github.com/ashtonian/git-mgr/internal/workgroup"
@@ -19,6 +20,80 @@ import (
 type WGStatusCmd struct {
 	Name string `arg:"" help:"Workgroup name."`
 	JSON bool   `help:"Output JSON."`
+}
+
+// WGRecoverCmd recovers a member's backed-up WIP, reusing the restore machinery.
+type WGRecoverCmd struct {
+	Name   string `arg:"" help:"Workgroup name."`
+	Member string `help:"Only recover this member." default:""`
+	Into   string `help:"Clone + apply into this scratch dir (requires --member)." default:""`
+	Apply  bool   `help:"Apply the backup onto the member's worktree (refuses dirty without --force)."`
+	Force  bool   `help:"With --apply, apply onto a dirty worktree."`
+}
+
+func (c *WGRecoverCmd) Run(ctx *Context) error {
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return err
+	}
+	spec, _, err := operationalSpec(ctx, c.Name)
+	if err != nil {
+		return err
+	}
+	patchDir := cfg.ResolveForRepo("").Backup.PatchDir
+
+	members := spec.Members
+	if c.Member != "" {
+		members = nil
+		for _, m := range spec.Members {
+			if m.Name == c.Member {
+				members = append(members, m)
+			}
+		}
+		if len(members) == 0 {
+			return fmt.Errorf("no member %q in workgroup %q", c.Member, c.Name)
+		}
+	}
+	if c.Into != "" && len(members) != 1 {
+		return fmt.Errorf("--into requires a single member (use --member)")
+	}
+
+	found := 0
+	for _, m := range members {
+		label := c.Name + "/" + m.Name
+		if !gitops.HasGitDir(m.Path) {
+			fmt.Printf("  %s: not present (run 'wg ensure %s' to recreate, then recover)\n", m.Name, c.Name)
+			continue
+		}
+		id := latestBackupID(ctx, m.Path, patchDir)
+		if id == "" {
+			fmt.Printf("  %s: no local backup found\n", m.Name)
+			continue
+		}
+		a := locateBackup(ctx, m.Path, patchDir, id)
+		if !a.any() {
+			fmt.Printf("  %s: no backup\n", m.Name)
+			continue
+		}
+		found++
+		switch {
+		case c.Into != "":
+			if err := restoreBackupInto(ctx, m.Path, config.ExpandHome(c.Into), label, a); err != nil {
+				return err
+			}
+		case c.Apply:
+			if err := applyBackupToTree(ctx, m.Path, label, c.Force, a); err != nil {
+				fmt.Printf("  %s: %v\n", m.Name, err)
+			}
+		default:
+			printRestoreSteps(m.Path, label, a)
+		}
+	}
+	if found == 0 {
+		fmt.Println("No local backups found. WIP pushed via --push-branch is on the remote:")
+		fmt.Println("  git -C <member> fetch <remote> git-mgr/wip/<branch> && git -C <member> stash apply FETCH_HEAD")
+	}
+	return nil
 }
 
 // WGCheckCmd asserts a workgroup is set up and in sync.

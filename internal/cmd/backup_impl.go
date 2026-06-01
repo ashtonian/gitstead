@@ -141,7 +141,7 @@ func (c *BackupCmd) runRestore(ctx *Context, cfg *config.Config, st *state.State
 		if !pass(key, repo) || !repo.Cloned {
 			continue
 		}
-		a := locateBackup(ctx, repo, cfg.ResolveForRepo(key), id)
+		a := locateBackup(ctx, repo.LocalPath, cfg.ResolveForRepo(key).Backup.PatchDir, id)
 		if !a.any() {
 			continue
 		}
