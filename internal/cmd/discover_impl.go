@@ -79,9 +79,19 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 		for k := range discovered {
 			discoveredKeys[k] = true
 		}
-		staleCount := discovery.DetectStale(st, discoveredKeys, cfg.Cleanup)
-		if staleCount > 0 {
-			fmt.Printf("\n%d newly stale repos\n", staleCount)
+		outcome := discovery.DetectStale(st, discoveredKeys, cfg.Cleanup, c.Apply)
+		if outcome.NewlyStale > 0 {
+			fmt.Printf("\n%d newly stale repos\n", outcome.NewlyStale)
+		}
+		if !c.Apply && outcome.Reapable > 0 {
+			fmt.Printf("%d stale repos are past the grace period; run with --apply to apply cleanup policy %q\n",
+				outcome.Reapable, cfg.Cleanup.Policy)
+		}
+		if c.Apply && outcome.Reaped > 0 {
+			fmt.Printf("cleaned up %d stale repos (policy %q)\n", outcome.Reaped, cfg.Cleanup.Policy)
+		}
+		if c.Apply && outcome.Failed > 0 {
+			fmt.Printf("warning: %d stale repos could not be deleted (left tracked)\n", outcome.Failed)
 		}
 	}
 

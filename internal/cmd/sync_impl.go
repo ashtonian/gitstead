@@ -102,7 +102,13 @@ func (c *SyncCmd) Run(ctx *Context) error {
 				for k := range discovered {
 					discoveredKeys[k] = true
 				}
-				discovery.DetectStale(st, discoveredKeys, cfg.Cleanup)
+				outcome := discovery.DetectStale(st, discoveredKeys, cfg.Cleanup, true)
+				if outcome.Reaped > 0 {
+					log.Info("cleaned up stale repos", "count", outcome.Reaped, "policy", cfg.Cleanup.Policy)
+				}
+				if outcome.Failed > 0 {
+					log.Warn("some stale repos could not be deleted", "count", outcome.Failed)
+				}
 			}
 		}
 	}
