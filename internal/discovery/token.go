@@ -8,6 +8,13 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 )
 
+// ResolveToken reports the token git-mgr would use for a provider's API
+// (explicit value, env var, or token_command output), or "" if none resolves.
+// Exported for diagnostics (git-mgr doctor).
+func ResolveToken(cfg config.Provider) string {
+	return resolveToken(cfg)
+}
+
 // resolveToken resolves a provider token from, in order of precedence:
 // the explicit value, the configured env var, any of the given default env
 // vars, then the output of token_command. Returns "" if none yield a token.

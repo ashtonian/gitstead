@@ -57,6 +57,7 @@ git-mgr status               # table of all managed repos
 | `git-mgr sync` | Fetch all repos + back up uncommitted changes (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`, `--push-branch`. |
 | `git-mgr backup` | Back up only (no fetch). `--list` to see backups, `--restore <id>` for instructions, `--push-branch` to also save WIP to a remote branch. |
 | `git-mgr status` | Table of managed repos. `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
+| `git-mgr doctor` | Diagnose tooling, auth (tokens/SSH keys), config, and repo-on-disk health. `--fix` for safe repairs. |
 | `git-mgr clone <url>` | Clone and track a single repo by SSH URL. `--tag`, `--path`. |
 | `git-mgr adopt <path>` | Import an existing clone. `--scan` for batch, `--dry-run`, `--tag`. |
 | `git-mgr remove <pattern>` | Stop tracking repos. `--delete` to also remove from disk, `--yes`. |
