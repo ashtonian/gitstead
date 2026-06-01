@@ -110,7 +110,7 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 				continue
 			}
 
-			destPath := filepath.Join(cfg.BaseDir, relPath)
+			destPath := filepath.Join(repoCfg.BaseDir, relPath)
 			sshKey := cfg.ResolveSSHKey(repo.Key(), "")
 			cloneURL, cloneKey := cloneTarget(repo, cfg.CloneProtocolFor(repo.Key(), repo.DiscoveredBy), sshKey)
 

@@ -33,6 +33,9 @@ func (c *Config) ResolveForRepo(repoKey string) *Config {
 		if !matchesOverride(repoKey, o.Repos) {
 			continue
 		}
+		if o.BaseDir != "" {
+			resolved.BaseDir = ExpandHome(o.BaseDir)
+		}
 		if o.PathTemplate != "" {
 			resolved.PathTemplate = o.PathTemplate
 		}

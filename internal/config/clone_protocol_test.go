@@ -25,3 +25,16 @@ func TestCloneProtocolFor(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveForRepo_BaseDir(t *testing.T) {
+	cfg := &config.Config{
+		BaseDir:   "/repos",
+		Overrides: []config.Override{{Repos: []string{"github.com/work/*"}, BaseDir: "/work"}},
+	}
+	if got := cfg.ResolveForRepo("github.com/work/api").BaseDir; got != "/work" {
+		t.Errorf("override base_dir: got %q, want /work", got)
+	}
+	if got := cfg.ResolveForRepo("github.com/personal/x").BaseDir; got != "/repos" {
+		t.Errorf("default base_dir: got %q, want /repos", got)
+	}
+}

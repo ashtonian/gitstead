@@ -108,7 +108,7 @@ func (c *ManifestImportCmd) Run(ctx *Context) error {
 			skipped++
 			continue
 		}
-		dest := manifestDest(cfg, mr, id)
+		dest := manifestDest(cfg.ResolveForRepo(key), mr, id)
 
 		if c.DryRun {
 			fmt.Printf("  would clone %s -> %s\n", key, dest)
