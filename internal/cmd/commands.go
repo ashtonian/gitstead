@@ -14,7 +14,9 @@ import (
 
 // InitCmd creates a config file with sensible defaults.
 // Run method is in remaining_impl.go
-type InitCmd struct{}
+type InitCmd struct {
+	NoDetect bool `help:"Don't auto-detect a logged-in gh CLI to prefill a GitHub provider." default:"false" name:"no-detect"`
+}
 
 // DiscoverCmd discovers repos from configured providers.
 // Run method is in discover_impl.go

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
@@ -196,6 +197,19 @@ func (c *InitCmd) Run(ctx *Context) error {
 	}
 
 	cfg := config.Defaults()
+
+	// If the gh CLI is logged in, prefill a ready GitHub provider + discovery
+	// rule so `git-mgr discover --apply` works with zero editing -- the
+	// zero-setup path for the GitHub + gh majority.
+	detected := ""
+	if !c.NoDetect {
+		if user, ok := detectGitHubCLI(ctx); ok {
+			cfg.Providers = []config.Provider{{Name: "github.com", Type: "github", TokenCommand: "gh auth token"}}
+			cfg.Discovery = []config.DiscoveryRule{{Name: user, Provider: "github.com", User: user, Tags: []string{"personal"}}}
+			detected = user
+		}
+	}
+
 	out, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
@@ -215,8 +229,34 @@ func (c *InitCmd) Run(ctx *Context) error {
 	}
 
 	fmt.Printf("Config written to %s\n", path)
-	fmt.Println("Uncomment and edit the provider + discovery stubs, then run 'git-mgr discover'.")
+	if detected != "" {
+		fmt.Printf("Detected GitHub login %q via gh -- added a ready provider + discovery rule.\n", detected)
+		fmt.Println("Run 'git-mgr discover --apply' to clone your repos (or 'git-mgr bootstrap').")
+	} else {
+		fmt.Println("Uncomment and edit the provider + discovery stubs, then run 'git-mgr discover'.")
+	}
 	return nil
+}
+
+// detectGitHubCLI returns the logged-in GitHub user if the gh CLI is installed
+// and authenticated (so `gh auth token` works), else ("", false). Used by init
+// to prefill a ready GitHub provider.
+func detectGitHubCLI(ctx *Context) (string, bool) {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return "", false
+	}
+	if exec.CommandContext(ctx.GoCtx(), "gh", "auth", "token").Run() != nil {
+		return "", false
+	}
+	out, err := exec.CommandContext(ctx.GoCtx(), "gh", "api", "user", "--jq", ".login").Output()
+	if err != nil {
+		return "", false
+	}
+	login := strings.TrimSpace(string(out))
+	if login == "" {
+		return "", false
+	}
+	return login, true
 }
 
 // initExamples are commented-out config stubs appended by `init` so a fresh
