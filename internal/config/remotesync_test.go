@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -84,5 +86,36 @@ func TestValidate_RemoteSync(t *testing.T) {
 				t.Errorf("Validate() = %v, want %q", err, tt.err)
 			}
 		})
+	}
+}
+
+// A key that isn't a setting fails the load instead of silently falling back
+// to the default.
+func TestLoad_RejectsUnknownKeys(t *testing.T) {
+	tests := []struct {
+		yaml, err string
+	}{
+		{"sync:\n  timout_per_repo: 1m\n", `"sync.timout_per_repo" is not a setting (did you mean "timeout_per_repo"?)`},
+		{"remote_sync:\n  remote_name: backup\n", `"remote_sync.remote_name" is not a setting`},
+		{"accounts:\n  - name: work\n    ssh-key: ~/.ssh/id\n", `"accounts[0].ssh-key" is not a setting (did you mean "ssh_key"?)`},
+		{"agents:\n  claude: claude --resume\n", ""}, // a map takes any key
+		{"accounts:\n  - name: work\n    remote_sync:\n      wip: off\n", ""},
+	}
+	for _, tt := range tests {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(tt.yaml), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := config.Load(path)
+		if tt.err == "" && err != nil || tt.err != "" && (err == nil || !strings.Contains(err.Error(), tt.err)) {
+			t.Errorf("Load(%q) = %v, want %q", tt.yaml, err, tt.err)
+		}
+	}
+}
+
+// The annotated example documents only real settings.
+func TestLoad_Example(t *testing.T) {
+	if _, err := config.Load("../../config.example.yaml"); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -175,7 +175,9 @@ accounts:
 two repos with the same name can't both be placed and are reported as blocked. A path you choose with `--config` or `GIT_MGR_CONFIG`
 must exist and parse: a missing, unreadable or malformed file is an error rather
 than a silent fall back to defaults, which would otherwise run with no discovery
-rules and mark every discovered repo stale.
+rules and mark every discovered repo stale. A key that isn't a setting -- a typo,
+or one renamed since -- is an error too, with the closest setting suggested:
+`"sync.timout_per_repo" is not a setting (did you mean "timeout_per_repo"?)`.
 
 ### Providers
 
