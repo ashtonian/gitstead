@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"sort"
 
 	"github.com/ashtonian/git-mgr/internal/state"
@@ -55,6 +56,12 @@ func (c *WGPruneCmd) Run(ctx *Context) error {
 		names = []string{c.Name}
 	}
 
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return err
+	}
+	archiveDir := cfg.Backup.ArchiveDir
+
 	reaped := 0
 	for _, name := range names {
 		ws, ok := st.Workgroups[name]
@@ -65,9 +72,18 @@ func (c *WGPruneCmd) Run(ctx *Context) error {
 		spec := workgroup.FromState(ws)
 		var reap []workgroup.Member
 		for _, mh := range workgroup.ComputeHealth(ctx.GoCtx(), spec).Members {
-			if reapable(mh) {
-				reap = append(reap, mh.Member)
+			if !reapable(mh) {
+				continue
 			}
+			// Health is a summary; deletion needs the full inspection, and
+			// anything it cannot vouch for is kept.
+			if work, lost, werr := workgroup.UniqueWorkOf(ctx.GoCtx(), spec, mh.Member); werr != nil || lost {
+				if werr == nil {
+					fmt.Printf("  keeping %s/%s: %s\n", name, mh.Member.Name, work)
+				}
+				continue
+			}
+			reap = append(reap, mh.Member)
 		}
 		if len(reap) == 0 {
 			continue
@@ -91,15 +107,24 @@ func (c *WGPruneCmd) Run(ctx *Context) error {
 			}
 		}
 
-		sub := &workgroup.Spec{Name: spec.Name, Kind: spec.Kind, Root: spec.Root, Source: spec.Source, BaseRef: spec.BaseRef, Members: reap}
-		for _, a := range workgroup.Remove(ctx.GoCtx(), sub, true) {
-			fmt.Printf("  %s\n", a)
+		var removed []workgroup.Member
+		for _, m := range reap {
+			archived, rerr := workgroup.RemoveMember(ctx.GoCtx(), spec, m, archiveDir, false)
+			if rerr != nil {
+				fmt.Fprintf(os.Stderr, "  %s/%s: kept: %v\n", name, m.Name, rerr)
+				continue
+			}
+			if archived != "" {
+				fmt.Printf("  %s/%s: archived to %s\n", name, m.Name, archived)
+			}
+			removed = append(removed, m)
 		}
-		ws.Members = dropMembers(ws.Members, reap)
+		ws.Members = dropMembers(ws.Members, removed)
 		if len(ws.Members) == 0 {
-			delete(st.Workgroups, name) // nothing left -- drop the empty workgroup
+			workgroup.RemoveEmptyRoot(spec)
+			delete(st.Workgroups, name)
 		}
-		reaped += len(reap)
+		reaped += len(removed)
 	}
 
 	if !c.DryRun && reaped > 0 {

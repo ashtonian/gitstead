@@ -171,6 +171,11 @@ func expandPaths(cfg *Config) {
 	} else {
 		cfg.Backup.PatchDir = ExpandHome(cfg.Backup.PatchDir)
 	}
+	if cfg.Backup.ArchiveDir == "" {
+		cfg.Backup.ArchiveDir = ExpandHome("~/.local/share/git-mgr/archive")
+	} else {
+		cfg.Backup.ArchiveDir = ExpandHome(cfg.Backup.ArchiveDir)
+	}
 	if cfg.Log.File != "" {
 		cfg.Log.File = ExpandHome(cfg.Log.File)
 	}

@@ -189,6 +189,10 @@ type BackupCfg struct {
 	IncludeUntracked bool   `koanf:"include_untracked" yaml:"include_untracked" default:"true"`
 	MaxPerRepo       int    `koanf:"max_per_repo"      yaml:"max_per_repo"      default:"10"    validate:"min=0"`
 	PatchDir         string `koanf:"patch_dir"         yaml:"patch_dir"`
+	// ArchiveDir receives a git bundle of any unique work (uncommitted changes,
+	// untracked files, stashes, unpushed commits) before git-mgr deletes a
+	// clone or worktree, so no deletion loses work.
+	ArchiveDir string `koanf:"archive_dir" yaml:"archive_dir"`
 	// PushBranch also force-pushes uncommitted tracked changes to a recoverable
 	// branch (git-mgr/wip/<branch>) on PushRemote, so dirty work is saved
 	// offsite as a normal, visible branch in addition to the local backup.

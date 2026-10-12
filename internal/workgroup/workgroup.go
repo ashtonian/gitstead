@@ -7,7 +7,9 @@ package workgroup
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,7 +18,6 @@ import (
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/pathutil"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
@@ -242,35 +243,49 @@ func Ensure(ctx context.Context, spec *Spec, sshKeyFor func(Member) string) ([]M
 	return out, nil
 }
 
-// Remove tears down a workgroup's members. For worktree kind it detaches each
-// worktree from the source repo; deleteFiles also removes member directories.
-// It returns human-readable action lines.
-func Remove(ctx context.Context, spec *Spec, deleteFiles bool) []string {
-	var actions []string
-	for _, m := range spec.Members {
-		if spec.Kind == "worktree" && spec.Source != "" && gitops.HasGitDir(m.Path) {
-			if err := gitops.WorktreeRemove(ctx, spec.Source, m.Path, true); err != nil {
-				actions = append(actions, fmt.Sprintf("%s: worktree remove failed: %v", m.Name, err))
-			} else {
-				actions = append(actions, fmt.Sprintf("%s: worktree removed", m.Name))
-				continue
-			}
-		}
-		if deleteFiles {
-			if err := pathutil.SafeRemoveAll(m.Path); err != nil {
-				actions = append(actions, fmt.Sprintf("%s: delete failed: %v", m.Name, err))
-			} else {
-				actions = append(actions, fmt.Sprintf("%s: deleted %s", m.Name, m.Path))
-			}
-		}
+// UniqueWorkOf reports the work that removing member m would lose: the whole
+// clone for a clone member, the working tree and detached-HEAD commits for a
+// worktree member. A member missing from disk has none.
+func UniqueWorkOf(ctx context.Context, spec *Spec, m Member) (work gitops.UniqueWork, lost bool, err error) {
+	if _, statErr := os.Stat(m.Path); errors.Is(statErr, fs.ErrNotExist) {
+		return work, false, nil
 	}
+	work, err = gitops.InspectUniqueWork(ctx, m.Path)
+	if err != nil {
+		return work, false, err
+	}
+	if spec.Kind == "worktree" {
+		return work, work.LostWithWorktree(), nil
+	}
+	return work, work.LostWithClone(), nil
+}
+
+// RemoveMember deletes member m from disk. A worktree member is removed from
+// its source repo, where its branch stays; a clone member is deleted. Unless
+// discard is set, work removal would lose is first saved as a git bundle in
+// archiveDir, and on any failure the member is left in place. It returns the
+// archive path, or "" when nothing needed saving.
+func RemoveMember(ctx context.Context, spec *Spec, m Member, archiveDir string, discard bool) (string, error) {
+	if _, err := os.Stat(m.Path); errors.Is(err, fs.ErrNotExist) {
+		if spec.Kind == "worktree" && spec.Source != "" {
+			_ = gitops.WorktreePrune(ctx, spec.Source) // forget a deleted worktree
+		}
+		return "", nil
+	}
+	if !gitops.HasGitDir(m.Path) {
+		return "", fmt.Errorf("%s is not a git working directory; left in place", m.Path)
+	}
+	name := spec.Name + "-" + m.Name
 	if spec.Kind == "worktree" && spec.Source != "" {
-		_ = gitops.WorktreePrune(ctx, spec.Source)
+		return gitops.RemoveWorktree(ctx, spec.Source, m.Path, archiveDir, name, discard)
 	}
-	if deleteFiles {
-		_ = os.Remove(spec.Root) // succeeds only if now empty
-	}
-	return actions
+	return gitops.RemoveClone(ctx, m.Path, archiveDir, name, discard)
+}
+
+// RemoveEmptyRoot deletes the workgroup's root directory if nothing is left
+// in it.
+func RemoveEmptyRoot(spec *Spec) {
+	_ = os.Remove(spec.Root) // fails, harmlessly, unless empty
 }
 
 // ScanAdopt builds a clone-kind Spec from the immediate git subdirectories of dir.

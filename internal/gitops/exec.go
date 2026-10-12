@@ -50,6 +50,20 @@ func GitWithSSHKey(ctx context.Context, repoPath, sshKeyPath string, args ...str
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+// gitWithEnv executes a git command with env appended to the process
+// environment and returns stdout trimmed of surrounding whitespace.
+func gitWithEnv(ctx context.Context, repoPath string, env []string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repoPath}, args...)...)
+	cmd.Env = append(os.Environ(), env...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
 // GitExitCode runs a git command and returns just the exit code.
 func GitExitCode(ctx context.Context, repoPath string, args ...string) int {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repoPath}, args...)...)
