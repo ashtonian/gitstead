@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/ashtonian/git-mgr/internal/repourl"
 )
 
 // Growth bound: once the log passes maxBytes, trim it to the newest keepLines
@@ -40,6 +42,7 @@ func Append(path string, ev Event) error {
 	if err != nil {
 		return err
 	}
+	ev.Repo, ev.Detail = repourl.Redact(ev.Repo), repourl.Redact(ev.Detail)
 	line, err := json.Marshal(ev)
 	if err != nil {
 		f.Close()

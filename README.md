@@ -160,9 +160,12 @@ providers:
     token_env: "GITEA_TOKEN"
 ```
 
-Token resolution order: `token` → `token_env` → provider default env var
-(`GITHUB_TOKEN` / `GITLAB_TOKEN` / `GITEA_TOKEN` / `FORGEJO_TOKEN`) →
-`token_command`.
+Each provider takes its token from the one source it sets: `token`,
+`token_env` or `token_command`. If that source yields nothing — an unset
+variable, a failing command — discovery for that provider fails rather than
+trying another source, which could send one account's token to another
+account's API. A provider that sets none uses `GITHUB_TOKEN` / `GITLAB_TOKEN` /
+`GITEA_TOKEN` / `FORGEJO_TOKEN`, and without those sees only public repos.
 
 ### Discovery rules
 
@@ -217,8 +220,8 @@ search.
 
 git-mgr separates two auth surfaces and **does not store credentials** itself:
 
-- **Provider APIs** (discovery) use a PAT, resolved per provider from `token` /
-  `token_env` / `token_command` (e.g. `token_command: "gh auth token"`).
+- **Provider APIs** (discovery) use a PAT from the provider's one token source
+  (e.g. `token_command: "gh auth token"`).
 - **Git transport** (clone/fetch) uses `clone_protocol` — `ssh` (default; your
   SSH agent/keys, or a provider/override `ssh_key`) or `https`. Over HTTPS, auth
   flows through git's own credential helper (`gh auth setup-git`, osxkeychain, a
@@ -233,7 +236,9 @@ overrides:
 ```
 
 `git-mgr clone <url>` honors the scheme you pass (an `https://` URL clones over
-HTTPS, `git@…`/`ssh://` over SSH). `git-mgr doctor` reports whether each
+HTTPS, `git@…`/`ssh://` over SSH). A URL embedding a credential
+(`https://user:token@…`) is refused everywhere — clone, `repos:`, manifests,
+workgroups, adopt — so none lands in state or logs; use a credential helper. `git-mgr doctor` reports whether each
 provider's token resolves and whether configured SSH keys exist.
 
 ### Accounts

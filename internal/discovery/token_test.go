@@ -1,31 +1,52 @@
 package discovery
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 )
 
-func TestResolveTokenPrecedence(t *testing.T) {
-	if got := resolveToken(config.Provider{Token: "explicit"}, "GITMGR_TEST_UNSET"); got != "explicit" {
-		t.Errorf("explicit token: got %q", got)
-	}
-
+func TestResolveToken(t *testing.T) {
 	t.Setenv("GITMGR_TEST_ENV", "envval")
-	if got := resolveToken(config.Provider{TokenEnv: "GITMGR_TEST_ENV"}, "GITMGR_TEST_DEFAULT"); got != "envval" {
-		t.Errorf("token_env: got %q", got)
-	}
-
 	t.Setenv("GITMGR_TEST_DEFAULT", "defval")
-	if got := resolveToken(config.Provider{}, "GITMGR_TEST_DEFAULT"); got != "defval" {
-		t.Errorf("default env: got %q", got)
-	}
+	t.Setenv("GITMGR_TEST_EMPTY", "")
 
-	if got := resolveToken(config.Provider{TokenCommand: "echo cmdval"}, "GITMGR_TEST_UNSET"); got != "cmdval" {
-		t.Errorf("token_command: got %q", got)
+	tests := []struct {
+		name    string
+		cfg     config.Provider
+		want    string
+		wantErr string
+	}{
+		{"explicit token", config.Provider{Token: "explicit"}, "explicit", ""},
+		{"token_env", config.Provider{TokenEnv: "GITMGR_TEST_ENV"}, "envval", ""},
+		{"token_command", config.Provider{TokenCommand: "echo cmdval"}, "cmdval", ""},
+		{"nothing configured falls back to the default env", config.Provider{}, "defval", ""},
+		// A configured source that yields nothing must never fall through to the
+		// default env, which may hold another account's token.
+		{"unset token_env fails closed", config.Provider{Name: "work", TokenEnv: "GITMGR_TEST_EMPTY"}, "", "token_env GITMGR_TEST_EMPTY is not set"},
+		{"failing token_command fails closed", config.Provider{Name: "work", TokenCommand: "echo nope >&2; exit 3"}, "", "failed: exit status 3: nope"},
+		{"silent token_command fails closed", config.Provider{Name: "work", TokenCommand: "true"}, "", "printed nothing"},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveToken(tt.cfg, "GITMGR_TEST_DEFAULT")
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("got %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+}
 
-	if got := resolveToken(config.Provider{}, "GITMGR_TEST_UNSET"); got != "" {
-		t.Errorf("no token: got %q", got)
+func TestResolveToken_NoSourceNoDefaultIsAnonymous(t *testing.T) {
+	got, err := resolveToken(config.Provider{}, "GITMGR_TEST_UNSET_DEFAULT")
+	if got != "" || err != nil {
+		t.Fatalf("got %q, %v; want no token and no error", got, err)
 	}
 }

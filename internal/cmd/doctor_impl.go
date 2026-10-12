@@ -62,9 +62,12 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 
 	// --- Auth: provider API tokens and configured SSH keys ---
 	for _, p := range cfg.Providers {
-		if discovery.ResolveToken(p) == "" {
-			d.warn(fmt.Sprintf("provider %q: no API token resolved (set token_command, token_env, or token)", p.Name))
-		} else {
+		switch tok, terr := discovery.ResolveToken(p); {
+		case terr != nil:
+			d.fail(terr.Error())
+		case tok == "":
+			d.warn(fmt.Sprintf("provider %q: no API token (set token_command, token_env, or token); only public repos are visible", p.Name))
+		default:
 			d.ok(fmt.Sprintf("provider %q: API token resolved", p.Name))
 		}
 	}

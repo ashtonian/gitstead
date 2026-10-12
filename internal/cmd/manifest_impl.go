@@ -99,6 +99,10 @@ func (c *ManifestImportCmd) Run(ctx *Context) error {
 	added, skipped := 0, 0
 	var errs []error
 	for _, mr := range m.Repos {
+		if err := repourl.CheckNoCredentials(mr.URL); err != nil {
+			errs = append(errs, err)
+			continue
+		}
 		id, perr := repourl.Parse(mr.URL)
 		if perr != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", mr.URL, perr))

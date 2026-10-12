@@ -23,7 +23,11 @@ func NewGitLabProvider(cfg config.Provider) (*GitLabProvider, error) {
 	if baseURL == "" {
 		baseURL = "https://gitlab.com"
 	}
-	client, err := gitlab.NewClient(resolveToken(cfg, "GITLAB_TOKEN"), gitlab.WithBaseURL(baseURL))
+	tok, err := ResolveToken(cfg)
+	if err != nil {
+		return nil, err
+	}
+	client, err := gitlab.NewClient(tok, gitlab.WithBaseURL(baseURL))
 	if err != nil {
 		return nil, fmt.Errorf("creating GitLab client: %w", err)
 	}

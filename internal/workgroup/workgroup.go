@@ -18,6 +18,7 @@ import (
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
@@ -148,6 +149,9 @@ func resolveCloneMembers(st *state.State, wg *config.Workgroup, root string) ([]
 	for _, m := range wg.Members {
 		if m.Repo == "" {
 			return nil, fmt.Errorf("workgroup %q: each clone member needs 'repo'", wg.Name)
+		}
+		if err := repourl.CheckNoCredentials(m.Repo); err != nil {
+			return nil, fmt.Errorf("workgroup %q: %w", wg.Name, err)
 		}
 		url, name, key := m.Repo, m.Name, ""
 		if r, ok := st.Repos[m.Repo]; ok {
@@ -292,7 +296,7 @@ func RemoveEmptyRoot(spec *Spec) {
 // so `git-mgr sync` keeps them fetched: the shared source for a worktree
 // group, each member clone for a clone group. Repos already tracked are left
 // alone. It returns how many it added and the paths it skipped because their
-// origin remote could not be parsed.
+// origin remote could not be parsed or embeds a credential.
 func TrackRepos(ctx context.Context, st *state.State, spec *Spec) (added int, skipped []string) {
 	track := func(localPath string) {
 		if localPath == "" {
@@ -304,7 +308,7 @@ func TrackRepos(ctx context.Context, st *state.State, spec *Spec) (added int, sk
 			}
 		}
 		id, err := gitops.ParseRemoteURL(ctx, localPath)
-		if err != nil {
+		if err != nil || repourl.HasCredentials(id.URL) {
 			skipped = append(skipped, localPath)
 			return
 		}

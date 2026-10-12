@@ -60,8 +60,10 @@ providers:
   # Public GitHub
   - name: "github.com"
     type: "github"
-    # Token resolution order: token > token_env > token_command
-    # For public repos, token is optional but increases rate limits.
+    # Set one of token, token_env or token_command. If it yields nothing,
+    # discovery for this provider fails instead of trying another source.
+    # With none set, GITHUB_TOKEN is used; without a token only public repos
+    # are visible.
     token_command: "gh auth token"
 
   # GitHub Enterprise example

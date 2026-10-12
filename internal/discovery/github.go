@@ -246,7 +246,11 @@ type GitHubProvider struct {
 
 // NewGitHubProvider creates a GitHub provider from config.
 func NewGitHubProvider(cfg config.Provider) (*GitHubProvider, error) {
-	client, err := newGHClient(resolveToken(cfg, "GITHUB_TOKEN"), cfg.URL)
+	tok, err := ResolveToken(cfg)
+	if err != nil {
+		return nil, err
+	}
+	client, err := newGHClient(tok, cfg.URL)
 	if err != nil {
 		return nil, err
 	}

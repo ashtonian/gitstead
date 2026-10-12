@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ashtonian/git-mgr/internal/gitops"
@@ -122,5 +123,17 @@ func TestHasGitDir(t *testing.T) {
 	}
 	if gitops.HasGitDir(t.TempDir()) {
 		t.Error("expected false for non-repo")
+	}
+}
+
+// A git error never repeats a credential from the URL it was given.
+func TestGit_ErrorsRedactURLCredentials(t *testing.T) {
+	t.Setenv("GIT_TERMINAL_PROMPT", "0")
+	_, err := gitops.Git(context.Background(), t.TempDir(), "ls-remote", "https://me:s3cret-token@127.0.0.1:9/acme/api.git")
+	if err == nil {
+		t.Fatal("ls-remote against a closed port should fail")
+	}
+	if strings.Contains(err.Error(), "s3cret") || !strings.Contains(err.Error(), "https://***@127.0.0.1:9") {
+		t.Fatalf("error leaks or loses the URL: %v", err)
 	}
 }
