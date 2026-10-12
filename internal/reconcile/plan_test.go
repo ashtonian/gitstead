@@ -390,3 +390,27 @@ func TestRepos_AccountGivesKeyAndIdentity(t *testing.T) {
 		t.Errorf("https repo config = %v", desired[key].Config)
 	}
 }
+
+func TestAccountConfig_Signing(t *testing.T) {
+	tests := []struct {
+		name    string
+		signing config.Signing
+		want    map[string]string
+	}{
+		{"inherit writes nothing", config.Signing{Mode: "inherit", Key: "/k.pub"}, map[string]string{}},
+		{"off turns signing off", config.Signing{Mode: "off"}, map[string]string{"commit.gpgsign": "false", "tag.gpgsign": "false"}},
+		{"ssh is inferred from a .pub key", config.Signing{Mode: "required", Key: "/k/id.pub", Program: "/bin/op-ssh-sign", AllowedSigners: "/k/allowed"},
+			map[string]string{"commit.gpgsign": "true", "tag.gpgsign": "true", "gpg.format": "ssh", "user.signingkey": "/k/id.pub",
+				"gpg.ssh.program": "/bin/op-ssh-sign", "gpg.ssh.allowedsignersfile": "/k/allowed"}},
+		{"a key ID means openpgp", config.Signing{Mode: "required", Key: "ABCD1234", Program: "/bin/gpg2"},
+			map[string]string{"commit.gpgsign": "true", "tag.gpgsign": "true", "gpg.format": "openpgp", "user.signingkey": "ABCD1234", "gpg.program": "/bin/gpg2"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AccountConfig(&config.Account{Signing: tt.signing})
+			if fmt.Sprint(got) != fmt.Sprint(tt.want) {
+				t.Errorf("got %v\nwant %v", got, tt.want)
+			}
+		})
+	}
+}

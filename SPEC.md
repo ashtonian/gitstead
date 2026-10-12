@@ -372,6 +372,10 @@ accounts:
     owners: [acme]                 # empty = every owner on these hosts no other account claims
     ssh_key: "~/.ssh/id_work"
     git: {name: "Ashton Kinslow", email: "you@acme.com"}
+    signing:                       # inherit (default) | required | off
+      mode: required               # required writes commit/tag.gpgsign, gpg.format,
+      key: "~/.ssh/id_work.pub"    # user.signingkey and the signer program; off sets
+                                   # commit/tag.gpgsign false; doctor test-signs headless
 
 # Base directory for all cloned repos. Supports ~ expansion.
 base_dir: "~/repos"
@@ -790,7 +794,7 @@ left unless `reconcile.drift: overwrite`.
 | `adopt` | no | Record a clone already at the desired path (an interrupted clone, or `adopt`). |
 | `rename` | no | A tracked repo with the same provider ID on the same host that discovery no longer finds under its key: rekey state and workgroup references. |
 | `url` | no | `git remote set-url origin`. |
-| `config`, `member-config` | no | Set or unset a managed key (`core.sshcommand`, `user.name`, `user.email`) in a repo or clone member, or start/stop managing one already set to the wanted value. |
+| `config`, `member-config` | no | Set or unset a managed key (`core.sshcommand`, `user.name`, `user.email`, the signing keys) in a repo or clone member, or start/stop managing one already set to the wanted value. |
 | `tags` | no | Update tags and discovering rule in state. |
 | `move` | yes | Rename the directory (same filesystem only), `git worktree repair`, repoint workgroup sources, remove now-empty parents below `base_dir`. A move already done by hand or before an interruption is just recorded. |
 | `create-workgroup`, `create-member` | no | `workgroup.Ensure`; record members with copy IDs; `sync: true` tracks the repos. |

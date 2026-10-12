@@ -9,6 +9,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/reconcile"
 )
 
 // DoctorCmd diagnoses the health of the git-mgr setup: tooling, auth, config,
@@ -100,6 +101,16 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 			d.warn(msg + " -- check its hosts and owners")
 		} else {
 			d.ok(msg)
+		}
+		switch a.Signing.Mode {
+		case "required":
+			if serr := gitops.TestSign(ctx.GoCtx(), reconcile.AccountConfig(&a)); serr != nil {
+				d.fail(fmt.Sprintf("account %q: signing is required but a test signature failed: %v", a.Name, serr))
+			} else {
+				d.ok(fmt.Sprintf("account %q: signs commits and tags (%s) without a terminal", a.Name, a.Signing.SigningFormat()))
+			}
+		case "off":
+			d.ok(fmt.Sprintf("account %q: signing turned off in its repos", a.Name))
 		}
 	}
 

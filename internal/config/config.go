@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"time"
 )
 
@@ -37,11 +38,44 @@ type Config struct {
 // account with no Owners covers every owner on its hosts that no other
 // account claims).
 type Account struct {
-	Name   string      `koanf:"name"    yaml:"name"              validate:"required"`
-	Hosts  []string    `koanf:"hosts"   yaml:"hosts,omitempty"`
-	Owners []string    `koanf:"owners"  yaml:"owners,omitempty"`
-	SSHKey string      `koanf:"ssh_key" yaml:"ssh_key,omitempty"`
-	Git    GitIdentity `koanf:"git"     yaml:"git,omitempty"`
+	Name    string      `koanf:"name"    yaml:"name"              validate:"required"`
+	Hosts   []string    `koanf:"hosts"   yaml:"hosts,omitempty"`
+	Owners  []string    `koanf:"owners"  yaml:"owners,omitempty"`
+	SSHKey  string      `koanf:"ssh_key" yaml:"ssh_key,omitempty"`
+	Git     GitIdentity `koanf:"git"     yaml:"git,omitempty"`
+	Signing Signing     `koanf:"signing" yaml:"signing,omitempty"`
+}
+
+// Signing is how commits and tags in an account's repos are signed.
+type Signing struct {
+	// Mode "inherit" leaves signing to your global git config, "required"
+	// signs every commit and tag, "off" turns signing off in these repos, so
+	// an agent never stalls on a passphrase prompt.
+	Mode string `koanf:"mode" yaml:"mode,omitempty" default:"inherit" validate:"omitempty,oneof=inherit required off"`
+	// Format is git's gpg.format: ssh, openpgp or x509. Empty means ssh for a
+	// key ending in .pub or given as key::..., openpgp otherwise.
+	Format string `koanf:"format" yaml:"format,omitempty" validate:"omitempty,oneof=ssh openpgp x509"`
+	// Key is user.signingkey: an SSH key path or key::<public key>, a GPG key
+	// ID, or an X.509 certificate ID.
+	Key string `koanf:"key" yaml:"key,omitempty"`
+	// Program signs in place of ssh-keygen, gpg or gpgsm, such as 1Password's
+	// op-ssh-sign.
+	Program string `koanf:"program" yaml:"program,omitempty"`
+	// AllowedSigners is gpg.ssh.allowedSignersFile, for verifying SSH
+	// signatures.
+	AllowedSigners string `koanf:"allowed_signers" yaml:"allowed_signers,omitempty"`
+}
+
+// SigningFormat is the gpg.format the account signs with.
+func (s Signing) SigningFormat() string {
+	switch {
+	case s.Format != "":
+		return s.Format
+	case strings.HasSuffix(s.Key, ".pub") || strings.HasPrefix(s.Key, "key::"):
+		return "ssh"
+	default:
+		return "openpgp"
+	}
 }
 
 // GitIdentity is the commit identity written into each repo an account
