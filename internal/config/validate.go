@@ -74,6 +74,9 @@ func Validate(cfg *Config) error {
 	if err := validateAccounts(cfg); err != nil {
 		return err
 	}
+	if err := validateRemoteSync(cfg); err != nil {
+		return err
+	}
 	for _, mr := range cfg.Repos {
 		if err := repourl.CheckNoCredentials(mr.URL); err != nil {
 			return fmt.Errorf("repos entry: %w", err)

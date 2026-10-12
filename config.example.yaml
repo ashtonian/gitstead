@@ -360,30 +360,42 @@ backup:
   # Default: ~/.local/share/git-mgr/archive/
   archive_dir: ""
 
-  # Also push uncommitted tracked changes, as one commit on top of HEAD, to a
-  # recoverable branch (refs/heads/git-mgr/wip/<branch>) on push_remote.
-  # Unlike the hidden snapshot ref, this is a normal branch visible in the
-  # remote's UI, so dirty work is saved offsite. Untracked files are not pushed.
-  # Force-updated each run.
-  # Equivalent to passing `--push-branch` to `git-mgr sync`/`git-mgr backup`.
-  push_branch: false
-
-  # Remote to push the WIP branch to. Must exist in each repo's git config.
-  push_remote: "origin"
-
 # =============================================================================
 # Remote Sync
 # =============================================================================
 
 remote_sync:
-  # Push backup refs (refs/git-mgr/*) to remotes.
+  # Take each working copy offsite during sync: uncommitted work and commits
+  # no remote has, pushed under a hidden namespace the copy owns. `git-mgr
+  # remote-sync` does it on demand either way. Any key below can be set per
+  # account (accounts[].remote_sync) or per repo (overrides[].remote_sync).
   enabled: false
 
-  # Which remote to push to.
-  remote_name: "origin"
+  # A remote name, or a URL template ({{.Host}}, {{.Owner}}, {{.Name}},
+  # {{.FullName}}) for a separate backup remote, e.g.
+  # "git@backup.example:{{.Host}}/{{.FullName}}.git". Hidden refs don't show
+  # in branch lists or trigger CI, but anyone who can read the remote can
+  # fetch them.
+  remote: "origin"
 
-  # Only push for repos matching this glob. Empty = all.
-  repos_glob: ""
+  # Uncommitted work: "ref" pushes each new backup to <namespace>/wip/<id>
+  # (untracked files and the staged/unstaged split included); "branch" pushes
+  # a visible branch git-mgr/wip/<machine>/<copy> (tracked changes only, on
+  # top of HEAD); "off" pushes none.
+  wip: "ref"
+
+  # Commits no remote has: "push" saves each such branch as
+  # <namespace>/heads/<branch> (your branches are never pushed); "bundle"
+  # writes them to backup.archive_dir/unpushed/<copy>.bundle (protects against
+  # a deleted branch, not a lost disk); "off" does neither.
+  unpushed: "push"
+
+  # The hidden ref prefix each copy owns on the remote. Must stay under refs/,
+  # outside branches and tags, and include {{.Copy}}.
+  namespace: "refs/git-mgr/{{.Machine}}/{{.Copy}}"
+
+  # How long a pushed WIP ref stays; the current one always stays.
+  keep: "720h"
 
 # =============================================================================
 # Notifications

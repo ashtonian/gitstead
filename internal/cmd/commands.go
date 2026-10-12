@@ -36,19 +36,16 @@ type SyncCmd struct {
 	NoFetch    bool   `help:"Skip fetching, only backup." default:"false" name:"no-fetch"`
 	NoDiscover bool   `help:"Skip auto-discovery." default:"false" name:"no-discover"`
 	Force      bool   `help:"Ignore min_fetch_interval." default:"false"`
-	PushBranch bool   `help:"On backup, also push WIP to a recoverable remote branch (git-mgr/wip/<branch>)." default:"false" name:"push-branch"`
 }
 
 // BackupCmd backs up uncommitted changes.
 // Run method is in backup_impl.go
 type BackupCmd struct {
-	Repos      string `help:"Filter to specific repos." default:"" predictor:"repo"`
-	Tag        string `help:"Filter by tag." default:"" predictor:"tag"`
-	Set        string `help:"Filter by named set (from config 'sets:')." default:"" predictor:"set"`
-	List       bool   `help:"List existing backups." default:"false"`
-	Restore    string `help:"Show restore instructions for a backup." default:""`
-	PushBranch bool   `help:"Also push WIP to a recoverable remote branch (git-mgr/wip/<branch>)." default:"false" name:"push-branch"`
-	PushRemote string `help:"Remote for --push-branch (default: config/origin)." default:"" name:"push-remote"`
+	Repos   string `help:"Filter to specific repos." default:"" predictor:"repo"`
+	Tag     string `help:"Filter by tag." default:"" predictor:"tag"`
+	Set     string `help:"Filter by named set (from config 'sets:')." default:"" predictor:"set"`
+	List    bool   `help:"List existing backups." default:"false"`
+	Restore string `help:"Show restore instructions for a backup." default:""`
 }
 
 // RestoreCmd recovers a backup for a repo.
@@ -297,13 +294,14 @@ type RemoveCmd struct {
 	Yes     bool   `help:"Skip confirmation." default:"false"`
 }
 
-// RemoteSyncCmd pushes backup refs to remotes.
+// RemoteSyncCmd takes working copies offsite now, under remote_sync's policy.
 // Run method is in remaining_impl.go
 type RemoteSyncCmd struct {
 	Repos  string `help:"Filter by glob." default:"" predictor:"repo"`
 	Tag    string `help:"Filter by tag." default:"" predictor:"tag"`
 	Set    string `help:"Filter by named set (from config 'sets:')." default:"" predictor:"set"`
-	DryRun bool   `help:"Show what would be pushed." default:"false" name:"dry-run"`
+	DryRun bool   `help:"Show what would be pushed, from the latest backups; change nothing." default:"false" name:"dry-run"`
+	List   bool   `help:"List what every machine and copy left offsite for the selected repos, and how to restore it."`
 }
 
 // ConfigCmd prints resolved configuration.

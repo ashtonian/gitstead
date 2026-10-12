@@ -24,14 +24,6 @@ type BackupConfig struct {
 	Retention Retention
 	PatchDir  string
 
-	// PushBranch, when set, also force-pushes the tracked changes to a
-	// recoverable branch (refs/heads/git-mgr/wip/<branch>) on PushRemote,
-	// using SSHKey for auth. Unlike the snapshot ref, which lives in the hidden
-	// refs/git-mgr namespace, the WIP branch is visible in the remote's UI.
-	PushBranch bool
-	PushRemote string
-	SSHKey     string
-
 	Now func() time.Time
 }
 
@@ -78,20 +70,6 @@ func WithUntrackedLimits(maxFile, maxTotal int64) BackupOption {
 // WithClock sets the clock that names and ages backups.
 func WithClock(now func() time.Time) BackupOption { return func(c *BackupConfig) { c.Now = now } }
 
-// WithPushBranch enables pushing the tracked changes to a recoverable branch
-// (refs/heads/git-mgr/wip/<branch>) on the given remote, using sshKey for auth.
-// An empty remote defaults to "origin".
-func WithPushBranch(remote, sshKey string) BackupOption {
-	return func(c *BackupConfig) {
-		c.PushBranch = true
-		if remote == "" {
-			remote = "origin"
-		}
-		c.PushRemote = remote
-		c.SSHKey = sshKey
-	}
-}
-
 // backupRefPrefix holds snapshot refs as <prefix><copy ID>/<backup ID>. It is
 // outside refs/heads and refs/stash, so it stays invisible to git branch, git
 // stash list, git log and IDEs. Linked worktrees share refs, which is why each
@@ -123,9 +101,9 @@ type BackupResult struct {
 	Outcome       BackupOutcome
 	ID            string // backup holding the current state; "" when clean
 	CopyID        string
+	Snapshot      string // commit of the backed-up state; "" when clean
 	Ref           string // snapshot ref; "" if the strategy keeps none or it failed
 	PatchDir      string // patch backup directory; "" if the strategy keeps none or it failed
-	PushedBranch  string // WIP branch pushed to the remote; "" if none
 	Skipped       []SkippedFile
 	IndexUnmerged bool
 }
@@ -159,7 +137,7 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 	if err != nil {
 		return res, fmt.Errorf("snapshotting %s: %w", repoPath, err)
 	}
-	res.Skipped, res.IndexUnmerged = snap.Skipped, snap.IndexUnmerged
+	res.Snapshot, res.Skipped, res.IndexUnmerged = snap.Commit, snap.Skipped, snap.IndexUnmerged
 	if res.CopyID, err = CopyID(ctx, repoPath); err != nil {
 		return res, err
 	}
@@ -205,13 +183,6 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 		}
 	}
 
-	if cfg.PushBranch {
-		if ref, err := pushWIPBranch(ctx, repoPath, cfg.PushRemote, cfg.SSHKey, snap); err != nil {
-			errs = append(errs, fmt.Errorf("pushing WIP branch to %s: %w", cfg.PushRemote, err))
-		} else {
-			res.PushedBranch = ref
-		}
-	}
 	if len(errs) > 0 {
 		return res, fmt.Errorf("backing up %s: %w", repoPath, errors.Join(errs...))
 	}
@@ -228,25 +199,6 @@ func newBackupID(now time.Time, latest *BackupInfo) string {
 		}
 	}
 	return at.Format(backupIDLayout)
-}
-
-// pushWIPBranch force-pushes the snapshot's tracked changes, on top of their
-// base commit, to refs/heads/git-mgr/wip/<branch> on remote. Untracked files
-// and the index are not pushed. It returns the ref that was pushed.
-func pushWIPBranch(ctx context.Context, repoPath, remote, sshKey string, snap Snapshot) (string, error) {
-	wip, err := wipCommit(ctx, repoPath, snap)
-	if err != nil {
-		return "", err
-	}
-	branch, err := Git(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
-	if err != nil || branch == "" {
-		branch = "detached"
-	}
-	wipRef := "refs/heads/git-mgr/wip/" + branch
-	if _, err := GitWithSSHKey(ctx, repoPath, sshKey, "push", "--force", remote, wip+":"+wipRef); err != nil {
-		return "", err
-	}
-	return wipRef, nil
 }
 
 // partialSuffix marks a patch backup still being written. Only complete

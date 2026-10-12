@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -99,7 +98,13 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		}
 	}
 
-	jobs, skippedRecent := c.jobs(cfg, st, pass)
+	machine := ""
+	if offsiteWanted(cfg) {
+		if machine, err = ensureMachine(cfg, st); err != nil {
+			return fmt.Errorf("naming this machine for offsite refs: %w", err)
+		}
+	}
+	jobs, skippedRecent := c.jobs(cfg, st, pass, machine)
 	outcomes := runCopies(ctx.GoCtx(), log, jobs, cfg.Concurrency)
 	err = st.Update(cfg.LockTimeout, func(st *state.State) error {
 		recordCopies(st, outcomes)
@@ -152,10 +157,11 @@ type syncError struct {
 	err  error
 }
 
-// jobs lists the copies this run backs up and fetches: selected repos, and
-// the workgroup members of selected repos (all of them when nothing is
-// selected). Repos fetched within min_fetch_interval are only backed up.
-func (c *SyncCmd) jobs(cfg *config.Config, st *state.State, pass func(string, *state.RepoState) bool) (jobs []copyJob, skippedRecent int) {
+// jobs lists the copies this run backs up, fetches and, under
+// remote_sync.enabled, takes offsite: selected repos, and the workgroup
+// members of selected repos (all of them when nothing is selected). Repos
+// fetched within min_fetch_interval are not fetched again.
+func (c *SyncCmd) jobs(cfg *config.Config, st *state.State, pass func(string, *state.RepoState) bool, machine string) (jobs []copyJob, skippedRecent int) {
 	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
 		repo := st.Repos[key]
 		if !pass(key, repo) || repo.Status == "stale" || !repo.Cloned {
@@ -164,7 +170,7 @@ func (c *SyncCmd) jobs(cfg *config.Config, st *state.State, pass func(string, *s
 		repoCfg := cfg.ResolveForRepo(key)
 		var backup *gitops.BackupConfig
 		if !c.NoBackup && repoCfg.Backup.Enabled {
-			b := backupConfigFor(cfg, repoCfg, key, repo.DiscoveredBy, c.PushBranch, "")
+			b := backupConfigFor(repoCfg)
 			backup = &b
 		}
 		job := repoJob(cfg, key, repo, backup)
@@ -176,61 +182,27 @@ func (c *SyncCmd) jobs(cfg *config.Config, st *state.State, pass func(string, *s
 				job.fetch = true
 			}
 		}
+		if policy := cfg.RemoteSyncFor(key, repo.DiscoveredBy); policy.Enabled && machine != "" {
+			job.offsite = offsiteFor(cfg, policy, machine, identityOf(repo), job.sshKey, repo.OffsiteStatus)
+		}
 		jobs = append(jobs, job)
 	}
 
 	// Agent worktrees and clones never show up as tracked repos; without
 	// this their uncommitted work -- what workgroups exist to keep -- would
 	// be unprotected by the scheduled run.
-	memberCfg := cfg.ResolveForRepo("")
-	if c.NoBackup || !memberCfg.Backup.Enabled {
+	if c.NoBackup {
 		return jobs, skippedRecent
 	}
-	backup := backupConfigFor(cfg, memberCfg, "", "", c.PushBranch, "")
-	all := (selection{c.Repos, c.Tag, c.Set}).empty()
-	// A member adopted from a tracked repo's directory is already a job; two
-	// backups of one working copy at once would race on its refs.
-	queued := make(map[string]bool, len(jobs))
-	for _, j := range jobs {
-		queued[j.path] = true
-	}
-	for _, wgName := range slices.Sorted(maps.Keys(st.Workgroups)) {
-		for _, m := range st.Workgroups[wgName].Members {
-			if repo := st.Repos[m.RepoKey]; !all && (repo == nil || !pass(m.RepoKey, repo)) {
-				continue
-			}
-			if queued[m.Path] || !gitops.HasGitDir(m.Path) {
-				continue
-			}
-			queued[m.Path] = true
-			jobs = append(jobs, copyJob{
-				label: wgName + "/" + m.Name, workgroup: wgName, member: m.Name, path: m.Path,
-				backup: &backup, backupTimeout: memberCfg.Sync.BackupTimeout,
-			})
+	jobs = addMemberJobs(jobs, st, selection{c.Repos, c.Tag, c.Set}, pass, func(wgName string, m state.WorkgroupMemberState) *copyJob {
+		job := memberJob(cfg, st, wgName, m, true)
+		if policy := memberRemoteSync(cfg, st, m); policy.Enabled && machine != "" {
+			job.offsite = offsiteFor(cfg, policy, machine, memberIdentity(st, m), job.sshKey, m.OffsiteStatus)
 		}
-	}
-	return jobs, skippedRecent
-}
-
-func fetchWithRetry(ctx context.Context, repoPath, sshKey string, cfg config.SyncConfig) error {
-	var lastErr error
-	for attempt := 0; attempt <= cfg.Retries; attempt++ {
-		if attempt > 0 {
-			backoff := cfg.RetryBackoff * time.Duration(1<<uint(attempt-1))
-			select {
-			case <-time.After(backoff):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-		lastErr = gitops.Fetch(ctx, repoPath, sshKey)
-		if lastErr == nil {
+		if job.backup == nil && job.offsite == nil {
 			return nil
 		}
-		// A lock is transient; don't burn retries waiting on another process.
-		if errors.Is(lastErr, gitops.ErrLocked) {
-			return lastErr
-		}
-	}
-	return lastErr
+		return &job
+	})
+	return jobs, skippedRecent
 }

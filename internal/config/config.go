@@ -49,6 +49,9 @@ type Account struct {
 	SSHKey  string      `koanf:"ssh_key" yaml:"ssh_key,omitempty"`
 	Git     GitIdentity `koanf:"git"     yaml:"git,omitempty"`
 	Signing Signing     `koanf:"signing" yaml:"signing,omitempty"`
+	// RemoteSync sets remote_sync for the account's repos, under any
+	// override's.
+	RemoteSync *RemoteSyncOverride `koanf:"remote_sync" yaml:"remote_sync,omitempty"`
 }
 
 // Signing is how commits and tags in an account's repos are signed.
@@ -212,15 +215,42 @@ type BackupOverride struct {
 	MaxPerCopy          *int           `koanf:"max_per_copy"           yaml:"max_per_copy,omitempty"           validate:"omitempty,min=0"`
 	MaxUntrackedFileMB  *int           `koanf:"max_untracked_file_mb"  yaml:"max_untracked_file_mb,omitempty"  validate:"omitempty,min=0"`
 	MaxUntrackedTotalMB *int           `koanf:"max_untracked_total_mb" yaml:"max_untracked_total_mb,omitempty" validate:"omitempty,min=0"`
-	PushBranch          *bool          `koanf:"push_branch"       yaml:"push_branch,omitempty"`
-	PushRemote          *string        `koanf:"push_remote"       yaml:"push_remote,omitempty"`
 }
 
-// RemoteSyncOverride overrides RemoteSyncConfig fields per repo. A nil pointer means "not set".
+// RemoteSyncOverride overrides RemoteSyncConfig fields for an account or a
+// repo. A nil pointer means "not set".
 type RemoteSyncOverride struct {
-	Enabled    *bool   `koanf:"enabled"     yaml:"enabled,omitempty"`
-	RemoteName *string `koanf:"remote_name" yaml:"remote_name,omitempty"`
-	ReposGlob  *string `koanf:"repos_glob"  yaml:"repos_glob,omitempty"`
+	Enabled   *bool          `koanf:"enabled"   yaml:"enabled,omitempty"`
+	Remote    *string        `koanf:"remote"    yaml:"remote,omitempty"    validate:"omitempty,min=1"`
+	WIP       *string        `koanf:"wip"       yaml:"wip,omitempty"       validate:"omitempty,oneof=off ref branch"`
+	Unpushed  *string        `koanf:"unpushed"  yaml:"unpushed,omitempty"  validate:"omitempty,oneof=off bundle push"`
+	Namespace *string        `koanf:"namespace" yaml:"namespace,omitempty"`
+	Keep      *time.Duration `koanf:"keep"      yaml:"keep,omitempty"      validate:"omitempty,min=0"`
+}
+
+// apply sets the fields o sets.
+func (o *RemoteSyncOverride) apply(r *RemoteSyncConfig) {
+	if o == nil {
+		return
+	}
+	if o.Enabled != nil {
+		r.Enabled = *o.Enabled
+	}
+	if o.Remote != nil {
+		r.Remote = *o.Remote
+	}
+	if o.WIP != nil {
+		r.WIP = *o.WIP
+	}
+	if o.Unpushed != nil {
+		r.Unpushed = *o.Unpushed
+	}
+	if o.Namespace != nil {
+		r.Namespace = *o.Namespace
+	}
+	if o.Keep != nil {
+		r.Keep = *o.Keep
+	}
 }
 
 // Workgroup declares a set of working directories (members) managed as a unit
@@ -289,11 +319,6 @@ type BackupCfg struct {
 	// untracked files, stashes, unpushed commits) before git-mgr deletes a
 	// clone or worktree, so no deletion loses work.
 	ArchiveDir string `koanf:"archive_dir" yaml:"archive_dir"`
-	// PushBranch also force-pushes uncommitted tracked changes to a recoverable
-	// branch (git-mgr/wip/<branch>) on PushRemote, so dirty work is saved
-	// offsite as a normal, visible branch in addition to the local backup.
-	PushBranch bool   `koanf:"push_branch" yaml:"push_branch" default:"false"`
-	PushRemote string `koanf:"push_remote" yaml:"push_remote" default:"origin"`
 }
 
 // ReconcileConfig controls how config changes reach repos already on disk.
@@ -309,11 +334,29 @@ type ReconcileConfig struct {
 	Drift string `koanf:"drift" yaml:"drift" default:"report" validate:"oneof=report overwrite"`
 }
 
-// RemoteSyncConfig controls pushing backup refs.
+// RemoteSyncConfig is what of a working copy goes offsite, and where. An
+// account or an override can set it for the repos it covers.
 type RemoteSyncConfig struct {
-	Enabled    bool   `koanf:"enabled"     yaml:"enabled"`
-	RemoteName string `koanf:"remote_name" yaml:"remote_name" default:"origin"`
-	ReposGlob  string `koanf:"repos_glob"  yaml:"repos_glob"`
+	// Enabled makes sync push offsite on its own; `git-mgr remote-sync`
+	// pushes on demand either way.
+	Enabled bool `koanf:"enabled" yaml:"enabled"`
+	// Remote is a remote name, or a URL template ({{.Host}}, {{.Owner}},
+	// {{.Name}}, {{.FullName}}) for a separate backup remote.
+	Remote string `koanf:"remote" yaml:"remote" default:"origin" validate:"required"`
+	// WIP is how uncommitted work goes offsite: "ref" pushes each new backup
+	// under Namespace, hidden from branch lists and CI; "branch" pushes a
+	// visible branch per copy; "off" pushes none.
+	WIP string `koanf:"wip" yaml:"wip" default:"ref" validate:"oneof=off ref branch"`
+	// Unpushed protects commits no remote has: "push" saves each such branch
+	// under Namespace, "bundle" writes them to a local bundle in
+	// backup.archive_dir, "off" does neither. The branches themselves are
+	// never pushed.
+	Unpushed string `koanf:"unpushed" yaml:"unpushed" default:"push" validate:"oneof=off bundle push"`
+	// Namespace is the hidden ref prefix each copy owns on the remote. It must
+	// include {{.Copy}} so copies never overwrite each other.
+	Namespace string `koanf:"namespace" yaml:"namespace" default:"refs/git-mgr/{{.Machine}}/{{.Copy}}"`
+	// Keep is how long a pushed WIP ref stays; the current one always stays.
+	Keep time.Duration `koanf:"keep" yaml:"keep" default:"720h" validate:"min=0"`
 }
 
 // NotifyConfig controls OS notifications.

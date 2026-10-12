@@ -27,7 +27,8 @@ type copyJob struct {
 	backupTimeout time.Duration        // bounds the backup and the status read
 	fetch         bool
 	sshKey        string
-	sync          config.SyncConfig // fetch retries and timeout_per_repo
+	sync          config.SyncConfig // fetch retries; timeout_per_repo bounds the fetch and the offsite push
+	offsite       *offsiteSpec      // nil keeps everything local
 }
 
 // copyOutcome is what a run did to one copy.
@@ -37,8 +38,13 @@ type copyOutcome struct {
 	backupErr error
 	fetched   bool // a fetch was attempted
 	fetchErr  error
-	status    *gitops.RepoStatus
-	at        time.Time
+	// offsite is what the offsite push left, nil when it didn't run;
+	// offsitePlan is what it did, or would do on a dry run.
+	offsite     *gitops.OffsiteRecord
+	offsitePlan gitops.OffsitePlan
+	offsiteErr  error
+	status      *gitops.RepoStatus
+	at          time.Time
 }
 
 // runCopies backs up and fetches each copy, at most limit at a time. It
@@ -66,7 +72,7 @@ func runCopy(ctx context.Context, log *slog.Logger, job copyJob) copyOutcome {
 		o.backupErr = ctxutil.TimedOut(bctx, o.backupErr, "backup", job.backupTimeout, "sync.backup_timeout")
 		cancel()
 		if o.backup != nil && o.backup.Dirty() {
-			log.Debug("backup", "copy", job.label, "outcome", o.backup.Outcome.String(), "id", o.backup.ID, "pushed", o.backup.PushedBranch)
+			log.Debug("backup", "copy", job.label, "outcome", o.backup.Outcome.String(), "id", o.backup.ID)
 		}
 		if o.backup != nil && len(o.backup.Skipped) > 0 {
 			log.Warn("untracked paths left out of backup", "copy", job.label, "count", len(o.backup.Skipped), "paths", skippedSummary(o.backup.Skipped))
@@ -76,6 +82,13 @@ func runCopy(ctx context.Context, log *slog.Logger, job copyJob) copyOutcome {
 		fctx, cancel := ctxutil.WithTimeout(ctx, job.sync.TimeoutPerRepo)
 		o.fetched, o.fetchErr = true, fetchWithRetry(fctx, job.path, job.sshKey, job.sync)
 		o.fetchErr = ctxutil.TimedOut(fctx, o.fetchErr, "fetch", job.sync.TimeoutPerRepo, "sync.timeout_per_repo")
+		cancel()
+	}
+	// Offsite after the fetch, which tells which commits a remote already has.
+	if job.offsite != nil {
+		octx, cancel := ctxutil.WithTimeout(ctx, job.sync.TimeoutPerRepo)
+		o.pushOffsite(octx, job)
+		o.offsiteErr = ctxutil.TimedOut(octx, o.offsiteErr, "offsite push", job.sync.TimeoutPerRepo, "sync.timeout_per_repo")
 		cancel()
 	}
 	if job.repoKey != "" {
@@ -99,6 +112,9 @@ func (o copyOutcome) failed() []error {
 	if o.fetchErr != nil && !errors.Is(o.fetchErr, gitops.ErrLocked) {
 		errs = append(errs, o.fetchErr)
 	}
+	if o.offsiteErr != nil {
+		errs = append(errs, o.offsiteErr)
+	}
 	return errs
 }
 
@@ -107,8 +123,11 @@ func (o copyOutcome) failed() []error {
 func recordCopies(st *state.State, outcomes []copyOutcome) {
 	for _, o := range outcomes {
 		if o.job.repoKey == "" {
-			if m := memberAt(st, o.job.workgroup, o.job.member, o.job.path); m != nil && o.job.backup != nil {
-				m.RecordBackup(o.backupID(), o.backupErr, o.at)
+			if m := memberAt(st, o.job.workgroup, o.job.member, o.job.path); m != nil {
+				if o.job.backup != nil {
+					m.RecordBackup(o.backupID(), o.backupErr, o.at)
+				}
+				o.recordOffsite(&m.OffsiteStatus)
 			}
 			continue
 		}
@@ -122,6 +141,7 @@ func (o copyOutcome) recordRepo(repo *state.RepoState) {
 	if o.job.backup != nil {
 		repo.RecordBackup(o.backupID(), o.backupErr, o.at)
 	}
+	o.recordOffsite(&repo.OffsiteStatus)
 	if o.fetched {
 		switch {
 		case o.fetchErr == nil:
@@ -172,4 +192,27 @@ func repoJob(cfg *config.Config, key string, repo *state.RepoState, backup *gito
 		backup: backup, backupTimeout: repoCfg.Sync.BackupTimeout,
 		sshKey: cfg.ResolveSSHKey(key, repo.DiscoveredBy), sync: repoCfg.Sync,
 	}
+}
+
+func fetchWithRetry(ctx context.Context, repoPath, sshKey string, cfg config.SyncConfig) error {
+	var lastErr error
+	for attempt := 0; attempt <= cfg.Retries; attempt++ {
+		if attempt > 0 {
+			backoff := cfg.RetryBackoff * time.Duration(1<<uint(attempt-1))
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		lastErr = gitops.Fetch(ctx, repoPath, sshKey)
+		if lastErr == nil {
+			return nil
+		}
+		// A lock is transient; don't burn retries waiting on another process.
+		if errors.Is(lastErr, gitops.ErrLocked) {
+			return lastErr
+		}
+	}
+	return lastErr
 }

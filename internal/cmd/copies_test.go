@@ -155,10 +155,14 @@ func TestSyncJobs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		jobs, _ := c.jobs(cfg, st, pass)
+		jobs, _ := c.jobs(cfg, st, pass, "laptop-1a2b3c")
 		var out []string
 		for _, j := range jobs {
-			out = append(out, j.label)
+			label := j.label
+			if j.offsite != nil {
+				label += "+offsite"
+			}
+			out = append(out, label)
 		}
 		return out
 	}
@@ -171,5 +175,14 @@ func TestSyncJobs(t *testing.T) {
 	}
 	if got := strings.Join(labels(&SyncCmd{NoBackup: true}), " "); got != "h/o/app h/o/lib" {
 		t.Errorf("jobs for --no-backup = %s; members are only backed up", got)
+	}
+
+	// remote_sync applies to members by the repo they copy: an override that
+	// turns it off for lib keeps lib's member local too.
+	off := false
+	cfg.RemoteSync.Enabled = true
+	cfg.Overrides = []config.Override{{Repos: []string{"h/o/lib"}, RemoteSync: &config.RemoteSyncOverride{Enabled: &off}}}
+	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+offsite h/o/lib fleet/agent" {
+		t.Errorf("jobs with remote_sync = %s", got)
 	}
 }

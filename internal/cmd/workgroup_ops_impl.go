@@ -84,8 +84,7 @@ func (c *WGRecoverCmd) Run(ctx *Context) error {
 		}
 	}
 	if found == 0 {
-		fmt.Println("No local backups found. WIP pushed via --push-branch is on the remote:")
-		fmt.Println("  git -C <member> fetch <remote> git-mgr/wip/<branch> && git -C <member> cherry-pick --no-commit FETCH_HEAD")
+		fmt.Println("No local backups found. `git-mgr remote-sync --list` shows what went offsite, and how to restore it.")
 	}
 	return outcome(failed, attempted, "members could not be recovered")
 }
@@ -281,13 +280,12 @@ func (c *WGPullCmd) Run(ctx *Context) error {
 // mutating group op, so a bad pull never loses it. It returns the members
 // whose backup failed, which the op must leave alone.
 func backupDirtyMembers(ctx *Context, cfg *config.Config, spec *workgroup.Spec) map[string]error {
-	bcfg := backupConfigFor(cfg, cfg.ResolveForRepo(""), "", "", false, "")
 	failed := map[string]error{}
 	for _, m := range spec.Members {
 		if !gitops.HasGitDir(m.Path) {
 			continue
 		}
-		br, err := gitops.Backup(ctx.GoCtx(), m.Path, bcfg)
+		br, err := gitops.Backup(ctx.GoCtx(), m.Path, backupConfigFor(cfg.ResolveForRepo(m.RepoKey)))
 		if err != nil {
 			failed[m.Name] = err
 			continue
