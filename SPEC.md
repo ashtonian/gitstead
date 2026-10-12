@@ -874,6 +874,16 @@ workspaces:
             url: ""              # a clone's origin, as git-mgr set it
             managed_config: {}   # a clone's managed git config
             last_backup: 2026-10-12T14:00:00Z   # backup and offsite status, as for repos
+        run:                     # the agent's latest run; whether it runs now is its lease's to say
+          profile: claude
+          command: "claude --continue"
+          pid: 61060
+          launcher: tmux
+          session: "%3"
+          started: 2026-10-12T15:00:00Z
+          stop_requested: ""     # when `ws stop` asked it to end
+          ended: 2026-10-12T17:30:00Z
+          exit_code: 0
 
 # Background syncs `install-agent` installed, so doctor can check them and
 # --uninstall can remove them by name.
@@ -1765,12 +1775,47 @@ in-progress rebase/merge/cherry-pick, a git lock, or being behind the upstream
 or, for a branch without one, what it started from. Uncommitted and untracked
 work is reported but isn't a failure: agents are expected to have WIP.
 
+### Runs and leases
+
+`ws run <workspace> <agent>` is one agent's run, in the terminal it is called
+from:
+
+1. Check the agent's copies and print any issue (`--no-check` skips it).
+2. Take the lease `<state dir>/runs/<workspace>/<agent>.lease`: an exclusive
+   non-blocking flock, holding a JSON record of the run (pid, profile, command,
+   launcher, terminal session). Held by another run, refuse. The kernel drops
+   the lock when the holder exits, so a held lease always means a live run.
+3. Record the run in the replica's `run:` (profile, command, pid, launcher from
+   `GIT_MGR_LAUNCHER`, session from `GIT_MGR_SESSION`, `TMUX_PANE`,
+   `ITERM_SESSION_ID` or `TERM_SESSION_ID`, start time).
+4. Run `$SHELL -i -c <command>` in the replica, with the profile's `env` and
+   `GIT_MGR_WORKSPACE`, `GIT_MGR_AGENT`, `GIT_MGR_REPLICA`. The command is the
+   profile's `resume` when the replica has a run on record (unless `--fresh`).
+   The interactive shell takes the terminal's foreground process group, so
+   Ctrl-C and Ctrl-\ reach the agent; the run catches (never ignores, which
+   the agent would inherit) SIGINT and SIGQUIT so they don't end it first, and
+   on SIGTERM or SIGHUP hangs up: SIGHUP to the terminal's foreground group
+   (the agent's job) and to the shell, which doesn't pass it on itself.
+5. Record the end and exit status (128+n for signal n), release the lease, and
+   exec an interactive shell in the replica (`--no-shell` exits instead).
+
+`ws stop` reads the holder's pid from the lease, sends SIGTERM, and waits up to
+`--timeout` for the lease to be released; with `--kill`, it then SIGKILLs the
+holder and every descendant (from `ps`). It records `stop_requested`, so the
+agent shows as `stopping` meanwhile. A copy is never removed while its agent
+holds the lease, and a removed replica's lease file is deleted.
+
+Agent states, from the lease and the record: `running`, `stopping`, `missing`
+(a copy gone from disk), `stopped` (a run on record), `ready`. Logs are the
+terminal's: an agent's TUI output isn't a useful log, and tmux, iTerm and Muxy
+keep scrollback.
+
 ### Terminal integration
 
 `ws open` builds a tmux session `ws-<name>`, one pane per agent, each running
-`ws check --agent` on startup, then the agent profile's command (or `--cmd`)
-typed into the pane's shell, then a shell. Under iTerm it attaches with control
-mode (`tmux -CC`).
+`git-mgr ws run <workspace> <agent>` as the pane's command, with
+`GIT_MGR_LAUNCHER=tmux`. Under iTerm it attaches with control mode
+(`tmux -CC`).
 
 ### WIP safety
 

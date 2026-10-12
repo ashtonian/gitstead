@@ -61,6 +61,10 @@ func (c *WSPruneCmd) Run(ctx *Context) error {
 			if !reapable(h) {
 				continue
 			}
+			if err := workspace.CheckStopped(st.Dir(), name, h.Agent); err != nil {
+				fmt.Printf("  keeping %s: its agent is running\n", h.Label(spec))
+				continue
+			}
 			// Health is a summary; deletion needs the full inspection, and
 			// anything it can't vouch for is kept.
 			if work, lost, werr := workspace.UniqueWorkOf(ctx.GoCtx(), spec.Isolation, h.Copy); werr != nil || lost {
@@ -117,9 +121,12 @@ func (c *WSPruneCmd) Run(ctx *Context) error {
 			return fmt.Errorf("recording %s's removed copies: %w", name, err)
 		}
 		env := reconcileEnv(cfg, st)
-		for _, paths := range removed {
+		for agent, paths := range removed {
 			for _, p := range paths {
 				reconcile.RemoveEmptyParents(env, p)
+			}
+			if ws := st.Workspaces[name]; ws == nil || ws.Replica(agent) == nil {
+				workspace.ForgetRuns(st.Dir(), name, agent)
 			}
 		}
 	}

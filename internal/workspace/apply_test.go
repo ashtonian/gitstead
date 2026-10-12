@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	agents "github.com/ashtonian/git-mgr/internal/agent"
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/gitops"
@@ -57,6 +58,8 @@ type world struct {
 	t   *testing.T
 	cfg *config.Config
 	st  *state.State
+	// tolerate lets apply return failed actions instead of failing the test.
+	tolerate bool
 }
 
 func newWorld(t *testing.T, root string) *world {
@@ -96,11 +99,12 @@ func (w *world) apply(p *reconcile.Plan, include func(reconcile.Action) bool) []
 		Update:      func(change func(*state.State) error) error { return w.st.Update(time.Second, change) },
 		Concurrency: w.cfg.Concurrency,
 		ArchiveDir:  w.cfg.Backup.ArchiveDir,
+		StateDir:    w.st.Dir(),
 		KeepDirs:    []string{w.cfg.BaseDir, w.cfg.WorkspaceDefaults.Root},
 	}
 	results := workspace.Apply(context.Background(), w.cfg, env, p, w.scope(), include)
 	for _, r := range results {
-		if r.Err != nil {
+		if r.Err != nil && !w.tolerate {
 			w.t.Fatalf("%s %s: %v", r.Action.Kind, r.Action.Target, r.Err)
 		}
 	}
@@ -449,5 +453,39 @@ func TestPlan_ClonesOfAPartialRepoAreBlocked(t *testing.T) {
 	p = workspace.Compute(context.Background(), w.cfg, w.st, w.scope())
 	if len(p.Blocked) != 1 || !strings.Contains(p.Blocked[0].Reason, "is partial") {
 		t.Fatalf("blocked = %+v", p.Blocked)
+	}
+}
+
+// A running agent's copy is never removed: the lease its run holds keeps it
+// until the agent is stopped.
+func TestApply_KeepsARunningAgentsCopy(t *testing.T) {
+	root := t.TempDir()
+	w := newWorld(t, root)
+	w.cfg.Repos = []config.ManualRepo{{URL: bareRemote(t, root, "app")}}
+	w.cfg.Workspaces = []config.Workspace{{Name: "app", Repos: []string{"local/remotes/app"}, Agents: 2}}
+	w.converge()
+
+	lease, err := agents.Acquire(agents.LeasePath(w.st.Dir(), "app", "agent-2"), agents.Holder{PID: os.Getpid()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := workspace.AgentState(w.st.Dir(), "app", w.st.Workspaces["app"].Replica("agent-2")); got != workspace.AgentRunning {
+		t.Errorf("agent-2 is %s, want running", got)
+	}
+	w.cfg.Workspaces[0].Agents = 1
+	w.tolerate = true
+	results := w.apply(w.plan(), reconcile.All)
+	if len(results) != 1 || results[0].Err == nil || !strings.Contains(results[0].Err.Error(), "is running") {
+		t.Fatalf("results = %+v", results)
+	}
+	if _, err := os.Stat(filepath.Join(w.cfg.WorkspaceDefaults.Root, "app", "agent-2", ".git")); err != nil {
+		t.Fatal("a running agent's copy was removed")
+	}
+
+	lease.Release()
+	w.tolerate = false
+	w.converge()
+	if _, err := os.Stat(agents.LeasePath(w.st.Dir(), "app", "agent-2")); !os.IsNotExist(err) {
+		t.Error("the removed agent's lease file should be gone")
 	}
 }

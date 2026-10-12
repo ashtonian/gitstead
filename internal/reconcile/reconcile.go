@@ -185,6 +185,9 @@ type Env struct {
 	CloneTimeout time.Duration
 	// ArchiveDir receives the unique work of anything removed.
 	ArchiveDir string
+	// StateDir is the state file's directory, where agents' runs keep their
+	// leases.
+	StateDir string
 	// KeepDirs are directories never removed when a move leaves its old
 	// parents empty, such as base_dir and the workspace root.
 	KeepDirs []string

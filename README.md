@@ -683,6 +683,30 @@ git-mgr ws create app --repo github.com/me/app --agents 4 --save   # write it to
 git-mgr ws open app --agent claude                     # tmux session, a pane per agent
 ```
 
+### Running agents
+
+`git-mgr ws run <workspace> <agent>` runs an agent in its replica, in the
+current terminal; every pane `ws open` makes runs it. It checks the agent's
+copies, then types the agent profile's command into an interactive shell there
+(`$SHELL -i -c`), so shell functions such as a `claudemore` wrapper work, with
+`GIT_MGR_WORKSPACE`, `GIT_MGR_AGENT`, `GIT_MGR_REPLICA` and the profile's `env`
+set. When the agent ran in the replica before, the profile's `resume` command
+is typed instead (`--fresh` to start over). When the agent exits, its exit
+status is recorded and a shell is left in the replica (`--no-shell` to exit
+too).
+
+While it runs, the agent holds a *lease*: a lock on
+`<state dir>/runs/<workspace>/<agent>.lease` that the system releases when the
+run ends, however it ends. A second `ws run` of the same agent is refused, and
+no command removes a copy whose agent holds its lease (`ws rm --delete`,
+`ws prune`, `remove-copy` on apply). `git-mgr ws stop <workspace> [agent]`
+ends runs the way closing their terminal would -- SIGHUP to the agent and its
+shell -- waiting up to `--timeout` (30s); `--kill` then kills what is left.
+
+`ws status` shows each agent's state: `ready` (copies made, never run),
+`running`, `stopping`, `stopped` (with its last exit status) or `missing` (a
+copy gone from disk).
+
 A workspace created from flags or adopted is kept as recorded: `ws ensure`
 makes its missing copies again, and only `ws rm` removes it. Declared
 workspaces follow config: agents or repos removed from a declaration, a new
@@ -694,9 +718,11 @@ that act on copies take `--agent` to pick one agent's.
 |---|---|
 | `create <name>` | Create a workspace from flags (`--repo`, `--set` or `--path`; `--agents`, `--isolation`, `--branch`, `--base-ref`, `--root`), or the one config declares. `--save` (`--force`) writes it to config; `--open` with `--agent`/`--cmd` opens it. |
 | `ensure [name]` | Make what is missing of one workspace or all of them; list moves and removals for `git-mgr apply`. Idempotent. |
-| `open <name>` | Build/attach a tmux session, one pane per agent; `--agent <profile>` or `--cmd <command>` runs in each pane; `--no-check`, `--print`, `--recreate`, `--no-attach`, `--plain`. |
+| `open <name>` | Build/attach a tmux session, one pane per agent, each running `ws run`; `--agent <profile>` or `--cmd <command>`, `--fresh`, `--no-check`, `--print`, `--recreate`, `--no-attach`, `--plain`. |
+| `run <name> <agent>` | Run the agent in its replica in this terminal, under its lease, then leave a shell there. `--profile`, `--command`, `--fresh`, `--no-check`, `--no-shell`. |
+| `stop <name> [agent]` | End running agents as closing their terminals would. `--timeout`, `--kill`. |
 | `check <name>` | Exit non-zero when a copy is missing, on the wrong branch, mid-rebase or merge, or behind. `--agent`. |
-| `status <name>` / `overview` | Copy status for one workspace / across all of them (`--json`). |
+| `status <name>` / `overview` | Agents' states and copies' status for one workspace / across all of them (`--json`). |
 | `fetch <name>` | Fetch each source once, then refresh the clones from it. |
 | `commit`, `pull`, `push`, `exec` | Run across copies. `pull` backs up dirty copies first. |
 | `backup <name>` / `recover <name>` | Back up / restore each copy's WIP (`--offsite`; `recover --into`/`--apply`). |
@@ -711,7 +737,7 @@ own `remote_sync`, after its repos are fetched.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `agents[].name`, `.command` | none | An agent profile. The command is typed into an interactive shell in the replica, so shell functions and aliases work. |
+| `agents[].name`, `.command` | `claude`, `codex` when on PATH | An agent profile. The command is typed into an interactive shell in the replica, so shell functions and aliases work. Declaring any replaces the detected ones. |
 | `agents[].resume` | none | Typed instead of `command` when the agent ran in the replica before. |
 | `agents[].env` | none | Extra environment for the agent. |
 | `workspace_defaults.root` | `~/workspaces` | Holds a directory per workspace. |
@@ -720,9 +746,10 @@ own `remote_sync`, after its repos are fetched.
 | `workspace_defaults.agent_name` | `agent-{{.N}}` | Names agent N (`{{.N}}`, `{{.Workspace}}`). |
 | `workspace_defaults.branch` | `agents/{{.Workspace}}/{{.Agent}}` | A new copy's branch (`{{.Workspace}}`, `{{.Agent}}`, `{{.N}}`, `{{.Repo}}`). |
 | `workspace_defaults.base_ref` | upstream's default branch | Where new branches start. |
+| `workspace_defaults.agent` | the first profile | The agent profile workspaces' agents run. |
 | `workspaces[].name` | required | Letters, digits, `-` and `_`. |
 | `workspaces[].repos` / `.set` / `.path` | one required | The repos, or the shared folder. |
-| `workspaces[].root`, `.isolation`, `.agents`, `.agent_name`, `.branch`, `.base_ref` | `workspace_defaults` | Per-workspace settings. |
+| `workspaces[].root`, `.isolation`, `.agents`, `.agent_name`, `.branch`, `.base_ref`, `.agent` | `workspace_defaults` | Per-workspace settings. |
 | `workspaces[].remote_sync` | the repo's | `remote_sync` for the workspace's copies. |
 
 ## Running on a schedule

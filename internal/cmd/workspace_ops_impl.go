@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
@@ -25,14 +26,20 @@ type WSStatusCmd struct {
 }
 
 func (c *WSStatusCmd) Run(ctx *Context) error {
-	spec, _, err := operationalSpec(ctx, c.Name)
+	spec, st, err := operationalSpec(ctx, c.Name)
 	if err != nil {
 		return err
 	}
 	hs := workspace.Health(ctx.GoCtx(), spec, spec.Targets())
+	runs := agentRuns(st, c.Name)
 	if c.JSON {
-		return printIndentedJSON(healthViews(spec, hs))
+		views := healthViews(spec, hs)
+		for i := range views {
+			views[i].addRun(runs)
+		}
+		return printIndentedJSON(views)
 	}
+	printAgents(st, c.Name, runs)
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "COPY\tBRANCH\tSTATE\tUPSTREAM\tAHEAD/BEHIND\tNOTES")
 	for _, h := range hs {
@@ -42,7 +49,7 @@ func (c *WSStatusCmd) Run(ctx *Context) error {
 	}
 	tw.Flush()
 	if workspace.OK(hs) {
-		fmt.Printf("\n%s: %d copies, all up to date\n", c.Name, len(hs))
+		fmt.Printf("\n%s: %d %s, all up to date\n", c.Name, len(hs), plural(len(hs), "copy", "copies"))
 	} else {
 		fmt.Printf("\n%s: %d of %d copies need attention\n", c.Name, workspace.Flagged(hs), len(hs))
 	}
@@ -68,29 +75,33 @@ func (c *WSOverviewCmd) Run(ctx *Context) error {
 	type row struct {
 		spec *workspace.Spec
 		h    workspace.CopyHealth
+		runs map[string]agentRun
 	}
 	var rows []row
 	for _, n := range slices.Sorted(maps.Keys(st.Workspaces)) {
 		spec := workspace.FromState(cfg, st, st.Workspaces[n])
+		runs := agentRuns(st, n)
 		for _, h := range workspace.Health(ctx.GoCtx(), spec, spec.Targets()) {
-			rows = append(rows, row{spec, h})
+			rows = append(rows, row{spec, h, runs})
 		}
 	}
 	if c.JSON {
 		views := make([]copyStatusJSON, 0, len(rows))
 		for _, r := range rows {
-			views = append(views, healthView(r.spec, r.h))
+			v := healthView(r.spec, r.h)
+			v.addRun(r.runs)
+			views = append(views, v)
 		}
 		return printIndentedJSON(views)
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "COPY\tBRANCH\tSTATE\tAHEAD/BEHIND\tNOTES")
+	fmt.Fprintln(tw, "COPY\tAGENT\tBRANCH\tSTATE\tAHEAD/BEHIND\tNOTES")
 	counts := map[string]int{}
 	for _, r := range rows {
 		s := r.h.State()
 		counts[s]++
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d/%d\t%s\n", r.h.Label(r.spec), dashIfEmpty(r.h.Branch), s, r.h.Ahead, r.h.Behind, strings.Join(r.h.Issues, "; "))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d/%d\t%s\n", r.h.Label(r.spec), dashIfEmpty(r.runs[r.h.Agent].state), dashIfEmpty(r.h.Branch), s, r.h.Ahead, r.h.Behind, strings.Join(r.h.Issues, "; "))
 	}
 	tw.Flush()
 	var parts []string
@@ -532,21 +543,81 @@ func reportOps(spec *workspace.Spec, verb string, results []workspace.OpResult, 
 // copyStatusJSON is the stable JSON shape of a copy's health, shared by
 // `ws status --json` and `ws overview --json`.
 type copyStatusJSON struct {
-	Workspace string   `json:"workspace"`
-	Agent     string   `json:"agent,omitempty"`
-	Repo      string   `json:"repo,omitempty"`
-	Path      string   `json:"path"`
-	Branch    string   `json:"branch,omitempty"`
-	State     string   `json:"state"` // missing|clean|dirty|untracked|rebase|merge|cherry-pick
-	Present   bool     `json:"present"`
-	Dirty     bool     `json:"dirty"`
-	Untracked bool     `json:"untracked"`
-	Locked    bool     `json:"locked"`
-	Stuck     string   `json:"stuck,omitempty"`
-	Upstream  string   `json:"upstream,omitempty"`
-	Ahead     int      `json:"ahead"`
-	Behind    int      `json:"behind"`
-	Issues    []string `json:"issues,omitempty"`
+	Workspace string `json:"workspace"`
+	Agent     string `json:"agent,omitempty"`
+	// AgentState is the agent's lifecycle state: ready, running, stopping,
+	// stopped or missing; Run its latest run.
+	AgentState string          `json:"agent_state,omitempty"`
+	Run        *state.RunState `json:"run,omitempty"`
+	Repo       string          `json:"repo,omitempty"`
+	Path       string          `json:"path"`
+	Branch     string          `json:"branch,omitempty"`
+	State      string          `json:"state"` // missing|clean|dirty|untracked|rebase|merge|cherry-pick
+	Present    bool            `json:"present"`
+	Dirty      bool            `json:"dirty"`
+	Untracked  bool            `json:"untracked"`
+	Locked     bool            `json:"locked"`
+	Stuck      string          `json:"stuck,omitempty"`
+	Upstream   string          `json:"upstream,omitempty"`
+	Ahead      int             `json:"ahead"`
+	Behind     int             `json:"behind"`
+	Issues     []string        `json:"issues,omitempty"`
+}
+
+// agentRun is an agent's lifecycle state and latest run.
+type agentRun struct {
+	state string
+	run   *state.RunState
+}
+
+// agentRuns returns the state of each agent of a recorded workspace.
+func agentRuns(st *state.State, name string) map[string]agentRun {
+	out := map[string]agentRun{}
+	ws := st.Workspaces[name]
+	if ws == nil {
+		return out
+	}
+	for i := range ws.Replicas {
+		r := &ws.Replicas[i]
+		out[r.Agent] = agentRun{workspace.AgentState(st.Dir(), name, r), r.Run}
+	}
+	return out
+}
+
+func (v *copyStatusJSON) addRun(runs map[string]agentRun) {
+	if ar, ok := runs[v.Agent]; ok {
+		v.AgentState, v.Run = ar.state, ar.run
+	}
+}
+
+// printAgents lists a workspace's agents and their runs.
+func printAgents(st *state.State, name string, runs map[string]agentRun) {
+	ws := st.Workspaces[name]
+	if ws == nil || len(ws.Replicas) == 0 {
+		return
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "AGENT\tSTATE\tPROFILE\tLAST RUN")
+	for _, r := range ws.Replicas {
+		ar := runs[r.Agent]
+		profile, last := "-", "-"
+		if run := ar.run; run != nil {
+			profile = dashIfEmpty(run.Profile)
+			switch ar.state {
+			case workspace.AgentRunning, workspace.AgentStopping:
+				last = fmt.Sprintf("since %s (pid %d)", run.Started.Local().Format(time.DateTime), run.PID)
+			default:
+				if !run.Ended.IsZero() {
+					last = fmt.Sprintf("exit %d at %s", run.ExitCode, run.Ended.Local().Format(time.DateTime))
+				} else {
+					last = fmt.Sprintf("started %s, end not recorded", run.Started.Local().Format(time.DateTime))
+				}
+			}
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", r.Agent, ar.state, profile, last)
+	}
+	tw.Flush()
+	fmt.Println()
 }
 
 func healthViews(spec *workspace.Spec, hs []workspace.CopyHealth) []copyStatusJSON {

@@ -47,6 +47,9 @@ type WorkspaceDefaults struct {
 	// BaseRef is what new branches start from; empty for the upstream's
 	// default branch.
 	BaseRef string `koanf:"base_ref" yaml:"base_ref,omitempty"`
+	// Agent is the agent profile workspaces' agents run; empty for the first
+	// declared, or detected, one.
+	Agent string `koanf:"agent" yaml:"agent,omitempty"`
 }
 
 // Workspace is one repo, or several related ones, worked on by a number of
@@ -67,6 +70,7 @@ type Workspace struct {
 	AgentName  string              `koanf:"agent_name"  yaml:"agent_name,omitempty"`
 	Branch     string              `koanf:"branch"      yaml:"branch,omitempty"`
 	BaseRef    string              `koanf:"base_ref"    yaml:"base_ref,omitempty"`
+	Agent      string              `koanf:"agent"       yaml:"agent,omitempty"`
 	RemoteSync *RemoteSyncOverride `koanf:"remote_sync" yaml:"remote_sync,omitempty"`
 }
 
@@ -114,6 +118,9 @@ func (c *Config) WithDefaults(w Workspace) Workspace {
 	}
 	if w.BaseRef == "" {
 		w.BaseRef = d.BaseRef
+	}
+	if w.Agent == "" {
+		w.Agent = d.Agent
 	}
 	w.Root, w.Path = ExpandHome(w.Root), ExpandHome(w.Path)
 	return w
@@ -215,6 +222,9 @@ func validateWorkspaces(cfg *Config) error {
 		agents[a.Name] = true
 	}
 
+	if a := cfg.WorkspaceDefaults.Agent; a != "" && len(cfg.Agents) > 0 && cfg.FindAgent(a) == nil {
+		return fmt.Errorf("workspace_defaults.agent: unknown agent %q (declare it under agents:)", a)
+	}
 	names := map[string]bool{}
 	for _, decl := range cfg.Workspaces {
 		if names[decl.Name] {
@@ -269,6 +279,9 @@ func validateWorkspace(cfg *Config, decl Workspace) error {
 	}
 	if _, err := w.AgentNames(); err != nil {
 		return err
+	}
+	if w.Agent != "" && len(cfg.Agents) > 0 && cfg.FindAgent(w.Agent) == nil {
+		return fmt.Errorf("unknown agent %q (declare it under agents:)", w.Agent)
 	}
 	_, err := w.BranchFor("agent", 1, "repo")
 	return err
