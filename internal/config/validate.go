@@ -7,6 +7,8 @@ import (
 	"text/template"
 
 	"github.com/go-playground/validator/v10"
+
+	"github.com/ashtonian/git-mgr/internal/repourl"
 )
 
 // --- Validation ---
@@ -41,6 +43,15 @@ func Validate(cfg *Config) error {
 		if _, ok := provType[p.Name]; ok {
 			return fmt.Errorf("duplicate provider name: %q", p.Name)
 		}
+		sources := 0
+		for _, s := range []string{p.Token, p.TokenEnv, p.TokenCommand} {
+			if s != "" {
+				sources++
+			}
+		}
+		if sources > 1 {
+			return fmt.Errorf("provider %q: set one of token, token_env and token_command, not %d", p.Name, sources)
+		}
 		provType[p.Name] = NormalizeProviderType(p.Type)
 	}
 
@@ -59,6 +70,18 @@ func Validate(cfg *Config) error {
 
 	if err := validateAccounts(cfg); err != nil {
 		return err
+	}
+	for _, mr := range cfg.Repos {
+		if err := repourl.CheckNoCredentials(mr.URL); err != nil {
+			return fmt.Errorf("repos entry: %w", err)
+		}
+	}
+	for _, wg := range cfg.Workgroups {
+		for _, m := range wg.Members {
+			if err := repourl.CheckNoCredentials(m.Repo); err != nil {
+				return fmt.Errorf("workgroup %q: %w", wg.Name, err)
+			}
+		}
 	}
 
 	// Workgroup cross-field validation

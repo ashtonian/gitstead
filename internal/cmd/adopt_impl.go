@@ -8,6 +8,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
+	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
@@ -50,6 +51,9 @@ func (c *AdoptCmd) adoptSingle(ctx *Context, cfg *config.Config, st *state.State
 	identity, err := gitops.ParseRemoteURL(ctx.GoCtx(), absPath)
 	if err != nil {
 		return fmt.Errorf("parsing remote URL: %w", err)
+	}
+	if err := repourl.CheckNoCredentials(identity.URL); err != nil {
+		return fmt.Errorf("origin of %s: %w", absPath, err)
 	}
 	if _, exists := st.Repos[identity.Key()]; exists {
 		fmt.Printf("Already tracked: %s\n", identity.Key())

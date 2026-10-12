@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/shellutil"
 )
 
@@ -28,7 +29,7 @@ func runGit(cmd *exec.Cmd, args []string) ([]byte, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("%s: %w\n%s", repourl.Redact("git "+strings.Join(args, " ")), err, repourl.Redact(strings.TrimSpace(stderr.String())))
 	}
 	return stdout.Bytes(), nil
 }
@@ -97,7 +98,7 @@ func GitClone(ctx context.Context, sshURL, destPath, sshKeyPath string) (string,
 		cmd.Env = append(os.Environ(), gitSSHCommandEnv(sshKeyPath))
 	}
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git clone %s: %w\n%s", sshURL, err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("git clone %s: %w\n%s", repourl.Redact(sshURL), err, repourl.Redact(strings.TrimSpace(stderr.String())))
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }

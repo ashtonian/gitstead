@@ -5,6 +5,7 @@ package repourl
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -161,4 +162,43 @@ func identity(host, owner, name string) *Identity {
 // credential helper rather than an SSH key.
 func IsHTTP(u string) bool {
 	return strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://")
+}
+
+// HasCredentials reports whether a remote URL embeds a credential: any user
+// info in an http(s) URL, where a token often travels as the user name, or a
+// password in any other URL. The user in git@host:path is not a credential.
+func HasCredentials(raw string) bool {
+	if !strings.Contains(raw, "://") {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.User == nil {
+		return false
+	}
+	if u.Scheme == "http" || u.Scheme == "https" {
+		return true
+	}
+	_, hasPassword := u.User.Password()
+	return hasPassword
+}
+
+// CheckNoCredentials returns an error naming the URL, redacted, when it embeds
+// a credential. git-mgr keeps URLs in state and logs, so it never accepts one.
+func CheckNoCredentials(raw string) error {
+	if HasCredentials(raw) {
+		return fmt.Errorf("%s embeds a credential; remove it from the URL and let git's credential helper supply it", Redact(raw))
+	}
+	return nil
+}
+
+var (
+	httpUserInfo = regexp.MustCompile(`(?i)\b(https?://)[^\s/@]+@`)
+	urlPassword  = regexp.MustCompile(`\b([a-zA-Z][a-zA-Z0-9+.-]*://[^\s/:@]+):[^\s/@]+@`)
+)
+
+// Redact hides credentials in any remote URLs within text: all user info of
+// http(s) URLs, the password of others.
+func Redact(text string) string {
+	text = httpUserInfo.ReplaceAllString(text, "${1}***@")
+	return urlPassword.ReplaceAllString(text, "${1}:***@")
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
+	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/state"
 	"golang.org/x/term"
 )
@@ -290,8 +291,10 @@ func describeAction(a reconcile.Action) string {
 	return line
 }
 
-// tildify shortens paths under the home directory for display.
+// tildify prepares text for display: credentials in URLs hidden, paths under
+// the home directory shortened.
 func tildify(s string) string {
+	s = repourl.Redact(s)
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return s

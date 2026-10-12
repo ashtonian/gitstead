@@ -2,7 +2,9 @@ package oplog
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,5 +57,16 @@ func TestAppendRead(t *testing.T) {
 
 	if evs, err := Read(filepath.Join(t.TempDir(), "none.jsonl"), time.Time{}); err != nil || evs != nil {
 		t.Errorf("missing file should be empty/no-error: got %v, %v", evs, err)
+	}
+}
+
+func TestAppend_RedactsURLCredentials(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "e.jsonl")
+	if err := Append(path, Event{Time: time.Now(), Action: "clone", Detail: "https://me:s3cret@github.com/acme/api.git"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "s3cret") {
+		t.Fatalf("event log holds a credential: %s", data)
 	}
 }

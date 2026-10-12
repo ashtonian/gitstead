@@ -85,3 +85,20 @@ func TestValidate_Accounts(t *testing.T) {
 		})
 	}
 }
+
+func TestValidate_OneTokenSourcePerProvider(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Providers = []config.Provider{{Name: "gh", Type: "github", TokenEnv: "WORK_TOKEN", TokenCommand: "gh auth token"}}
+	if err := config.Validate(cfg); err == nil || !strings.Contains(err.Error(), "set one of token, token_env and token_command") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestValidate_RejectsURLCredentials(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Repos = []config.ManualRepo{{URL: "https://me:s3cret@github.com/acme/api.git"}}
+	err := config.Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "embeds a credential") || strings.Contains(err.Error(), "s3cret") {
+		t.Fatalf("err = %v", err)
+	}
+}

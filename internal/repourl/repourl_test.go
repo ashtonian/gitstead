@@ -1,6 +1,7 @@
 package repourl_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ashtonian/git-mgr/internal/repourl"
@@ -140,6 +141,31 @@ func TestIsHTTP(t *testing.T) {
 	for _, u := range []string{"git@github.com:x/y.git", "ssh://git@h/x/y", "/local/path", "~/r"} {
 		if repourl.IsHTTP(u) {
 			t.Errorf("IsHTTP(%q) = true, want false", u)
+		}
+	}
+}
+
+func TestCredentials(t *testing.T) {
+	tests := []struct {
+		url, redacted string
+		has           bool
+	}{
+		{"https://me:ghp_secret@github.com/acme/api.git", "https://***@github.com/acme/api.git", true},
+		{"https://ghp_secret@github.com/acme/api.git", "https://***@github.com/acme/api.git", true},
+		{"ssh://git:hunter2@host:2222/acme/api.git", "ssh://git:***@host:2222/acme/api.git", true},
+		{"ssh://git@host:2222/acme/api.git", "ssh://git@host:2222/acme/api.git", false},
+		{"git@github.com:acme/api.git", "git@github.com:acme/api.git", false},
+		{"https://github.com/acme/api.git", "https://github.com/acme/api.git", false},
+	}
+	for _, tt := range tests {
+		if got := repourl.HasCredentials(tt.url); got != tt.has {
+			t.Errorf("HasCredentials(%s) = %v", tt.url, got)
+		}
+		if got := repourl.Redact("fatal: could not read " + tt.url + " (exit 128)"); got != "fatal: could not read "+tt.redacted+" (exit 128)" {
+			t.Errorf("Redact(%s) = %s", tt.url, got)
+		}
+		if err := repourl.CheckNoCredentials(tt.url); (err != nil) != tt.has || (err != nil && strings.Contains(err.Error(), "secret")) {
+			t.Errorf("CheckNoCredentials(%s) = %v", tt.url, err)
 		}
 	}
 }

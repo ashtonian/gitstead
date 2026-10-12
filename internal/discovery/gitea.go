@@ -35,7 +35,11 @@ func NewGiteaProvider(cfg config.Provider) (*GiteaProvider, error) {
 	base = strings.TrimRight(base, "/")
 
 	opts := []gitea.ClientOption{gitea.SetHTTPClient(newRetryClient(nil))}
-	if tok := resolveToken(cfg, "GITEA_TOKEN", "FORGEJO_TOKEN"); tok != "" {
+	tok, err := ResolveToken(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if tok != "" {
 		opts = append(opts, gitea.SetToken(tok))
 	}
 	client, err := gitea.NewClient(base, opts...)

@@ -19,12 +19,21 @@ are not maintained — upgrade to the latest release.
 `git-mgr` handles credentials and runs unattended, so a few properties are worth
 calling out:
 
-- **Tokens** are resolved from (in order) an explicit config value, an env var,
-  any provider default env var (`GITHUB_TOKEN` / `GITLAB_TOKEN` /
-  `GITEA_TOKEN`,`FORGEJO_TOKEN`), or the output of `token_command`. Prefer
+- **Tokens** come from the one source a provider configures: `token`,
+  `token_env` or `token_command` (run with a 30-second limit). A configured
+  source that yields nothing is an error, never a reason to try another one,
+  so one account's token is never sent to another account's API. Only a
+  provider configuring no source uses the type's default env var
+  (`GITHUB_TOKEN` / `GITLAB_TOKEN` / `GITEA_TOKEN`, `FORGEJO_TOKEN`). Prefer
   `token_env` or `token_command` over committing a literal `token:` to config.
+- **Credentials in URLs are refused.** A clone, `repos:` entry, manifest entry,
+  workgroup member or adopted origin whose URL embeds a credential
+  (`https://user:token@…`, or any user info in an http(s) URL) is rejected, so
+  none reaches state or the event log. Git errors and the event log have URL
+  credentials redacted as a second line of defence.
 - **SSH keys** are referenced by path and passed to `git` via `GIT_SSH_COMMAND`
-  with `IdentitiesOnly=yes`. git-mgr never reads key material itself.
+  with `IdentitiesOnly=yes`, and written into each repo they apply to as
+  `core.sshCommand`. git-mgr never reads key material itself.
 - **Config and state files** may contain repo paths and (if you inline them)
   tokens. They are written with `0600`/`0700` permissions; keep them out of
   version control.

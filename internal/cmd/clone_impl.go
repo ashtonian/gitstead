@@ -23,6 +23,9 @@ func (c *CloneCmd) Run(ctx *Context) error {
 	}
 	defer unlock()
 
+	if err := repourl.CheckNoCredentials(c.URL); err != nil {
+		return err
+	}
 	id, err := repourl.Parse(c.URL)
 	if err != nil {
 		return fmt.Errorf("parsing URL: %w", err)
