@@ -248,11 +248,11 @@ func (c *WGCreateCmd) materialize(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	st, unlock, err := lockedState(ctx)
+	// Members are created unlocked and recorded with a short locked write.
+	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}
-	defer unlock()
 
 	// --from-set expands to clone members from a named set's tracked repos.
 	if c.FromSet != "" {
@@ -298,23 +298,29 @@ func (c *WGCreateCmd) materialize(ctx *Context) error {
 		return err
 	}
 	created, failed := printEnsure(statuses, ctx.Quiet)
-	// --save turns the flags into a config declaration, which then owns it.
-	persistWorkgroup(ctx, st, spec, c.Save)
-
-	// --sync tracks the underlying repo(s) so the normal sync loop keeps them
-	// fetched.
-	if c.Sync {
-		n, skipped := workgroup.TrackRepos(ctx.GoCtx(), st, spec)
-		if n > 0 && !ctx.Quiet {
-			fmt.Printf("Tracking %d repo(s) for sync.\n", n)
+	var tracked int
+	var untracked []string
+	err = st.Update(cfg.LockTimeout, func(st *state.State) error {
+		if _, exists := st.Workgroups[c.Name]; exists && !c.Save {
+			return fmt.Errorf("workgroup %q was created by another run meanwhile", c.Name)
 		}
-		for _, p := range skipped {
-			fmt.Fprintf(os.Stderr, "warning: not tracking %s for sync (no parseable SSH remote)\n", p)
+		// --save turns the flags into a config declaration, which then owns it.
+		persistWorkgroup(ctx, st, spec, c.Save)
+		// --sync tracks the underlying repo(s) so the normal sync loop keeps
+		// them fetched.
+		if c.Sync {
+			tracked, untracked = workgroup.TrackRepos(ctx.GoCtx(), st, spec)
 		}
-	}
-
-	if err := st.Save(); err != nil {
+		return nil
+	})
+	if err != nil {
 		return err
+	}
+	if tracked > 0 && !ctx.Quiet {
+		fmt.Printf("Tracking %d repo(s) for sync.\n", tracked)
+	}
+	for _, p := range untracked {
+		fmt.Fprintf(os.Stderr, "warning: not tracking %s for sync (no parseable SSH remote)\n", p)
 	}
 	logEvent(ctx, "wg_create", c.Name, spec.Kind)
 
@@ -344,11 +350,10 @@ func (c *WGEnsureCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	st, unlock, err := lockedState(ctx)
+	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}
-	defer unlock()
 	if c.Name != "" && st.Workgroups[c.Name] == nil && !slices.ContainsFunc(cfg.Workgroups, func(w config.Workgroup) bool { return w.Name == c.Name }) {
 		return fmt.Errorf("workgroup %q is neither declared in config nor recorded", c.Name)
 	}
@@ -374,20 +379,26 @@ func ensureWorkgroups(ctx *Context, cfg *config.Config, st *state.State, name st
 }
 
 func (c *WGAdoptCmd) Run(ctx *Context) error {
-	st, unlock, err := lockedState(ctx)
+	cfg, err := ctx.LoadConfig()
 	if err != nil {
 		return err
 	}
-	defer unlock()
-	if _, exists := st.Workgroups[c.Name]; exists {
-		return fmt.Errorf("workgroup %q already exists", c.Name)
+	st, err := ctx.LoadState()
+	if err != nil {
+		return err
 	}
 	spec, err := workgroup.ScanAdopt(c.Name, c.Dir)
 	if err != nil {
 		return err
 	}
-	persistWorkgroup(ctx, st, spec, false)
-	if err := st.Save(); err != nil {
+	err = st.Update(cfg.LockTimeout, func(st *state.State) error {
+		if _, exists := st.Workgroups[c.Name]; exists {
+			return fmt.Errorf("workgroup %q already exists", c.Name)
+		}
+		persistWorkgroup(ctx, st, spec, false)
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	fmt.Printf("Adopted %q: %d members under %s\n", c.Name, len(spec.Members), spec.Root)
@@ -443,20 +454,21 @@ func (c *WGListCmd) Run(ctx *Context) error {
 }
 
 func (c *WGRemoveCmd) Run(ctx *Context) error {
-	st, unlock, err := lockedState(ctx)
+	cfg, err := ctx.LoadConfig()
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	// Unlocked through the prompt and the removals; recording them is one
+	// locked write at the end.
+	st, err := ctx.LoadState()
+	if err != nil {
+		return err
+	}
 
 	var spec *workgroup.Spec
 	if ws, ok := st.Workgroups[c.Name]; ok {
 		spec = workgroup.FromState(ws)
 	} else {
-		cfg, cerr := ctx.LoadConfig()
-		if cerr != nil {
-			return cerr
-		}
 		s, serr := workgroup.FromConfig(cfg, st, c.Name)
 		if serr != nil {
 			return fmt.Errorf("workgroup %q not found in state or config", c.Name)
@@ -482,15 +494,16 @@ func (c *WGRemoveCmd) Run(ctx *Context) error {
 	}
 
 	if !c.Delete {
-		delete(st.Workgroups, c.Name)
-		logEvent(ctx, "wg_remove", c.Name, "forgot; files kept")
-		return st.Save()
-	}
-
-	cfg, err := ctx.LoadConfig()
-	if err != nil {
+		err := st.Update(cfg.LockTimeout, func(st *state.State) error {
+			delete(st.Workgroups, c.Name)
+			return nil
+		})
+		if err == nil {
+			logEvent(ctx, "wg_remove", c.Name, "forgot; files kept")
+		}
 		return err
 	}
+
 	var removed []workgroup.Member
 	for _, m := range spec.Members {
 		if c.PushBranch && !c.Force {
@@ -515,19 +528,28 @@ func (c *WGRemoveCmd) Run(ctx *Context) error {
 			}
 		}
 	}
-	if kept := len(spec.Members) - len(removed); kept > 0 {
-		if ws, ok := st.Workgroups[c.Name]; ok {
-			ws.Members = dropMembers(ws.Members, removed)
+	kept := len(spec.Members) - len(removed)
+	if kept == 0 {
+		workgroup.RemoveEmptyRoot(spec)
+	}
+	err = st.Update(cfg.LockTimeout, func(st *state.State) error {
+		ws, ok := st.Workgroups[c.Name]
+		if !ok {
+			return nil
 		}
-		if serr := st.Save(); serr != nil {
-			return serr
+		if ws.Members = dropMembers(ws.Members, removed); kept == 0 && len(ws.Members) == 0 {
+			delete(st.Workgroups, c.Name)
 		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if kept > 0 {
 		return outcome(kept, len(spec.Members), "members of %q could not be removed and are still tracked", c.Name)
 	}
-	workgroup.RemoveEmptyRoot(spec)
-	delete(st.Workgroups, c.Name)
 	logEvent(ctx, "wg_remove", c.Name, "")
-	return st.Save()
+	return nil
 }
 
 // --- helpers ---
@@ -553,24 +575,6 @@ func printEnsure(statuses []workgroup.MemberStatus, quiet bool) (created, failed
 	return created, failed
 }
 
-// lockedState loads the state file, takes the same exclusive flock that sync
-// uses, and re-reads the file under the lock so a mutation cannot clobber a
-// concurrent writer's changes. The returned func releases the lock.
-func lockedState(ctx *Context) (*state.State, func(), error) {
-	st, err := ctx.LoadState()
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := st.AcquireLock(); err != nil {
-		return nil, nil, err
-	}
-	if err := st.Reload(); err != nil {
-		st.ReleaseLock()
-		return nil, nil, err
-	}
-	return st, st.ReleaseLock, nil
-}
-
 // persistWorkgroup writes the spec into state, preserving the original
 // CreatedAt. declared says whether config now declares it.
 func persistWorkgroup(ctx *Context, st *state.State, spec *workgroup.Spec, declared bool) {
@@ -581,6 +585,11 @@ func persistWorkgroup(ctx *Context, st *state.State, spec *workgroup.Spec, decla
 	}
 	if prev, ok := st.Workgroups[spec.Name]; ok {
 		ws.CreatedAt = prev.CreatedAt
+		for i := range ws.Members {
+			if old := memberAt(st, spec.Name, ws.Members[i].Name, ws.Members[i].Path); old != nil {
+				ws.Members[i].ManagedConfig, ws.Members[i].BackupStatus = old.ManagedConfig, old.BackupStatus
+			}
+		}
 	}
 	st.Workgroups[spec.Name] = ws
 }

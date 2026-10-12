@@ -6,7 +6,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
@@ -33,19 +32,6 @@ func backupConfigFor(cfg, repoCfg *config.Config, key, discoveredBy string, push
 		opts = append(opts, gitops.WithPushBranch(remote, cfg.ResolveSSHKey(key, discoveredBy)))
 	}
 	return gitops.NewBackupConfig(opts...)
-}
-
-// recordBackup stores a backup run's outcome on repo. LastBackup moves only
-// when a backup holds the current state.
-func recordBackup(repo *state.RepoState, br *gitops.BackupResult, err error, now time.Time) {
-	repo.LastBackupError = ""
-	if err != nil {
-		repo.LastBackupError = err.Error()
-	}
-	if br != nil && br.ID != "" {
-		repo.LastBackup = now
-		repo.LastBackupID = br.ID
-	}
 }
 
 // describeBackup summarises a backup run for one line of output.
@@ -103,54 +89,55 @@ func (c *BackupCmd) Run(ctx *Context) error {
 		return c.runRestore(ctx, cfg, st)
 	}
 
-	// The backup path writes per-repo backup metadata, so take the lock.
-	st, unlock, err := lockedState(ctx)
+	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}
-	defer unlock()
-
 	pass, err := selection{c.Repos, c.Tag, c.Set}.predicate(cfg)
 	if err != nil {
 		return err
 	}
 
-	saved, failed, attempted := 0, 0, 0
-	for key, repo := range st.Repos {
+	// Back up without the state lock, then record every outcome in one write.
+	var jobs []copyJob
+	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
+		repo := st.Repos[key]
 		if !pass(key, repo) || !repo.Cloned {
 			continue
 		}
-
-		repoCfg := cfg.ResolveForRepo(key)
-		backupCfg := backupConfigFor(cfg, repoCfg, key, repo.DiscoveredBy, c.PushBranch, c.PushRemote)
-		attempted++
-
-		br, err := gitops.Backup(ctx.GoCtx(), repo.LocalPath, backupCfg)
-		recordBackup(repo, br, err, time.Now())
-		if err != nil {
-			failed++
-			fmt.Fprintf(os.Stderr, "  %s: %v\n", key, err)
-		}
-		if !br.Dirty() {
-			continue
-		}
-		repo.Status = "dirty"
-		if br.Outcome == gitops.BackupSaved {
-			saved++
-			logEvent(ctx, "backup", key, br.ID)
-		}
-		if !ctx.Quiet || len(br.Skipped) > 0 {
-			fmt.Printf("  %s: %s\n", key, describeBackup(br))
-		}
+		b := backupConfigFor(cfg, cfg.ResolveForRepo(key), key, repo.DiscoveredBy, c.PushBranch, c.PushRemote)
+		jobs = append(jobs, repoJob(cfg, key, repo, &b))
+	}
+	outcomes := runCopies(ctx.GoCtx(), ctx.Logger(), jobs, cfg.Concurrency)
+	if err := st.Update(cfg.LockTimeout, func(st *state.State) error {
+		recordCopies(st, outcomes)
+		return nil
+	}); err != nil {
+		return fmt.Errorf("recording backups: %w", err)
 	}
 
-	if err := st.Save(); err != nil {
-		return fmt.Errorf("saving state: %w", err)
+	saved, failed := 0, 0
+	for _, o := range outcomes {
+		if o.backupErr != nil {
+			failed++
+			fmt.Fprintf(os.Stderr, "  %s: %v\n", o.job.label, o.backupErr)
+		}
+		br := o.backup
+		if br == nil || !br.Dirty() {
+			continue
+		}
+		if br.Outcome == gitops.BackupSaved {
+			saved++
+			logEvent(ctx, "backup", o.job.label, br.ID)
+		}
+		if !ctx.Quiet || len(br.Skipped) > 0 {
+			fmt.Printf("  %s: %s\n", o.job.label, describeBackup(br))
+		}
 	}
 	if !ctx.Quiet {
 		fmt.Printf("Saved %d new backup(s)\n", saved)
 	}
-	return outcome(failed, attempted, "repos failed to back up")
+	return outcome(failed, len(jobs), "repos failed to back up")
 }
 
 func (c *BackupCmd) runList(ctx *Context, cfg *config.Config, st *state.State) error {

@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"code.gitea.io/sdk/gitea"
 	"github.com/google/go-github/v88/github"
@@ -18,23 +19,24 @@ type Owner struct {
 }
 
 // ListOwners returns the token's own login, then the organizations it belongs
-// to (top-level groups on GitLab), for choosing what to track.
-func ListOwners(ctx context.Context, p config.Provider) ([]Owner, error) {
+// to (top-level groups on GitLab), for choosing what to track. apiTimeout
+// bounds each API request.
+func ListOwners(ctx context.Context, p config.Provider, apiTimeout time.Duration) ([]Owner, error) {
 	switch config.NormalizeProviderType(p.Type) {
 	case "github":
-		gp, err := NewGitHubProvider(p)
+		gp, err := NewGitHubProvider(p, apiTimeout)
 		if err != nil {
 			return nil, err
 		}
 		return githubOwners(ctx, gp.core.client)
 	case "gitlab":
-		gp, err := NewGitLabProvider(p)
+		gp, err := NewGitLabProvider(p, apiTimeout)
 		if err != nil {
 			return nil, err
 		}
 		return gitlabOwners(ctx, gp.client)
 	case "gitea":
-		gp, err := NewGiteaProvider(p)
+		gp, err := NewGiteaProvider(p, apiTimeout)
 		if err != nil {
 			return nil, err
 		}

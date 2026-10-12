@@ -31,17 +31,9 @@ func (c *WGPruneCmd) Run(ctx *Context) error {
 		return fmt.Errorf("specify a workgroup name or --all")
 	}
 
-	var st *state.State
-	var err error
-	if c.DryRun {
-		st, err = ctx.LoadState()
-	} else {
-		var unlock func()
-		st, unlock, err = lockedState(ctx)
-		if err == nil {
-			defer unlock()
-		}
-	}
+	// Unlocked through inspection, prompts and removals; each workgroup's
+	// removals are recorded with one locked write.
+	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}
@@ -120,19 +112,27 @@ func (c *WGPruneCmd) Run(ctx *Context) error {
 			}
 			removed = append(removed, m)
 		}
-		ws.Members = dropMembers(ws.Members, removed)
-		if len(ws.Members) == 0 {
+		emptied := false
+		err := st.Update(cfg.LockTimeout, func(st *state.State) error {
+			ws, ok := st.Workgroups[name]
+			if !ok {
+				return nil
+			}
+			ws.Members = dropMembers(ws.Members, removed)
+			if emptied = len(ws.Members) == 0; emptied {
+				delete(st.Workgroups, name)
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("recording %s's reaped members: %w", name, err)
+		}
+		if emptied {
 			workgroup.RemoveEmptyRoot(spec)
-			delete(st.Workgroups, name)
 		}
 		reaped += len(removed)
 	}
 
-	if !c.DryRun && reaped > 0 {
-		if err := st.Save(); err != nil {
-			return fmt.Errorf("saving state: %w", err)
-		}
-	}
 	if c.DryRun {
 		fmt.Printf("%d member(s) reapable.\n", reaped)
 		return nil

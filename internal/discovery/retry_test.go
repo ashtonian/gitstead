@@ -11,7 +11,7 @@ import (
 
 // newTestRetryClient builds a retry client with no real sleeping, for tests.
 func newTestRetryClient() *http.Client {
-	c := newRetryClient(nil)
+	c := newRetryClient(0)
 	c.Transport.(*retryTransport).sleep = func(ctx context.Context, d time.Duration) error {
 		return ctx.Err()
 	}

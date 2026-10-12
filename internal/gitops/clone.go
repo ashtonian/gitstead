@@ -1,19 +1,125 @@
 package gitops
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
+
+	"github.com/ashtonian/git-mgr/internal/repourl"
 )
 
-// Clone clones a repo from sshURL into destPath using the given SSH key,
-// creating the parent directory if needed. An empty sshKeyPath uses the
+// stagingPrefix names the directory a clone is made in, beside its
+// destination, until it is complete.
+const stagingPrefix = ".git-mgr-clone-"
+
+// IsStaging reports whether a directory name is a clone in progress, which
+// scans for repositories skip.
+func IsStaging(name string) bool {
+	return strings.HasPrefix(name, stagingPrefix)
+}
+
+// Clone clones url into destPath, creating parent directories. The clone is
+// made in a staging directory beside destPath and renamed into place when
+// complete, so destPath never holds a partial clone, a failed or killed clone
+// leaves nothing there, and whatever already is at destPath -- files, or
+// another run's clone -- is never touched. An empty sshKeyPath uses the
 // default SSH configuration.
-func Clone(ctx context.Context, sshURL, destPath, sshKeyPath string) error {
-	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+func Clone(ctx context.Context, url, destPath, sshKeyPath string) error {
+	parent, base := filepath.Dir(destPath), filepath.Base(destPath)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return fmt.Errorf("creating parent dir: %w", err)
 	}
-	_, err := GitClone(ctx, sshURL, destPath, sshKeyPath)
-	return err
+	if err := checkFree(destPath); err != nil {
+		return err
+	}
+	sweepStaging(parent, base)
+
+	staging, err := mkdirStaging(parent, base)
+	if err != nil {
+		return fmt.Errorf("creating staging dir: %w", err)
+	}
+	defer os.RemoveAll(staging)
+	// Holding a lock on the staging directory marks it as in use; a run that
+	// died mid-clone leaves it unlocked for the next clone to sweep.
+	held, err := os.Open(staging)
+	if err != nil {
+		return err
+	}
+	defer held.Close()
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return fmt.Errorf("locking staging dir: %w", err)
+	}
+
+	var env []string
+	if sshKeyPath != "" {
+		env = []string{gitSSHCommandEnv(sshKeyPath)}
+	}
+	cmd := newGit(ctx, env, "clone", "--quiet", url, staging)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git clone %s: %w\n%s", repourl.Redact(url), err, repourl.Redact(strings.TrimSpace(stderr.String())))
+	}
+	// os.Remove takes only an empty directory, and rename(2) won't replace a
+	// non-empty one, so anything that appeared at destPath meanwhile -- say,
+	// another run's clone -- is kept.
+	if err := os.Remove(destPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("%s appeared while cloning; leaving it as it is", destPath)
+	}
+	if err := os.Rename(staging, destPath); err != nil {
+		return fmt.Errorf("moving the clone into %s: %w", destPath, err)
+	}
+	return nil
+}
+
+// mkdirStaging creates an empty staging directory for base. Unlike
+// os.MkdirTemp it honours the umask, so the finished clone gets the
+// permissions git itself would have given it.
+func mkdirStaging(parent, base string) (string, error) {
+	for {
+		dir := filepath.Join(parent, fmt.Sprintf("%s%s-%08x", stagingPrefix, base, rand.Uint32()))
+		if err := os.Mkdir(dir, 0o777); !errors.Is(err, fs.ErrExist) {
+			return dir, err
+		}
+	}
+}
+
+// checkFree fails unless destPath is missing or an empty directory.
+func checkFree(destPath string) error {
+	info, err := os.Lstat(destPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		if entries, err := os.ReadDir(destPath); err == nil && len(entries) == 0 {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s already exists and is not an empty directory", destPath)
+}
+
+// sweepStaging removes staging directories for base that no running clone
+// holds: what a killed run left behind.
+func sweepStaging(parent, base string) {
+	dirs, _ := filepath.Glob(filepath.Join(parent, stagingPrefix+base+"-*"))
+	for _, dir := range dirs {
+		f, err := os.Open(dir)
+		if err != nil {
+			continue
+		}
+		if syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil {
+			_ = os.RemoveAll(dir)
+		}
+		f.Close()
+	}
 }

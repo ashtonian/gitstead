@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
-	"sync"
+	"slices"
 	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
@@ -14,23 +15,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/notify"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
 	"github.com/ashtonian/git-mgr/internal/state"
-	"golang.org/x/sync/errgroup"
 )
-
-type syncResult struct {
-	attempted     int // fetches and backups tried
-	fetched       int
-	skippedRecent int
-	skippedLocked int
-	failed        int
-	backedUp      int
-	errors        []syncError
-}
-
-type syncError struct {
-	repo string
-	err  error
-}
 
 func (c *SyncCmd) Run(ctx *Context) error {
 	cfg, err := ctx.LoadConfig()
@@ -41,27 +26,32 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	pass, err := selection{c.Repos, c.Tag, c.Set}.predicate(cfg)
+	if err != nil {
+		return err
+	}
 
-	// Acquire lock
-	if err := st.AcquireLock(); err != nil {
+	// Syncs don't overlap; a scheduled one that finds another running is
+	// routine. Other commands only wait on the state lock, which this run
+	// takes just long enough to record each change.
+	release, err := st.RunLock("sync")
+	if err != nil {
 		if !errors.Is(err, state.ErrLocked) {
 			return err
 		}
-		// A scheduled sync overlapping a running one is routine: exit 0.
 		if !ctx.Quiet {
-			fmt.Fprintln(os.Stderr, "Another git-mgr instance is running, skipping.")
+			fmt.Fprintln(os.Stderr, "Another sync is running, skipping.")
 		}
 		return nil
 	}
-	defer st.ReleaseLock()
-
-	// Re-read state under the lock so this run mutates from the latest on-disk
-	// state, not the snapshot loaded before the lock was held.
+	defer release()
 	if err := st.Reload(); err != nil {
 		return fmt.Errorf("reloading state: %w", err)
 	}
 
 	log := ctx.Logger()
+	var failures []syncError
+	tried := 0
 
 	// Discover, then bring repos in line with config as far as reconcile.auto
 	// allows. Without discovery only hand-added repos can be judged.
@@ -71,19 +61,23 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		if !ctx.Quiet {
 			fmt.Println("Discovering repos (auto-discover enabled)...")
 		}
-		var err error
 		results, scope.Discovered, err = discovery.RunDiscovery(ctx.GoCtx(), cfg, "", c.Tag)
 		if err != nil {
 			log.Warn("auto-discovery failed", "error", err)
 		} else {
 			scope.Rules = discovery.StaleScopeOf(results, "", c.Tag)
 		}
+		for _, r := range results {
+			for _, why := range r.Incomplete {
+				log.Warn("discovery incomplete; the rule's repos are not judged stale", "rule", r.Rule, "reason", why)
+			}
+		}
 	}
 	plan := reconcile.Compute(ctx.GoCtx(), cfg, st, scope)
 	changes := applyAuto(ctx, cfg, st, plan, reconcile.AutoFilter(cfg.Reconcile.Auto))
 	changesFailed, changesTried := failedChanges(changes)+len(plan.Blocked), len(changes)+len(plan.Blocked)
 
-	// Detect stale -- but only if every rule succeeded. On a partial failure the
+	// Judge staleness only if every rule succeeded. On a partial failure the
 	// discovered set is incomplete, and marking the missing repos stale (or
 	// deleting them under remove_and_delete) would be destructive on a
 	// transient provider outage.
@@ -91,12 +85,11 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		if discovery.AnyFailed(results) {
 			log.Warn("skipping stale detection: one or more discovery rules failed")
 		} else {
-			discoveredKeys := make(map[string]bool)
-			for k := range scope.Discovered {
-				discoveredKeys[k] = true
+			outcome, err := staleCleanup(ctx, cfg, st).Run(st, discoveredKeys(scope.Discovered), scope.Rules)
+			tried++
+			if err != nil {
+				failures = append(failures, syncError{"stale cleanup", err})
 			}
-			outcome := discovery.DetectStale(st, discoveredKeys, scope.Rules, cfg.Cleanup, true,
-				archivingRemover(ctx.GoCtx(), log, cfg.Backup.ArchiveDir))
 			if outcome.Reaped > 0 {
 				log.Info("cleaned up stale repos", "count", outcome.Reaped, "policy", cfg.Cleanup.Policy)
 			}
@@ -106,149 +99,117 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		}
 	}
 
-	// Sync repos
-	result := &syncResult{}
-	sem := make(chan struct{}, cfg.Concurrency)
-	var mu sync.Mutex
-	g, gctx := errgroup.WithContext(ctx.GoCtx())
-
-	pass, err := selection{c.Repos, c.Tag, c.Set}.predicate(cfg)
+	jobs, skippedRecent := c.jobs(cfg, st, pass)
+	outcomes := runCopies(ctx.GoCtx(), log, jobs, cfg.Concurrency)
+	err = st.Update(cfg.LockTimeout, func(st *state.State) error {
+		recordCopies(st, outcomes)
+		st.LastSync = time.Now()
+		return nil
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("recording the sync: %w", err)
 	}
 
-	for key, repo := range st.Repos {
-		key, repo := key, repo
+	fetched, skippedLocked, backedUp := 0, 0, 0
+	for _, o := range outcomes {
+		if o.job.backup != nil {
+			tried++
+		}
+		if o.fetched {
+			tried++
+		}
+		switch {
+		case o.fetched && o.fetchErr == nil:
+			fetched++
+		case errors.Is(o.fetchErr, gitops.ErrLocked):
+			skippedLocked++
+		}
+		if o.backup != nil && o.backup.Outcome == gitops.BackupSaved {
+			backedUp++
+		}
+		for _, err := range o.failed() {
+			failures = append(failures, syncError{o.job.label, err})
+		}
+	}
 
+	if cfg.Notify.Enabled && cfg.Notify.OnError && len(failures) > 0 {
+		notify.Send("git-mgr sync errors", fmt.Sprintf("%d repos failed to sync", len(failures)))
+	}
+	logEvent(ctx, "sync", "", fmt.Sprintf("fetched=%d backed_up=%d failed=%d skipped_recent=%d skipped_locked=%d",
+		fetched, backedUp, len(failures), skippedRecent, skippedLocked))
+	if !ctx.Quiet {
+		fmt.Printf("Synced: %d fetched, %d skipped (recent), %d skipped (locked), %d failed, %d backed up\n",
+			fetched, skippedRecent, skippedLocked, len(failures), backedUp)
+	}
+	for _, e := range failures {
+		fmt.Fprintf(os.Stderr, "  %s: %v\n", e.repo, e.err)
+	}
+	return outcome(len(failures)+changesFailed, tried+changesTried, "sync operations failed")
+}
+
+type syncError struct {
+	repo string
+	err  error
+}
+
+// jobs lists the copies this run backs up and fetches: selected repos, and
+// the workgroup members of selected repos (all of them when nothing is
+// selected). Repos fetched within min_fetch_interval are only backed up.
+func (c *SyncCmd) jobs(cfg *config.Config, st *state.State, pass func(string, *state.RepoState) bool) (jobs []copyJob, skippedRecent int) {
+	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
+		repo := st.Repos[key]
 		if !pass(key, repo) || repo.Status == "stale" || !repo.Cloned {
 			continue
 		}
-
 		repoCfg := cfg.ResolveForRepo(key)
-
-		g.Go(func() error {
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			repoCtx, cancel := context.WithTimeout(gctx, repoCfg.Sync.TimeoutPerRepo)
-			defer cancel()
-
-			// Fetch (skipped for repos with sync.enabled: false -- tracked/backed
-			// up but never auto-fetched).
-			if !c.NoFetch && repoCfg.Sync.Enabled {
-				if !c.Force && !repo.LastFetch.IsZero() && time.Since(repo.LastFetch) < repoCfg.Sync.MinFetchInterval {
-					mu.Lock()
-					result.skippedRecent++
-					mu.Unlock()
-				} else {
-					sshKey := cfg.ResolveSSHKey(key, repo.DiscoveredBy)
-					err := fetchWithRetry(repoCtx, repo.LocalPath, sshKey, repoCfg.Sync)
-					mu.Lock()
-					result.attempted++
-					switch {
-					case err == nil:
-						result.fetched++
-						repo.LastFetch = time.Now()
-						repo.LastFetchError = ""
-					case errors.Is(err, gitops.ErrLocked):
-						// Transient: another git process holds a lock.
-						// Skip this round without flagging an error.
-						result.skippedLocked++
-					default:
-						result.failed++
-						result.errors = append(result.errors, syncError{repo: key, err: err})
-						repo.LastFetchError = err.Error()
-						repo.Status = "error"
-					}
-					mu.Unlock()
-				}
-			}
-
-			// Backup
-			if !c.NoBackup && repoCfg.Backup.Enabled {
-				backupCfg := backupConfigFor(cfg, repoCfg, key, repo.DiscoveredBy, c.PushBranch, "")
-				br, err := gitops.Backup(repoCtx, repo.LocalPath, backupCfg)
-				mu.Lock()
-				result.attempted++
-				recordBackup(repo, br, err, time.Now())
-				if err != nil {
-					result.failed++
-					result.errors = append(result.errors, syncError{repo: key, err: err})
-				}
-				if br.Outcome == gitops.BackupSaved {
-					result.backedUp++
-				}
-				if br.Dirty() {
-					log.Debug("backup", "repo", key, "outcome", br.Outcome.String(), "id", br.ID, "pushed", br.PushedBranch)
-				}
-				if len(br.Skipped) > 0 {
-					log.Warn("untracked paths left out of backup", "repo", key, "count", len(br.Skipped), "paths", skippedSummary(br.Skipped))
-				}
-				mu.Unlock()
-			}
-
-			// Update status
-			if rs, err := gitops.GetStatus(repoCtx, repo.LocalPath); err == nil {
-				mu.Lock()
-				repo.HeadCommit = rs.HeadCommit
-				repo.CurrentBranch = rs.CurrentBranch
-				if repo.Status != "error" && repo.Status != "stale" {
-					repo.Status = rs.StatusString()
-				}
-				mu.Unlock()
-			}
-
-			return nil
-		})
-	}
-
-	_ = g.Wait()
-
-	// Back up workgroup members too. The tracked-repo loop above never sees agent
-	// worktrees, so without this their uncommitted work is unprotected by the
-	// scheduled run -- exactly the data the workgroup subsystem exists to keep.
-	if !c.NoBackup {
-		repoCfg := cfg.ResolveForRepo("")
-		bcfg := backupConfigFor(cfg, repoCfg, "", "", c.PushBranch, "")
-		for wgName, ws := range st.Workgroups {
-			for _, m := range ws.Members {
-				if !gitops.HasGitDir(m.Path) {
-					continue
-				}
-				br, berr := gitops.Backup(ctx.GoCtx(), m.Path, bcfg)
-				result.attempted++
-				if berr != nil {
-					result.failed++
-					result.errors = append(result.errors, syncError{repo: wgName + "/" + m.Name, err: berr})
-				}
-				if br.Outcome == gitops.BackupSaved {
-					result.backedUp++
-				}
+		var backup *gitops.BackupConfig
+		if !c.NoBackup && repoCfg.Backup.Enabled {
+			b := backupConfigFor(cfg, repoCfg, key, repo.DiscoveredBy, c.PushBranch, "")
+			backup = &b
+		}
+		job := repoJob(cfg, key, repo, backup)
+		// sync.enabled: false keeps a repo tracked and backed up, never fetched.
+		if !c.NoFetch && repoCfg.Sync.Enabled {
+			if !c.Force && !repo.LastFetch.IsZero() && time.Since(repo.LastFetch) < repoCfg.Sync.MinFetchInterval {
+				skippedRecent++
+			} else {
+				job.fetch = true
 			}
 		}
+		jobs = append(jobs, job)
 	}
 
-	// Notifications
-	if cfg.Notify.Enabled && len(result.errors) > 0 && cfg.Notify.OnError {
-		notify.Send("git-mgr sync errors",
-			fmt.Sprintf("%d repos failed to sync", len(result.errors)))
+	// Agent worktrees and clones never show up as tracked repos; without
+	// this their uncommitted work -- what workgroups exist to keep -- would
+	// be unprotected by the scheduled run.
+	memberCfg := cfg.ResolveForRepo("")
+	if c.NoBackup || !memberCfg.Backup.Enabled {
+		return jobs, skippedRecent
 	}
-
-	st.LastSync = time.Now()
-	if err := st.Save(); err != nil {
-		return fmt.Errorf("saving state: %w", err)
+	backup := backupConfigFor(cfg, memberCfg, "", "", c.PushBranch, "")
+	all := (selection{c.Repos, c.Tag, c.Set}).empty()
+	// A member adopted from a tracked repo's directory is already a job; two
+	// backups of one working copy at once would race on its refs.
+	queued := make(map[string]bool, len(jobs))
+	for _, j := range jobs {
+		queued[j.path] = true
 	}
-	logEvent(ctx, "sync", "", fmt.Sprintf("fetched=%d backed_up=%d failed=%d skipped_recent=%d skipped_locked=%d",
-		result.fetched, result.backedUp, result.failed, result.skippedRecent, result.skippedLocked))
-
-	if !ctx.Quiet {
-		fmt.Printf("Synced: %d fetched, %d skipped (recent), %d skipped (locked), %d failed, %d backed up\n",
-			result.fetched, result.skippedRecent, result.skippedLocked, result.failed, result.backedUp)
+	for _, wgName := range slices.Sorted(maps.Keys(st.Workgroups)) {
+		for _, m := range st.Workgroups[wgName].Members {
+			if repo := st.Repos[m.RepoKey]; !all && (repo == nil || !pass(m.RepoKey, repo)) {
+				continue
+			}
+			if queued[m.Path] || !gitops.HasGitDir(m.Path) {
+				continue
+			}
+			queued[m.Path] = true
+			jobs = append(jobs, copyJob{
+				label: wgName + "/" + m.Name, workgroup: wgName, member: m.Name, path: m.Path,
+				backup: &backup, backupTimeout: memberCfg.Sync.BackupTimeout,
+			})
+		}
 	}
-	for _, e := range result.errors {
-		fmt.Fprintf(os.Stderr, "  %s: %v\n", e.repo, e.err)
-	}
-	return outcome(len(result.errors)+changesFailed, result.attempted+changesTried, "sync operations failed")
+	return jobs, skippedRecent
 }
 
 func fetchWithRetry(ctx context.Context, repoPath, sshKey string, cfg config.SyncConfig) error {

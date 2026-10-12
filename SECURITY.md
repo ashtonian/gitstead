@@ -34,6 +34,14 @@ calling out:
 - **SSH keys** are referenced by path and passed to `git` via `GIT_SSH_COMMAND`
   with `IdentitiesOnly=yes`, and written into each repo they apply to as
   `core.sshCommand`. git-mgr never reads key material itself.
+- **git never prompts.** Every git command runs without a terminal, with
+  `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never` and
+  `SSH_ASKPASS_REQUIRE=never`, so a missing credential fails instead of
+  waiting, and nothing typed is ever collected. When git-mgr passes a key
+  itself, ssh runs with `BatchMode=yes` and `StrictHostKeyChecking=accept-new`:
+  an unknown host's key is recorded on first use, and a changed one fails the
+  connection. Pre-populate `~/.ssh/known_hosts` if first use must be verified
+  too.
 - **Config and state files** may contain repo paths and (if you inline them)
   tokens. They are written with `0600`/`0700` permissions; keep them out of
   version control.

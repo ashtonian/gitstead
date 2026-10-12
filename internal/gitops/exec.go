@@ -3,24 +3,54 @@ package gitops
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/shellutil"
 )
 
+// batchEnv keeps git and its helpers from waiting on a person: git-mgr runs
+// git in parallel and unattended, where a prompt can only hang the run.
+var batchEnv = []string{
+	"GIT_TERMINAL_PROMPT=0",     // git's own username/password prompt
+	"GCM_INTERACTIVE=never",     // Git Credential Manager's dialogs
+	"SSH_ASKPASS_REQUIRE=never", // ssh's graphical passphrase prompt
+}
+
+// killGrace bounds how long Wait waits for output after git is killed; a
+// helper git started (ssh, git-remote-https) can hold the pipes open.
+const killGrace = 5 * time.Second
+
+// newGit builds a git command that cannot prompt. It runs in a session of
+// its own, without a controlling terminal, so ssh fails instead of asking for
+// a passphrase or to trust a host key; when ctx ends, the whole session --
+// ssh and credential helpers included -- is killed.
+func newGit(ctx context.Context, env []string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Env = append(append(os.Environ(), batchEnv...), env...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.Cancel = func() error {
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
+	cmd.WaitDelay = killGrace
+	return cmd
+}
+
 // gitCommand builds a git invocation in repoPath with env appended to the
 // process environment. --no-optional-locks keeps read-only commands such as
 // status from refreshing the index under an agent's running git command.
 func gitCommand(ctx context.Context, repoPath string, env []string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"--no-optional-locks", "-C", repoPath}, args...)...)
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
-	}
-	return cmd
+	return newGit(ctx, env, append([]string{"--no-optional-locks", "-C", repoPath}, args...)...)
 }
 
 // runGit runs cmd and returns its stdout, folding stderr into the error.
@@ -88,28 +118,13 @@ func GitExitCode(ctx context.Context, repoPath string, args ...string) int {
 	return 0
 }
 
-// GitClone clones a repo. Does not use -C since the target doesn't exist yet.
-func GitClone(ctx context.Context, sshURL, destPath, sshKeyPath string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "clone", sshURL, destPath)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if sshKeyPath != "" {
-		cmd.Env = append(os.Environ(), gitSSHCommandEnv(sshKeyPath))
-	}
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git clone %s: %w\n%s", repourl.Redact(sshURL), err, repourl.Redact(strings.TrimSpace(stderr.String())))
-	}
-	return strings.TrimSpace(stdout.String()), nil
-}
-
 // gitSSHCommandEnv builds the GIT_SSH_COMMAND env entry pointing git at a
 // specific SSH key. The key path is shell-quoted because git runs
 // GIT_SSH_COMMAND through the shell, so an unquoted path containing spaces
 // would otherwise be split into separate arguments.
 func gitSSHCommandEnv(sshKeyPath string) string {
 	return fmt.Sprintf(
-		"GIT_SSH_COMMAND=ssh -i %s -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
+		"GIT_SSH_COMMAND=ssh -i %s -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
 		shellutil.Quote(sshKeyPath),
 	)
 }

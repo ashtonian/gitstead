@@ -68,13 +68,13 @@ func TestAcquireLock(t *testing.T) {
 	path := filepath.Join(dir, "state.yaml")
 
 	st, _ := state.Load(path)
-	if err := st.AcquireLock(); err != nil {
+	if err := st.Lock(0); err != nil {
 		t.Fatalf("first lock should succeed: %v", err)
 	}
 
 	// Second lock should fail
 	st2, _ := state.Load(path)
-	if err := st2.AcquireLock(); err == nil {
+	if err := st2.Lock(0); err == nil {
 		t.Error("second lock should fail")
 	}
 
@@ -82,7 +82,7 @@ func TestAcquireLock(t *testing.T) {
 
 	// After release, locking should work again
 	st3, _ := state.Load(path)
-	if err := st3.AcquireLock(); err != nil {
+	if err := st3.Lock(0); err != nil {
 		t.Fatalf("lock after release should succeed: %v", err)
 	}
 	st3.ReleaseLock()
@@ -139,12 +139,68 @@ func TestLoad_RefusesNewerVersion(t *testing.T) {
 func TestAcquireLock_HeldIsErrLocked(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.yaml")
 	first, _ := state.Load(path)
-	if err := first.AcquireLock(); err != nil {
+	if err := first.Lock(0); err != nil {
 		t.Fatal(err)
 	}
 	defer first.ReleaseLock()
 	second, _ := state.Load(path)
-	if err := second.AcquireLock(); !errors.Is(err, state.ErrLocked) {
+	if err := second.Lock(0); !errors.Is(err, state.ErrLocked) {
 		t.Fatalf("second lock = %v, want ErrLocked", err)
+	}
+}
+
+func TestLock_WaitsForRelease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.yaml")
+	holder, _ := state.Load(path)
+	if err := holder.Lock(0); err != nil {
+		t.Fatal(err)
+	}
+	waiter, _ := state.Load(path)
+	got := make(chan error, 1)
+	go func() { got <- waiter.Lock(10 * time.Second) }()
+	holder.ReleaseLock()
+	if err := <-got; err != nil {
+		t.Fatalf("a waiting Lock should get the lock once it is released: %v", err)
+	}
+	waiter.ReleaseLock()
+}
+
+func TestRunLock_IsSeparateFromTheStateLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.yaml")
+	st, _ := state.Load(path)
+	release, err := st.RunLock("sync")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if _, err := st.RunLock("sync"); !errors.Is(err, state.ErrLocked) {
+		t.Errorf("a second sync must not start: %v", err)
+	}
+	other, _ := state.Load(path)
+	if err := other.Lock(0); err != nil {
+		t.Fatalf("the state lock stays free while a sync runs: %v", err)
+	}
+	other.ReleaseLock()
+}
+
+func TestUpdate_AppliesToTheLatestState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.yaml")
+	a, _ := state.Load(path)
+	b, _ := state.Load(path) // loaded before a's change
+	if err := a.Update(0, func(s *state.State) error {
+		s.Repos["one"] = &state.RepoState{Name: "one"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Update(0, func(s *state.State) error {
+		s.Repos["two"] = &state.RepoState{Name: "two"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	final, _ := state.Load(path)
+	if len(final.Repos) != 2 {
+		t.Fatalf("an update must not lose another's change: %v", final.Repos)
 	}
 }

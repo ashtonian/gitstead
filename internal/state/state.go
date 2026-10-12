@@ -78,13 +78,9 @@ type RepoState struct {
 	// Sync State
 	LastFetch      time.Time `yaml:"last_fetch" json:"last_fetch"`
 	LastFetchError string    `yaml:"last_fetch_error" json:"last_fetch_error"`
-	// LastBackup is when the working copy's state was last known to be saved,
-	// by a new backup or one identical to it; LastBackupID names that backup.
-	LastBackup      time.Time `yaml:"last_backup" json:"last_backup"`
-	LastBackupID    string    `yaml:"last_backup_id,omitempty" json:"last_backup_id,omitempty"`
-	LastBackupError string    `yaml:"last_backup_error,omitempty" json:"last_backup_error,omitempty"`
-	Status          string    `yaml:"status" json:"status"` // clean, dirty, conflict, error, uncloned, missing, stale
-	Error           string    `yaml:"error" json:"error"`
+	BackupStatus   `yaml:",inline"`
+	Status         string `yaml:"status" json:"status"` // clean, dirty, conflict, error, uncloned, missing, stale
+	Error          string `yaml:"error" json:"error"`
 
 	// Discovery State
 	FirstSeen      time.Time `yaml:"first_seen" json:"first_seen"`
@@ -130,6 +126,29 @@ type WorkgroupMemberState struct {
 	// ManagedConfig holds the git config keys git-mgr set in a clone member,
 	// as RepoState.ManagedConfig does for a repo.
 	ManagedConfig map[string]string `yaml:"managed_config,omitempty" json:"managed_config,omitempty"`
+	BackupStatus  `yaml:",inline"`
+}
+
+// BackupStatus is what the last backup of a working copy did.
+type BackupStatus struct {
+	// LastBackup is when the working copy's state was last known to be saved,
+	// by a new backup or one identical to it; LastBackupID names that backup.
+	LastBackup      time.Time `yaml:"last_backup,omitempty" json:"last_backup,omitzero"`
+	LastBackupID    string    `yaml:"last_backup_id,omitempty" json:"last_backup_id,omitempty"`
+	LastBackupError string    `yaml:"last_backup_error,omitempty" json:"last_backup_error,omitempty"`
+}
+
+// RecordBackup stores a backup run's outcome. id is the backup that holds the
+// working copy's current state, "" when there is none (a clean tree, or a
+// failure); LastBackup moves only when there is one.
+func (b *BackupStatus) RecordBackup(id string, err error, now time.Time) {
+	b.LastBackupError = ""
+	if err != nil {
+		b.LastBackupError = err.Error()
+	}
+	if id != "" {
+		b.LastBackup, b.LastBackupID = now, id
+	}
 }
 
 // Load reads the state file from disk. Creates a new empty state if the file doesn't exist.
@@ -225,38 +244,89 @@ func (s *State) Reload() error {
 	return nil
 }
 
-// AcquireLock acquires an exclusive flock on the state file.
-// Returns an error if another instance is already running.
-func (s *State) AcquireLock() error {
-	lockPath := s.path + ".lock"
-	dir := filepath.Dir(lockPath)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("creating lock dir: %w", err)
-	}
+// lockPoll is how often a waiting Lock retries.
+const lockPoll = 100 * time.Millisecond
 
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+// Lock takes the exclusive state lock, waiting up to wait for another run to
+// release it (0 means don't wait). It returns ErrLocked if the lock stays
+// held. Hold it only around reading, changing and saving state; Update does
+// all three.
+func (s *State) Lock(wait time.Duration) error {
+	f, err := flock(s.path+".lock", wait)
 	if err != nil {
-		return fmt.Errorf("opening lock file: %w", err)
+		return err
 	}
-
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return ErrLocked
-		}
-		return fmt.Errorf("locking %s: %w", lockPath, err)
-	}
-
 	s.lockFD = f
 	return nil
 }
 
-// ReleaseLock releases the flock.
+// ReleaseLock releases the state lock.
 func (s *State) ReleaseLock() {
 	if s.lockFD != nil {
 		syscall.Flock(int(s.lockFD.Fd()), syscall.LOCK_UN)
 		s.lockFD.Close()
 		s.lockFD = nil
+	}
+}
+
+// Update applies change to the latest state as one atomic step: it takes the
+// lock (waiting up to wait), re-reads the file, calls change and saves. A
+// change that returns an error saves nothing.
+func (s *State) Update(wait time.Duration, change func(*State) error) error {
+	if err := s.Lock(wait); err != nil {
+		return err
+	}
+	defer s.ReleaseLock()
+	if err := s.Reload(); err != nil {
+		return err
+	}
+	if err := change(s); err != nil {
+		return err
+	}
+	return s.Save()
+}
+
+// RunLock takes the exclusive lock for a long activity, such as a sync, that
+// must not run twice at once. It is separate from the state lock, so other
+// commands keep working while the activity runs, and it never waits: a second
+// run gets ErrLocked. Call the returned func to release it.
+func (s *State) RunLock(name string) (release func(), err error) {
+	f, err := flock(s.path+"."+name+".lock", 0)
+	if err != nil {
+		return nil, err
+	}
+	return func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, nil
+}
+
+// flock takes an exclusive lock on path, retrying until wait has passed.
+func flock(path string, wait time.Duration) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("creating lock dir: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("opening lock file: %w", err)
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		switch {
+		case err == nil:
+			return f, nil
+		case !errors.Is(err, syscall.EWOULDBLOCK):
+			f.Close()
+			return nil, fmt.Errorf("locking %s: %w", path, err)
+		case time.Now().After(deadline):
+			f.Close()
+			if wait <= 0 {
+				return nil, fmt.Errorf("%w (%s is held)", ErrLocked, path)
+			}
+			return nil, fmt.Errorf("%w (%s still held after %s)", ErrLocked, path, wait)
+		}
+		time.Sleep(lockPoll)
 	}
 }
 

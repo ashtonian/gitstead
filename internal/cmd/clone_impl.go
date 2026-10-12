@@ -16,11 +16,10 @@ func (c *CloneCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	st, unlock, err := lockedState(ctx)
+	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}
-	defer unlock()
 
 	if err := repourl.CheckNoCredentials(c.URL); err != nil {
 		return err

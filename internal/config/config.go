@@ -10,23 +10,26 @@ type Config struct {
 	BaseDir      string `koanf:"base_dir"       yaml:"base_dir"       default:"~/repos"                        validate:"required"`
 	PathTemplate string `koanf:"path_template"  yaml:"path_template"  default:"{{.Host}}/{{.Owner}}/{{.Name}}"  validate:"required"`
 	// Layout names a common path_template: owner/name, host/owner/name or name.
-	Layout        string           `koanf:"layout" yaml:"layout,omitempty" validate:"omitempty,oneof=owner/name host/owner/name name"`
-	CloneProtocol string           `koanf:"clone_protocol" yaml:"clone_protocol" default:"ssh"                            validate:"oneof=ssh https"`
-	Concurrency   int              `koanf:"concurrency"   yaml:"concurrency"   default:"8"                                    validate:"min=1,max=128"`
-	Accounts      []Account        `koanf:"accounts"      yaml:"accounts,omitempty" validate:"dive"`
-	Providers     []Provider       `koanf:"providers"     yaml:"providers"      validate:"dive"`
-	Discovery     []DiscoveryRule  `koanf:"discovery"     yaml:"discovery"      validate:"dive"`
-	Repos         []ManualRepo     `koanf:"repos"         yaml:"repos,omitempty" validate:"dive"`
-	Exclude       []ExcludeRule    `koanf:"exclude"       yaml:"exclude"        validate:"dive"`
-	Sets          []RepoSet        `koanf:"sets"          yaml:"sets,omitempty" validate:"dive"`
-	Overrides     []Override       `koanf:"overrides"     yaml:"overrides"      validate:"dive"`
-	Sync          SyncConfig       `koanf:"sync"          yaml:"sync"`
-	Cleanup       CleanupConfig    `koanf:"cleanup"       yaml:"cleanup"`
-	Backup        BackupCfg        `koanf:"backup"        yaml:"backup"`
-	RemoteSync    RemoteSyncConfig `koanf:"remote_sync"   yaml:"remote_sync"`
-	Reconcile     ReconcileConfig  `koanf:"reconcile"     yaml:"reconcile"`
-	Notify        NotifyConfig     `koanf:"notify"        yaml:"notify"`
-	Log           LogConfig        `koanf:"log"           yaml:"log"`
+	Layout        string `koanf:"layout" yaml:"layout,omitempty" validate:"omitempty,oneof=owner/name host/owner/name name"`
+	CloneProtocol string `koanf:"clone_protocol" yaml:"clone_protocol" default:"ssh"                            validate:"oneof=ssh https"`
+	Concurrency   int    `koanf:"concurrency"   yaml:"concurrency"   default:"8"                                    validate:"min=1,max=128"`
+	// LockTimeout is how long a command waits for another git-mgr run to
+	// finish changing state before giving up.
+	LockTimeout time.Duration    `koanf:"lock_timeout" yaml:"lock_timeout" default:"2m" validate:"min=0"`
+	Accounts    []Account        `koanf:"accounts"      yaml:"accounts,omitempty" validate:"dive"`
+	Providers   []Provider       `koanf:"providers"     yaml:"providers"      validate:"dive"`
+	Discovery   []DiscoveryRule  `koanf:"discovery"     yaml:"discovery"      validate:"dive"`
+	Repos       []ManualRepo     `koanf:"repos"         yaml:"repos,omitempty" validate:"dive"`
+	Exclude     []ExcludeRule    `koanf:"exclude"       yaml:"exclude"        validate:"dive"`
+	Sets        []RepoSet        `koanf:"sets"          yaml:"sets,omitempty" validate:"dive"`
+	Overrides   []Override       `koanf:"overrides"     yaml:"overrides"      validate:"dive"`
+	Sync        SyncConfig       `koanf:"sync"          yaml:"sync"`
+	Cleanup     CleanupConfig    `koanf:"cleanup"       yaml:"cleanup"`
+	Backup      BackupCfg        `koanf:"backup"        yaml:"backup"`
+	RemoteSync  RemoteSyncConfig `koanf:"remote_sync"   yaml:"remote_sync"`
+	Reconcile   ReconcileConfig  `koanf:"reconcile"     yaml:"reconcile"`
+	Notify      NotifyConfig     `koanf:"notify"        yaml:"notify"`
+	Log         LogConfig        `koanf:"log"           yaml:"log"`
 
 	WorkgroupBaseDir string            `koanf:"workgroup_base_dir" yaml:"workgroup_base_dir" default:"~/workgroups"`
 	Workgroups       []Workgroup       `koanf:"workgroups" yaml:"workgroups,omitempty" validate:"dive"`
@@ -252,7 +255,11 @@ type SyncConfig struct {
 	Enabled          bool          `koanf:"enabled"            yaml:"enabled"            default:"true"`
 	AutoDiscover     bool          `koanf:"auto_discover"      yaml:"auto_discover"      default:"true"`
 	MinFetchInterval time.Duration `koanf:"min_fetch_interval" yaml:"min_fetch_interval" default:"10m"    validate:"min=0"`
-	TimeoutPerRepo   time.Duration `koanf:"timeout_per_repo"   yaml:"timeout_per_repo"   default:"5m"     validate:"min=0"`
+	TimeoutPerRepo   time.Duration `koanf:"timeout_per_repo"   yaml:"timeout_per_repo"   default:"5m"     validate:"min=0"` // one repo's fetch
+	BackupTimeout    time.Duration `koanf:"backup_timeout"     yaml:"backup_timeout"     default:"2m"     validate:"min=0"` // one repo's backup
+	CloneTimeout     time.Duration `koanf:"clone_timeout"      yaml:"clone_timeout"      default:"30m"    validate:"min=0"` // one clone
+	APITimeout       time.Duration `koanf:"api_timeout"        yaml:"api_timeout"        default:"60s"    validate:"min=0"` // one provider API request
+	DiscoveryTimeout time.Duration `koanf:"discovery_timeout"  yaml:"discovery_timeout"  default:"5m"     validate:"min=0"` // one discovery rule
 	Retries          int           `koanf:"retries"            yaml:"retries"            default:"2"      validate:"min=0,max=10"`
 	RetryBackoff     time.Duration `koanf:"retry_backoff"      yaml:"retry_backoff"      default:"2s"     validate:"min=0"`
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/shellutil"
+	"github.com/ashtonian/git-mgr/internal/state"
 	"gopkg.in/yaml.v3"
 )
 
@@ -82,11 +83,12 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 		return fmt.Errorf("specify a repo pattern, --tag, or --set")
 	}
 
-	st, unlock, err := lockedState(ctx)
+	// Unlocked through the prompt and the archiving; the untracking is one
+	// locked write at the end.
+	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}
-	defer unlock()
 
 	toRemove, err := selectRepos(cfg, st, sel)
 	if err != nil {
@@ -114,6 +116,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 	}
 
 	var kept []string
+	untrack := map[string]string{} // key -> the path it was removed at
 	for _, key := range toRemove {
 		repo := st.Repos[key]
 		if c.Delete && repo.LocalPath != "" {
@@ -128,13 +131,26 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 			}
 			fmt.Printf("  Deleted %s\n", repo.LocalPath)
 		}
-		delete(st.Repos, key)
-		logEvent(ctx, "remove", key, "")
-		fmt.Printf("  Removed %s\n", key)
+		untrack[key] = repo.LocalPath
 	}
 
-	if err := st.Save(); err != nil {
+	err = st.Update(cfg.LockTimeout, func(st *state.State) error {
+		for key, path := range untrack {
+			// A repo moved meanwhile wasn't the one deleted; keep tracking it.
+			if repo := st.Repos[key]; repo != nil && (!c.Delete || repo.LocalPath == path) {
+				delete(st.Repos, key)
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return err
+	}
+	for _, key := range toRemove {
+		if _, ok := untrack[key]; ok {
+			logEvent(ctx, "remove", key, "")
+			fmt.Printf("  Removed %s\n", key)
+		}
 	}
 	return outcome(len(kept), len(toRemove), "repos could not be deleted and are still tracked: %s", strings.Join(kept, ", "))
 }

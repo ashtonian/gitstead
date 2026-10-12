@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"code.gitea.io/sdk/gitea"
 	"github.com/ashtonian/git-mgr/internal/config"
@@ -26,7 +27,7 @@ type GiteaProvider struct {
 // NewGiteaProvider creates a Gitea/Forgejo provider. The SDK targets the
 // instance base URL and appends /api/v1 itself, so a URL copied from the
 // GitHub-shim style (".../api/v1/") is normalized back to the base.
-func NewGiteaProvider(cfg config.Provider) (*GiteaProvider, error) {
+func NewGiteaProvider(cfg config.Provider, apiTimeout time.Duration) (*GiteaProvider, error) {
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("gitea provider %q requires 'url'", cfg.Name)
 	}
@@ -34,7 +35,7 @@ func NewGiteaProvider(cfg config.Provider) (*GiteaProvider, error) {
 	base = strings.TrimSuffix(base, "/api/v1")
 	base = strings.TrimRight(base, "/")
 
-	opts := []gitea.ClientOption{gitea.SetHTTPClient(newRetryClient(nil))}
+	opts := []gitea.ClientOption{gitea.SetHTTPClient(newRetryClient(apiTimeout))}
 	tok, err := ResolveToken(cfg)
 	if err != nil {
 		return nil, err

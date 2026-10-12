@@ -5,7 +5,6 @@ import (
 
 	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
-	"github.com/ashtonian/git-mgr/internal/state"
 )
 
 func (c *DiscoverCmd) Run(ctx *Context) error {
@@ -14,18 +13,8 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	// --apply mutates and saves state, so hold the lock (and re-read under it)
-	// for that path; a dry-run preview stays lock-free.
-	var st *state.State
-	if c.Apply {
-		var unlock func()
-		st, unlock, err = lockedState(ctx)
-		if err == nil {
-			defer unlock()
-		}
-	} else {
-		st, err = ctx.LoadState()
-	}
+	// Applying locks the state per change, so this reads it unlocked.
+	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}
@@ -50,6 +39,9 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 		for _, w := range r.Warnings {
 			fmt.Printf("      warning: %s\n", w)
 		}
+		for _, why := range r.Incomplete {
+			fmt.Printf("      incomplete, so none of its repos are judged stale: %s\n", why)
+		}
 	}
 	fmt.Printf("\n%d new, %d existing\n\n", len(discovered)-existing, existing)
 
@@ -70,12 +62,16 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 	if discovery.AnyFailed(results) {
 		fmt.Println("\nSkipping stale detection: one or more discovery rules failed.")
 	} else {
-		discoveredKeys := make(map[string]bool)
-		for k := range discovered {
-			discoveredKeys[k] = true
+		cleanup := staleCleanup(ctx, cfg, st)
+		var outcome discovery.CleanupResult
+		if c.Apply {
+			var cerr error
+			if outcome, cerr = cleanup.Run(st, discoveredKeys(discovered), scope); cerr != nil {
+				return fmt.Errorf("recording stale repos: %w", cerr)
+			}
+		} else {
+			outcome = cleanup.Preview(st, discoveredKeys(discovered), scope)
 		}
-		outcome := discovery.DetectStale(st, discoveredKeys, scope, cfg.Cleanup, c.Apply,
-			archivingRemover(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir))
 		if outcome.NewlyStale > 0 {
 			fmt.Printf("\n%d newly stale repos\n", outcome.NewlyStale)
 		}
@@ -94,9 +90,6 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 	if !c.Apply {
 		fmt.Println("\nUse --apply to make the changes that move and delete nothing, or `git-mgr apply` for all of them.")
 		return nil
-	}
-	if err := st.Save(); err != nil {
-		return fmt.Errorf("saving state: %w", err)
 	}
 	fmt.Printf("State updated: %d repos tracked.\n", len(st.Repos))
 	return applyErr

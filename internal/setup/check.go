@@ -58,7 +58,7 @@ func (c Checker) Check(ctx context.Context, cfg *config.Config) []Check {
 			continue
 		}
 		pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		owners, err := discovery.ListOwners(pctx, p)
+		owners, err := discovery.ListOwners(pctx, p, cfg.Sync.APITimeout)
 		cancel()
 		if err != nil || len(owners) == 0 {
 			add(Fail, "provider %q: the API rejected the token: %v", p.Name, err)

@@ -70,13 +70,13 @@ type Capabilities struct {
 }
 
 // ProviderResult is what Discover returns: the repos, the set of filters the
-// provider already enforced server-side, its capabilities, and any non-fatal
-// warnings (e.g. a search result truncated at the API's hard cap).
+// provider already enforced server-side, its capabilities, and why the repos
+// may be incomplete (e.g. a search truncated at the API's hard cap).
 type ProviderResult struct {
 	Repos        []Repo
 	Applied      FilterSet
 	Capabilities Capabilities
-	Warnings     []string
+	Incomplete   []string
 }
 
 // Provider discovers repos from a hosting service instance.

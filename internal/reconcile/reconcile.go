@@ -102,7 +102,7 @@ type Plan struct {
 	// record updates state with what this run observed (copy IDs, provider
 	// IDs, discovery metadata). It changes nothing on disk beyond creating
 	// missing copy IDs, so it runs whenever a plan is applied.
-	record []func(ctx context.Context, env *Env)
+	record []func(ctx context.Context, st *state.State)
 }
 
 // MarshalJSON writes empty lists as [] rather than null.
@@ -148,9 +148,13 @@ func (p *Plan) Disruptive() int {
 // Env is what applying a plan acts on.
 type Env struct {
 	State *state.State
-	// Save persists State. Apply calls it after every action, so an
-	// interruption loses at most the action in progress.
-	Save func() error
+	// Update applies a change to the latest state and saves it, under the
+	// state lock, so other git-mgr runs can work between actions: an action
+	// does its slow disk work (a clone, an archive) first and only then
+	// records the result. Required.
+	Update func(change func(*state.State) error) error
+	// CloneTimeout bounds each clone; 0 means none.
+	CloneTimeout time.Duration
 	// ArchiveDir receives the unique work of anything removed.
 	ArchiveDir string
 	// KeepDirs are directories never removed when a move leaves its old
@@ -206,14 +210,18 @@ func All(Action) bool { return true }
 func None(Action) bool { return false }
 
 // Apply records this run's observations, then runs the actions include
-// selects, in order, saving state after each. An action whose target already
-// failed in this run is skipped, so a failed rename never leads to a move.
+// selects, in order; each action records what it did in state as soon as it
+// has done it. An action whose target already failed in this run is skipped,
+// so a failed rename never leads to a move.
 func (p *Plan) Apply(ctx context.Context, env *Env, include func(Action) bool) []Result {
-	for _, rec := range p.record {
-		rec(ctx, env)
-	}
-	if len(p.record) > 0 && env.Save != nil {
-		if err := env.Save(); err != nil {
+	if len(p.record) > 0 {
+		err := env.Update(func(st *state.State) error {
+			for _, rec := range p.record {
+				rec(ctx, st)
+			}
+			return nil
+		})
+		if err != nil {
 			return []Result{{Err: err}}
 		}
 	}
@@ -229,14 +237,6 @@ func (p *Plan) Apply(ctx context.Context, env *Env, include func(Action) bool) [
 			continue
 		}
 		info, err := a.run(ctx, env)
-		// Save even after a failure: an action records in state only what it
-		// actually changed, and a move that succeeded before a later step
-		// failed must not be forgotten.
-		if env.Save != nil {
-			if serr := env.Save(); serr != nil && err == nil {
-				err = serr
-			}
-		}
 		if err != nil {
 			failed[a.Target] = true
 		}

@@ -63,6 +63,8 @@ func runTokenCommand(cfg config.Provider) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), tokenCommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", cfg.TokenCommand)
+	// Killing sh leaves what it started; don't wait on it for the output.
+	cmd.WaitDelay = 2 * time.Second
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/discovery"
@@ -92,7 +93,12 @@ func (w *world) plan() *reconcile.Plan {
 
 func (w *world) apply(p *reconcile.Plan, include func(reconcile.Action) bool) []reconcile.Result {
 	w.t.Helper()
-	env := &reconcile.Env{State: w.st, Save: w.st.Save, ArchiveDir: w.cfg.Backup.ArchiveDir, KeepDirs: []string{w.cfg.BaseDir, w.cfg.WorkgroupBaseDir}}
+	env := &reconcile.Env{
+		State:      w.st,
+		Update:     func(change func(*state.State) error) error { return w.st.Update(time.Second, change) },
+		ArchiveDir: w.cfg.Backup.ArchiveDir,
+		KeepDirs:   []string{w.cfg.BaseDir, w.cfg.WorkgroupBaseDir},
+	}
 	results := reconcile.ApplyPlan(context.Background(), w.cfg, env, p, reconcile.Scope{Repos: true, Workgroups: true}, include)
 	for _, r := range results {
 		if r.Err != nil {
@@ -100,6 +106,18 @@ func (w *world) apply(p *reconcile.Plan, include func(reconcile.Action) bool) []
 		}
 	}
 	return results
+}
+
+// edit changes the state as another command would: under the lock, saved.
+func (w *world) edit(change func(*state.State)) {
+	w.t.Helper()
+	err := w.st.Update(time.Second, func(st *state.State) error {
+		change(st)
+		return nil
+	})
+	if err != nil {
+		w.t.Fatal(err)
+	}
 }
 
 // converge applies everything and checks a second plan is empty.
@@ -154,8 +172,10 @@ func TestApply_RepoLifecycle(t *testing.T) {
 	// A workgroup built on the repo, and a linked worktree, follow it when it moves.
 	wt := filepath.Join(root, "elsewhere", "wt")
 	mustGit(t, clonePath, "worktree", "add", "-q", "-b", "side", wt)
-	w.st.Workgroups["side"] = &state.WorkgroupState{Name: "side", Kind: "worktree", Root: filepath.Dir(wt), Source: clonePath,
-		Members: []state.WorkgroupMemberState{{Name: "wt", Path: wt, Branch: "side"}}}
+	w.edit(func(st *state.State) {
+		st.Workgroups["side"] = &state.WorkgroupState{Name: "side", Kind: "worktree", Root: filepath.Dir(wt), Source: clonePath,
+			Members: []state.WorkgroupMemberState{{Name: "wt", Path: wt, Branch: "side"}}}
+	})
 
 	// A new path_template is a move, which only apply makes.
 	w.cfg.PathTemplate = "{{.Name}}"
@@ -177,7 +197,7 @@ func TestApply_RepoLifecycle(t *testing.T) {
 	if src := w.st.Workgroups["side"].Source; src != newPath {
 		t.Errorf("workgroup source = %s, want %s", src, newPath)
 	}
-	delete(w.st.Workgroups, "side")
+	w.edit(func(st *state.State) { delete(st.Workgroups, "side") })
 
 	// A move interrupted after the rename, before state was saved, is recorded.
 	w.cfg.PathTemplate = "{{.Host}}/{{.Owner}}/{{.Name}}"
@@ -219,7 +239,7 @@ func TestApply_RepoLifecycle(t *testing.T) {
 	w.converge()
 
 	// A clone made by an interrupted run, never recorded, is adopted.
-	delete(w.st.Repos, key)
+	w.edit(func(st *state.State) { delete(st.Repos, key) })
 	assertKinds(t, w.plan(), "adopt")
 	w.converge()
 }
@@ -417,5 +437,40 @@ func TestApply_AccountSigning(t *testing.T) {
 	w.converge()
 	if _, err := gitops.Git(context.Background(), repo, "config", "--local", "commit.gpgsign"); err == nil {
 		t.Error("commit.gpgsign should be unset under inherit")
+	}
+}
+
+// A write by another command while a plan is applied survives: each change
+// is made to the latest state, not the snapshot the plan was computed from.
+func TestApply_KeepsConcurrentWrites(t *testing.T) {
+	root := t.TempDir()
+	w := newWorld(t, root)
+	w.cfg.Repos = []config.ManualRepo{{URL: bareRemote(t, root, "app")}}
+	p := w.plan()
+	assertKinds(t, p, "clone")
+
+	other, err := state.Load(filepath.Join(root, "state.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = other.Update(time.Second, func(st *state.State) error {
+		st.Repos["example.com/someone/else"] = &state.RepoState{Name: "else"}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w.apply(p, reconcile.All)
+
+	fresh, err := state.Load(filepath.Join(root, "state.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Repos["example.com/someone/else"] == nil {
+		t.Error("the other command's write was lost")
+	}
+	if fresh.Repos["local/remotes/app"] == nil {
+		t.Error("the clone was not recorded")
 	}
 }
