@@ -143,6 +143,11 @@ func Load(path string, opts ...Option) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if o.configPath != "" && !o.skipValidation {
+		if err := checkKeys(o.configPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+	}
 
 	normalize(cfg)
 	return cfg, nil
