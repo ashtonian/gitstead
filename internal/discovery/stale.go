@@ -16,17 +16,47 @@ type CleanupResult struct {
 	Failed     int // repos whose on-disk deletion failed (apply only); left tracked
 }
 
-// DetectStale marks repos that are no longer found by any discovery rule as
-// stale. When apply is true it also enforces cleanup.Policy on stale repos past
-// the grace period: "remove" untracks them, "remove_and_delete" additionally
-// deletes the working tree via the shared pathutil.SafeRemoveAll guard.
+// StaleScope is the set of tracked repos a discovery pass is entitled to judge. A
+// repo absent from a pass's results only means something if the pass ran the
+// rule that would have found it.
+type StaleScope struct {
+	all   bool
+	rules map[string]bool
+}
+
+// StaleScopeOf returns the scope of a pass that produced results under the given
+// rule and tag filters. An unfiltered pass covers every tracked repo, including
+// repos whose rule has since been removed from config. A filtered pass covers
+// only repos first found by one of the rules that ran, so `sync --tag personal`
+// cannot mark work repos stale.
+func StaleScopeOf(results []DiscoverResult, ruleFilter, tagFilter string) StaleScope {
+	if ruleFilter == "" && tagFilter == "" {
+		return StaleScope{all: true}
+	}
+	rules := make(map[string]bool, len(results))
+	for _, r := range results {
+		rules[r.Rule] = true
+	}
+	return StaleScope{rules: rules}
+}
+
+// Covers reports whether the pass may mark repo stale.
+func (s StaleScope) Covers(repo *state.RepoState) bool {
+	return s.all || s.rules[repo.DiscoveredBy]
+}
+
+// DetectStale marks repos within scope that this pass no longer found as stale.
+// Repos outside scope are left untouched. When apply is true it also enforces
+// cleanup.Policy on stale repos past the grace period: "remove" untracks them,
+// "remove_and_delete" additionally deletes the working tree via the shared
+// pathutil.SafeRemoveAll guard.
 //
 // When apply is false it is strictly non-destructive: it marks repos stale
 // in-memory (the caller decides whether to persist) and only *counts* what would
 // be reaped (Reapable), never touching disk or tracking. This is what makes a
 // preview such as `discover` without --apply safe -- enforcement happens only on
 // the explicit, lock-held apply paths (`discover --apply`, scheduled `sync`).
-func DetectStale(st *state.State, discovered map[string]bool, cleanup config.CleanupConfig, apply bool) CleanupResult {
+func DetectStale(st *state.State, discovered map[string]bool, scope StaleScope, cleanup config.CleanupConfig, apply bool) CleanupResult {
 	var res CleanupResult
 	now := time.Now()
 	reaps := cleanup.Policy == "remove" || cleanup.Policy == "remove_and_delete"
@@ -47,7 +77,11 @@ func DetectStale(st *state.State, discovered map[string]bool, cleanup config.Cle
 			continue
 		}
 
-		// Not found by any rule.
+		if !scope.Covers(repo) {
+			continue
+		}
+
+		// Not found by any rule that could have found it.
 		if repo.StaleSince.IsZero() {
 			repo.StaleSince = now
 			res.NewlyStale++

@@ -41,7 +41,7 @@ func removeAndDelete() config.CleanupConfig {
 func TestDetectStale_PreviewNeverDeletes(t *testing.T) {
 	st, dir := stalePastGrace(t)
 
-	res := DetectStale(st, map[string]bool{}, removeAndDelete(), false)
+	res := DetectStale(st, map[string]bool{}, StaleScope{all: true}, removeAndDelete(), false)
 
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("preview deleted the working tree: %v", err)
@@ -60,7 +60,7 @@ func TestDetectStale_PreviewNeverDeletes(t *testing.T) {
 func TestDetectStale_ApplyDeletes(t *testing.T) {
 	st, dir := stalePastGrace(t)
 
-	res := DetectStale(st, map[string]bool{}, removeAndDelete(), true)
+	res := DetectStale(st, map[string]bool{}, StaleScope{all: true}, removeAndDelete(), true)
 
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("apply should have deleted the working tree, stat err=%v", err)
@@ -85,7 +85,7 @@ func TestDetectStale_ApplyRefusesUnsafePath(t *testing.T) {
 		},
 	}}
 
-	res := DetectStale(st, map[string]bool{}, removeAndDelete(), true)
+	res := DetectStale(st, map[string]bool{}, StaleScope{all: true}, removeAndDelete(), true)
 
 	if _, ok := st.Repos["host/owner/repo"]; !ok {
 		t.Fatal("repo with unsafe path should stay tracked after a refused delete")
@@ -101,7 +101,7 @@ func TestDetectStale_MarkStaleNeverReaps(t *testing.T) {
 	st, dir := stalePastGrace(t)
 	cleanup := config.CleanupConfig{Policy: "mark_stale", GracePeriod: time.Minute, ProtectManual: true}
 
-	res := DetectStale(st, map[string]bool{}, cleanup, true)
+	res := DetectStale(st, map[string]bool{}, StaleScope{all: true}, cleanup, true)
 
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("mark_stale must not delete: %v", err)
@@ -115,7 +115,7 @@ func TestDetectStale_ProtectsManual(t *testing.T) {
 	st, dir := stalePastGrace(t)
 	st.Repos["host/owner/repo"].ManuallyAdded = true
 
-	res := DetectStale(st, map[string]bool{}, removeAndDelete(), true)
+	res := DetectStale(st, map[string]bool{}, StaleScope{all: true}, removeAndDelete(), true)
 
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("manually-added repo must not be deleted: %v", err)
@@ -132,7 +132,7 @@ func TestDetectStale_ProtectsManual(t *testing.T) {
 func TestDetectStale_FoundClearsStale(t *testing.T) {
 	st, _ := stalePastGrace(t)
 
-	DetectStale(st, map[string]bool{"host/owner/repo": true}, removeAndDelete(), true)
+	DetectStale(st, map[string]bool{"host/owner/repo": true}, StaleScope{all: true}, removeAndDelete(), true)
 
 	repo := st.Repos["host/owner/repo"]
 	if repo == nil {
@@ -149,7 +149,7 @@ func TestDetectStale_NewlyStaleNotYetReapable(t *testing.T) {
 	st.Repos["host/owner/repo"].StaleSince = time.Time{} // never seen missing before
 	st.Repos["host/owner/repo"].Status = "clean"
 
-	res := DetectStale(st, map[string]bool{}, removeAndDelete(), true)
+	res := DetectStale(st, map[string]bool{}, StaleScope{all: true}, removeAndDelete(), true)
 
 	if res.NewlyStale != 1 {
 		t.Fatalf("expected NewlyStale=1, got %+v", res)
@@ -159,5 +159,53 @@ func TestDetectStale_NewlyStaleNotYetReapable(t *testing.T) {
 	}
 	if st.Repos["host/owner/repo"].Status != "stale" {
 		t.Fatal("repo should be marked stale")
+	}
+}
+
+// A filtered pass (`sync --tag personal`) must not judge repos found by rules it
+// didn't run: a work repo already past the grace period under remove_and_delete
+// stays on disk and tracked.
+func TestDetectStale_ScopedPassLeavesOtherRulesAlone(t *testing.T) {
+	st, dir := stalePastGrace(t)
+	st.Repos["host/owner/repo"].DiscoveredBy = "work"
+
+	scope := StaleScopeOf([]DiscoverResult{{Rule: "personal"}}, "", "personal")
+	res := DetectStale(st, map[string]bool{}, scope, removeAndDelete(), true)
+
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("out-of-scope repo was deleted: %v", err)
+	}
+	if _, ok := st.Repos["host/owner/repo"]; !ok {
+		t.Fatal("out-of-scope repo was untracked")
+	}
+	if res.NewlyStale != 0 || res.Reapable != 0 || res.Reaped != 0 {
+		t.Fatalf("out-of-scope repo must be skipped, got %+v", res)
+	}
+}
+
+// A filtered pass still judges repos found by a rule it ran.
+func TestDetectStale_ScopedPassJudgesItsOwnRules(t *testing.T) {
+	st, _ := stalePastGrace(t)
+	repo := st.Repos["host/owner/repo"]
+	repo.DiscoveredBy = "personal"
+	repo.Status = "clean"
+	repo.StaleSince = time.Time{}
+
+	scope := StaleScopeOf([]DiscoverResult{{Rule: "personal"}}, "", "personal")
+	res := DetectStale(st, map[string]bool{}, scope, removeAndDelete(), true)
+
+	if res.NewlyStale != 1 || repo.Status != "stale" {
+		t.Fatalf("in-scope missing repo should go stale, got status=%q %+v", repo.Status, res)
+	}
+}
+
+// An unfiltered pass covers every repo, including one whose rule was removed
+// from config.
+func TestStaleScopeOf_UnfilteredCoversRemovedRules(t *testing.T) {
+	if !StaleScopeOf(nil, "", "").Covers(&state.RepoState{DiscoveredBy: "deleted-rule"}) {
+		t.Fatal("unfiltered pass should cover repos from removed rules")
+	}
+	if StaleScopeOf(nil, "only-this", "").Covers(&state.RepoState{DiscoveredBy: "deleted-rule"}) {
+		t.Fatal("a rule-filtered pass with no results should cover nothing")
 	}
 }
