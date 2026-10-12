@@ -288,8 +288,8 @@ type SyncConfig struct {
 	TimeoutPerRepo   time.Duration `koanf:"timeout_per_repo"   yaml:"timeout_per_repo"   default:"5m"     validate:"min=0"` // one repo's fetch
 	BackupTimeout    time.Duration `koanf:"backup_timeout"     yaml:"backup_timeout"     default:"2m"     validate:"min=0"` // one repo's backup
 	CloneTimeout     time.Duration `koanf:"clone_timeout"      yaml:"clone_timeout"      default:"30m"    validate:"min=0"` // one clone
-	APITimeout       time.Duration `koanf:"api_timeout"        yaml:"api_timeout"        default:"60s"    validate:"min=0"` // one provider API request
-	DiscoveryTimeout time.Duration `koanf:"discovery_timeout"  yaml:"discovery_timeout"  default:"5m"     validate:"min=0"` // one discovery rule
+	APITimeout       time.Duration `koanf:"api_timeout"        yaml:"api_timeout"        default:"60s"    validate:"min=0"` // one provider API request attempt
+	DiscoveryTimeout time.Duration `koanf:"discovery_timeout"  yaml:"discovery_timeout"  default:"5m"     validate:"min=0"` // one discovery rule, retries and rate-limit waits included
 	Retries          int           `koanf:"retries"            yaml:"retries"            default:"2"      validate:"min=0,max=10"`
 	RetryBackoff     time.Duration `koanf:"retry_backoff"      yaml:"retry_backoff"      default:"2s"     validate:"min=0"`
 }

@@ -146,7 +146,9 @@ func (c Cleanup) mark(st *state.State, discovered map[string]bool, scope StaleSc
 
 	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
 		repo := st.Repos[key]
-		if c.Config.ProtectManual && repo.ManuallyAdded {
+		// A repo added by hand -- cloned, adopted or listed under repos: --
+		// stays until it is removed by hand.
+		if c.Config.ProtectManual && (repo.ManuallyAdded || repo.DiscoveredBy == ManualRule) {
 			continue
 		}
 		if discovered[key] {
@@ -157,7 +159,8 @@ func (c Cleanup) mark(st *state.State, discovered map[string]bool, scope StaleSc
 			repo.LastDiscovered = now
 			continue
 		}
-		if !scope.Covers(repo) {
+		// "ignore" leaves a repo that dropped out of discovery as it is.
+		if !scope.Covers(repo) || c.Config.Policy == "ignore" {
 			continue
 		}
 		// Not found by any rule that could have found it.
