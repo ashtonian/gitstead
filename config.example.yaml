@@ -508,3 +508,61 @@ workspaces: []
   # - name: notes
   #   path: ~/notes                 # path implies isolation: shared
   #   agents: 2
+
+# =============================================================================
+# Fleets and Launchers
+# =============================================================================
+# A fleet opens several workspaces' agents side by side with one launcher:
+# `git-mgr fleet open <name>`. Each agent's terminal runs `git-mgr ws run`,
+# which checks its copies, runs its agent and leaves a shell.
+
+fleets: []
+  # - name: daily
+  #   workspaces: [app, platform, notes]
+  #   agent: claude                 # every agent runs this profile; default each workspace's
+  #   launcher: tmux                # tmux | iterm | muxy | auto | a plugin's name
+  #   host: ""                      # SSH destination the workspaces live on;
+  #   remote_command: git-mgr       # git-mgr there makes the plan
+
+launchers:
+  default: auto       # auto: tmux inside tmux, Muxy inside Muxy, iTerm inside iTerm, else tmux
+  title: "{{.Workspace}}/{{.Agent}}"   # each terminal's name ({{.Fleet}}, {{.Profile}} too)
+  check: true         # each terminal checks its agent's copies first
+  keep_shell: true    # leave a shell in the replica when the agent exits
+
+  tmux:               # a session per fleet, a window per workspace, a pane per agent
+    session: "git-mgr-{{.Fleet}}"
+    window_per: workspace         # workspace | agent
+    layout: tiled                 # tiled | even-horizontal | even-vertical | main-vertical | main-horizontal
+    max_panes: 4                  # more agents spill into another window
+    pane_titles: true
+    control_mode: auto            # attach with tmux -CC (native iTerm windows): auto | always | never
+    socket: ""                    # a separate tmux server (tmux -L)
+    on_exists: add-missing        # attach | add-missing | recreate
+    remain_on_exit: true
+
+  iterm:              # a window per fleet, a tab per workspace, a split per agent
+    window: new                   # new | current
+    tab_per: workspace            # workspace | agent
+    split: grid                   # grid | columns | rows
+    max_panes: 4
+    profile: Default
+    badge: "{{.Agent}}"           # pane watermark; "" turns it off
+    focus: true
+    type_delay: 150ms             # pause before typing into a new split
+
+  muxy:               # a project per workspace, a tab per agent
+    host: ""                      # Muxy server over SSH; "" = the fleet's host, or this machine
+    project_name: "{{.Workspace}}"
+    # layout:   write .muxy/layouts/<name>.json; open it with Apply Layout
+    # sessions: start agents as server sessions, under Existing Terminals
+    # state:    add tabs to the desktop app's saved state (format 3), restarting it
+    open: layout
+    layout_name: ""               # default: the agents' profile
+    restart: ask                  # open: state may quit the app: ask | always | never
+    color: auto                   # auto | none | #RRGGBB
+    prune_projects: false         # remove projects of workspaces no longer in the fleet
+    command: ""                   # the muxy CLI; default muxy on PATH, else the app's
+
+  plugins: {}         # options for git-mgr-launch-<name> executables
+    # wezterm: {tabs: per-agent}

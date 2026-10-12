@@ -88,6 +88,9 @@ func Validate(cfg *Config) error {
 	if err := validateClone(cfg); err != nil {
 		return err
 	}
+	if err := validateFleets(cfg); err != nil {
+		return err
+	}
 
 	return nil
 }

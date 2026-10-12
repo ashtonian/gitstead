@@ -13,6 +13,7 @@ import (
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/launch"
 	"github.com/ashtonian/git-mgr/internal/scheduler"
 	"github.com/ashtonian/git-mgr/internal/setup"
 	"github.com/ashtonian/git-mgr/internal/state"
@@ -150,6 +151,7 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 		d.ok(fmt.Sprintf("%d tracked repos present on disk", cloned))
 	}
 	checkWorkspaces(ctx, st, d)
+	checkLaunchers(cfg, d)
 
 	fmt.Printf("\n%d problem(s), %d warning(s)\n", d.fails, d.warns)
 	if d.fails > 0 {
@@ -262,6 +264,59 @@ func doctorAsScheduled(ctx *Context, s scheduler.Schedule) (fails, warns []strin
 		return nil, nil, fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(out)))
 	}
 	return fails, warns, nil
+}
+
+// checkLaunchers checks the launchers config uses are installed. It stays
+// offline, so a fleet's host and iTerm's Automation permission (which macOS
+// asks for the first time) aren't tried.
+func checkLaunchers(cfg *config.Config, d *doctorReport) {
+	used := map[string]bool{}
+	if cfg.Launchers.Default != "auto" {
+		used[cfg.Launchers.Default] = true
+	}
+	for _, f := range cfg.Fleets {
+		if f.Launcher != "" && f.Launcher != "auto" {
+			used[f.Launcher] = true
+		}
+		if f.Host != "" {
+			d.info(fmt.Sprintf("fleet %q opens on %s: git-mgr there plans it, so it needs this version and the same workspaces", f.Name, f.Host))
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(used)) {
+		switch name {
+		case "tmux":
+			if _, err := exec.LookPath("tmux"); err != nil {
+				d.fail("launcher tmux: tmux isn't on PATH")
+			} else {
+				d.ok("launcher tmux: installed")
+			}
+		case "iterm":
+			if _, err := os.Stat("/Applications/iTerm.app"); err != nil {
+				d.fail("launcher iterm: iTerm isn't in /Applications")
+			} else {
+				d.ok("launcher iterm: installed (macOS asks for Automation permission the first time)")
+			}
+		case "muxy":
+			cli := cfg.Launchers.Muxy.Command
+			if cli == "" {
+				cli = "muxy"
+				if _, err := exec.LookPath(cli); err != nil {
+					cli = "/Applications/Muxy.app/Contents/MacOS/muxy"
+				}
+			}
+			if out, err := exec.Command(cli, "--version").Output(); err != nil {
+				d.fail(fmt.Sprintf("launcher muxy: %s doesn't run: %v", cli, err))
+			} else {
+				d.ok("launcher muxy: " + strings.TrimSpace(string(out)))
+			}
+		default:
+			if _, err := exec.LookPath(launch.PluginPrefix + name); err != nil {
+				d.fail(fmt.Sprintf("launcher %s: no %s%s on PATH", name, launch.PluginPrefix, name))
+			} else {
+				d.ok(fmt.Sprintf("launcher %s: %s%s found", name, launch.PluginPrefix, name))
+			}
+		}
+	}
 }
 
 // checkWorkspaces checks every recorded copy is on disk, and that the clones

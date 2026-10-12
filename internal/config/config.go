@@ -35,6 +35,8 @@ type Config struct {
 	Agents            []AgentProfile    `koanf:"agents"             yaml:"agents,omitempty"     validate:"dive"`
 	WorkspaceDefaults WorkspaceDefaults `koanf:"workspace_defaults" yaml:"workspace_defaults"`
 	Workspaces        []Workspace       `koanf:"workspaces"         yaml:"workspaces,omitempty" validate:"dive"`
+	Fleets            []Fleet           `koanf:"fleets"             yaml:"fleets,omitempty"     validate:"dive"`
+	Launchers         LaunchersConfig   `koanf:"launchers"          yaml:"launchers"`
 }
 
 // Account is one identity on one or more hosts: the SSH key and commit

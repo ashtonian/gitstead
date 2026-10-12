@@ -197,6 +197,15 @@ func (s *State) RenameRepo(from, to string) {
 	}
 }
 
+// FleetState is what opening a fleet left that the next open needs.
+type FleetState struct {
+	Name     string    `yaml:"name"     json:"name"`
+	Launcher string    `yaml:"launcher" json:"launcher"`
+	Opened   time.Time `yaml:"opened"   json:"opened"`
+	// MuxyProjects maps each workspace to the Muxy project made for it.
+	MuxyProjects map[string]string `yaml:"muxy_projects,omitempty" json:"muxy_projects,omitempty"`
+}
+
 // workgroupV2 is a workgroup as state version 2 and earlier recorded it.
 type workgroupV2 struct {
 	Kind      string     `yaml:"kind"`
