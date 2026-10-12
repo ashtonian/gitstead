@@ -123,9 +123,13 @@ type DiscoveryRule struct {
 	Languages       []string `koanf:"languages"        yaml:"languages,omitempty"`
 	Topics          []string `koanf:"topics"           yaml:"topics,omitempty"`
 	NamePattern     string   `koanf:"name_pattern"     yaml:"name_pattern,omitempty"  validate:"omitempty,valid_regex"`
-	Tags            []string `koanf:"tags"             yaml:"tags,omitempty"`
-	SSHKey          string   `koanf:"ssh_key"          yaml:"ssh_key,omitempty"`
-	Account         string   `koanf:"account"          yaml:"account,omitempty"`
+	// Affiliation narrows a GitHub rule with no user, org or query -- the
+	// token's own repos -- to repos the account owns, collaborates on, or
+	// sees through an organization. Empty means all three, GitHub's default.
+	Affiliation []string `koanf:"affiliation" yaml:"affiliation,omitempty" validate:"dive,oneof=owner collaborator organization_member"`
+	Tags        []string `koanf:"tags"             yaml:"tags,omitempty"`
+	SSHKey      string   `koanf:"ssh_key"          yaml:"ssh_key,omitempty"`
+	Account     string   `koanf:"account"          yaml:"account,omitempty"`
 }
 
 // ExcludeRule defines repos to skip.

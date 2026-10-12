@@ -169,6 +169,9 @@ func validateSelector(r DiscoveryRule, typ string) error {
 	if set > 1 {
 		return fmt.Errorf("discovery rule %q: set at most one of user/org/group", r.Name)
 	}
+	if len(r.Affiliation) > 0 && (typ != "github" || set > 0) {
+		return fmt.Errorf("discovery rule %q: 'affiliation' only applies to a github rule without user/org/group", r.Name)
+	}
 	switch typ {
 	case "gitlab":
 		if r.Org != "" {

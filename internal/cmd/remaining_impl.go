@@ -9,6 +9,7 @@ import (
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/shellutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -228,8 +229,12 @@ func (c *InitCmd) Run(ctx *Context) error {
 	detected := ""
 	if !c.NoDetect {
 		if user, ok := detectGitHubCLI(ctx); ok {
-			cfg.Providers = []config.Provider{{Name: "github.com", Type: "github", TokenCommand: "gh auth token"}}
-			cfg.Discovery = []config.DiscoveryRule{{Name: user, Provider: "github.com", User: user, Tags: []string{"personal"}}}
+			// The token's own repos, private ones included, with the token
+			// pinned to this account so a later `gh auth switch` can't change it.
+			cfg.Providers = []config.Provider{{Name: "github.com", Type: "github",
+				TokenCommand: "gh auth token --hostname github.com --user " + shellutil.Quote(user)}}
+			cfg.Discovery = []config.DiscoveryRule{{Name: user, Provider: "github.com",
+				Affiliation: []string{"owner"}, Tags: []string{"personal"}}}
 			detected = user
 		}
 	}
