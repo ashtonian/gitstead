@@ -1,22 +1,32 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
+	"os/user"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/scheduler"
 	"github.com/ashtonian/git-mgr/internal/setup"
+	"github.com/ashtonian/git-mgr/internal/state"
 )
 
 // DoctorCmd diagnoses the health of the git-mgr setup: tooling, auth, config,
 // and whether tracked repos still exist on disk and point where state says.
 // It is offline (no provider API calls), changes nothing, and exits non-zero
 // if any check fails. `git-mgr plan` and `apply` fix what config can.
-type DoctorCmd struct{}
+type DoctorCmd struct {
+	// Scheduled is set when doctor checks a schedule's environment from
+	// inside it; the schedules aren't checked again from there.
+	Scheduled bool `hidden:"" help:"Run as a schedule's environment check."`
+}
 
 // stuckLockAfter is how long doctor waits for the state lock before calling
 // its holder stuck; a write holds it for milliseconds.
@@ -114,6 +124,10 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 		d.ok("state lock free")
 	}
 
+	if !c.Scheduled {
+		checkSchedules(ctx, st, d)
+	}
+
 	// --- Tracked repos: present on disk, origin still maps to the key ---
 	cloned, missing := 0, 0
 	for key, repo := range st.Repos {
@@ -160,4 +174,91 @@ func orInherited(v string) string {
 		return "(inherited)"
 	}
 	return v
+}
+
+// checkSchedules checks each installed schedule is in place and that its
+// environment -- PATH and agent captured at install, nothing else -- can do
+// what a sync needs, by running doctor there.
+func checkSchedules(ctx *Context, st *state.State, d *doctorReport) {
+	if len(st.Schedules) == 0 {
+		d.info("no background schedule installed (`git-mgr install-agent`)")
+		return
+	}
+	host, err := newHost(ctx)
+	if err != nil {
+		d.warn(fmt.Sprintf("schedules: %v", err))
+		return
+	}
+	for _, name := range slices.Sorted(maps.Keys(st.Schedules)) {
+		s := scheduleOf(st.Schedules[name])
+		where := fmt.Sprintf("schedule %q (%s, every %s)", s.Name, s.Kind, s.Every())
+		installed, err := host.Installed(s)
+		switch {
+		case err != nil:
+			d.warn(fmt.Sprintf("%s: %v", where, err))
+			continue
+		case !installed:
+			d.fail(fmt.Sprintf("%s is recorded but no longer installed; `git-mgr install-agent --name %s` puts it back", where, s.Name))
+			continue
+		}
+		if info, err := os.Stat(s.Bin); err != nil || info.Mode()&0o111 == 0 {
+			d.fail(fmt.Sprintf("%s runs %s, which is missing; `git-mgr install-agent --name %s` again from the git-mgr you use", where, s.Bin, s.Name))
+			continue
+		}
+		if s.Kind == scheduler.Systemd {
+			if u, err := user.Current(); err == nil {
+				if lingering, err := host.Lingering(u.Username); err == nil && !lingering {
+					d.warn(fmt.Sprintf("%s stops when you log out; `loginctl enable-linger %s` keeps it running", where, u.Username))
+				}
+			}
+		}
+		fails, warns, err := doctorAsScheduled(ctx, s)
+		switch {
+		case err != nil:
+			d.fail(fmt.Sprintf("%s: running doctor in its environment: %v", where, err))
+		case len(fails) > 0:
+			d.fail(fmt.Sprintf("%s would fail; in its environment: %s", where, strings.Join(fails, "; ")))
+		case len(warns) > 0:
+			d.warn(fmt.Sprintf("%s: in its environment: %s", where, strings.Join(warns, "; ")))
+		default:
+			d.ok(where + ": its environment passes doctor")
+		}
+	}
+}
+
+// doctorAsScheduled runs the schedule's binary as `doctor` with only the
+// environment the scheduler gives it, and returns the problems it reports.
+func doctorAsScheduled(ctx *Context, s scheduler.Schedule) (fails, warns []string, err error) {
+	runCtx, cancel := context.WithTimeout(ctx.GoCtx(), 2*time.Minute)
+	defer cancel()
+	args := append(slices.Clone(s.Global), "doctor", "--scheduled")
+	cmd := exec.CommandContext(runCtx, s.Bin, args...)
+	home, _ := os.UserHomeDir()
+	env := map[string]string{"HOME": home, "USER": os.Getenv("USER"), "LOGNAME": os.Getenv("LOGNAME")}
+	maps.Copy(env, s.Env)
+	// A LaunchAgent gets the login session's ssh agent from launchd.
+	if _, ok := env["SSH_AUTH_SOCK"]; !ok && s.Kind == scheduler.Launchd && !s.Daemon {
+		if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
+			env["SSH_AUTH_SOCK"] = sock
+		}
+	}
+	if _, ok := env["PATH"]; !ok {
+		env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin" // what launchd, systemd and cron default to
+	}
+	for _, k := range slices.Sorted(maps.Keys(env)) {
+		cmd.Env = append(cmd.Env, k+"="+env[k])
+	}
+	out, runErr := cmd.CombinedOutput()
+	for _, line := range strings.Split(string(out), "\n") {
+		switch {
+		case strings.HasPrefix(line, "  FAIL "):
+			fails = append(fails, strings.TrimPrefix(line, "  FAIL "))
+		case strings.HasPrefix(line, "  WARN "):
+			warns = append(warns, strings.TrimPrefix(line, "  WARN "))
+		}
+	}
+	if runErr != nil && len(fails) == 0 {
+		return nil, nil, fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(out)))
+	}
+	return fails, warns, nil
 }
