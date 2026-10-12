@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
@@ -82,8 +84,11 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 		if c.Apply && outcome.Reaped > 0 {
 			fmt.Printf("cleaned up %d stale repos (policy %q)\n", outcome.Reaped, cfg.Cleanup.Policy)
 		}
-		if c.Apply && outcome.Failed > 0 {
-			fmt.Printf("warning: %d stale repos could not be deleted (left tracked)\n", outcome.Failed)
+		if len(outcome.Kept) > 0 {
+			fmt.Printf("warning: %d stale repos kept their files and stay tracked:\n", len(outcome.Kept))
+			for _, key := range slices.Sorted(maps.Keys(outcome.Kept)) {
+				fmt.Printf("  %s: %v\n", key, outcome.Kept[key])
+			}
 		}
 	}
 

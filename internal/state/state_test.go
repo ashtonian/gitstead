@@ -35,7 +35,7 @@ func TestLoadSave(t *testing.T) {
 		FullName:  "user/repo",
 		Status:    "clean",
 		Tags:      []string{"personal"},
-		FirstSeen: now,
+		LastFetch: now,
 	}
 	st.LastSync = now
 

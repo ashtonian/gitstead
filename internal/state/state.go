@@ -39,65 +39,54 @@ type State struct {
 	lockFD *os.File `yaml:"-"`
 }
 
-// RepoState tracks the state of a single managed repo. Each field carries a
-// json tag matching its yaml tag so `git-mgr status --json` emits the same
-// snake_case keys used in config and the on-disk state file.
+// RepoState is one tracked repo: what git-mgr applied to it, which the
+// reconciler compares with what config wants, and what the last run found.
+// Each field carries a json tag matching its yaml tag so `git-mgr status
+// --json` emits the same snake_case keys as the state file.
 type RepoState struct {
-	// Identity. CloneURL and LocalPath, below, are the origin URL and path
-	// git-mgr last applied; the reconciler compares them with what config wants.
+	// What git-mgr applied. CloneURL and LocalPath are the origin URL and path
+	// it last set.
 	CloneURL string `yaml:"clone_url" json:"clone_url"`
 	Host     string `yaml:"host" json:"host"`
 	Owner    string `yaml:"owner" json:"owner"`
 	Name     string `yaml:"name" json:"name"`
 	FullName string `yaml:"full_name" json:"full_name"`
-	Provider string `yaml:"provider" json:"provider"` // provider instance name
 	// ProviderID is the hosting provider's ID for the repository, stable across
 	// renames and transfers on the same host; "" until discovery has seen it.
 	ProviderID string `yaml:"provider_id,omitempty" json:"provider_id,omitempty"`
 	// CopyID identifies the working copy on disk (see gitops.CopyID).
-	CopyID string `yaml:"copy_id,omitempty" json:"copy_id,omitempty"`
-
-	// Local State
-	LocalPath     string `yaml:"local_path" json:"local_path"`
-	Cloned        bool   `yaml:"cloned" json:"cloned"`
-	DefaultBranch string `yaml:"default_branch" json:"default_branch"`
-	HeadCommit    string `yaml:"head_commit" json:"head_commit"`
-	CurrentBranch string `yaml:"current_branch" json:"current_branch"`
-
-	// Metadata
-	DiscoveredBy string   `yaml:"discovered_by" json:"discovered_by"`
-	IsFork       bool     `yaml:"is_fork" json:"is_fork"`
-	IsArchived   bool     `yaml:"is_archived" json:"is_archived"`
-	Language     string   `yaml:"language" json:"language"`
-	Languages    []string `yaml:"languages,omitempty" json:"languages,omitempty"`
-	Topics       []string `yaml:"topics" json:"topics"`
-	Tags         []string `yaml:"tags" json:"tags"`
+	CopyID    string `yaml:"copy_id,omitempty" json:"copy_id,omitempty"`
+	LocalPath string `yaml:"local_path" json:"local_path"`
+	Cloned    bool   `yaml:"cloned,omitempty" json:"cloned"`
+	// DiscoveredBy is the rule that finds the repo; "" for one added by hand.
+	DiscoveredBy string   `yaml:"discovered_by,omitempty" json:"discovered_by,omitempty"`
+	Tags         []string `yaml:"tags,omitempty" json:"tags,omitempty"`
 	// UserTags are the tags given by hand (clone/adopt --tag, a manifest,
 	// workgroup tracking). Tags is them plus the tags of the rules that find
 	// the repo.
-	UserTags    []string `yaml:"user_tags,omitempty" json:"user_tags,omitempty"`
-	Description string   `yaml:"description" json:"description"`
-
-	// Sync State
-	LastFetch      time.Time `yaml:"last_fetch" json:"last_fetch"`
-	LastFetchError string    `yaml:"last_fetch_error" json:"last_fetch_error"`
-	BackupStatus   `yaml:",inline"`
-	OffsiteStatus  `yaml:",inline"`
-	Status         string `yaml:"status" json:"status"` // clean, dirty, conflict, error, uncloned, missing, stale
-	Error          string `yaml:"error" json:"error"`
-
-	// Discovery State
-	FirstSeen      time.Time `yaml:"first_seen" json:"first_seen"`
-	LastDiscovered time.Time `yaml:"last_discovered" json:"last_discovered"`
-	StaleSince     time.Time `yaml:"stale_since,omitempty" json:"stale_since,omitempty"`
+	UserTags []string `yaml:"user_tags,omitempty" json:"user_tags,omitempty"`
 	// ManuallyAdded marks a repo added by hand (clone, adopt, manifest import,
 	// workgroup tracking): its path and URL are the ones recorded, never
 	// derived from config.
-	ManuallyAdded bool `yaml:"manually_added" json:"manually_added"`
-
+	ManuallyAdded bool `yaml:"manually_added,omitempty" json:"manually_added,omitempty"`
 	// ManagedConfig holds the repo-local git config keys git-mgr set, with the
 	// values it set, keyed by git's lower-case name (core.sshcommand).
 	ManagedConfig map[string]string `yaml:"managed_config,omitempty" json:"managed_config,omitempty"`
+
+	// IsArchived is the provider's archived flag, for repo sets that exclude
+	// archived repos.
+	IsArchived bool `yaml:"is_archived,omitempty" json:"is_archived,omitempty"`
+	// StaleSince is when discovery first missed the repo; cleanup's grace
+	// period runs from it.
+	StaleSince time.Time `yaml:"stale_since,omitempty" json:"stale_since,omitzero"`
+
+	// What the last run found.
+	Status         string    `yaml:"status,omitempty" json:"status,omitempty"` // clean, dirty, conflict, error, missing, stale
+	CurrentBranch  string    `yaml:"current_branch,omitempty" json:"current_branch,omitempty"`
+	LastFetch      time.Time `yaml:"last_fetch,omitempty" json:"last_fetch,omitzero"`
+	LastFetchError string    `yaml:"last_fetch_error,omitempty" json:"last_fetch_error,omitempty"`
+	BackupStatus   `yaml:",inline"`
+	OffsiteStatus  `yaml:",inline"`
 }
 
 // WorkgroupState is the observed on-disk state of a managed workgroup. Like
@@ -172,22 +161,21 @@ type ScheduleState struct {
 // BackupStatus is what the last backup of a working copy did.
 type BackupStatus struct {
 	// LastBackup is when the working copy's state was last known to be saved,
-	// by a new backup or one identical to it; LastBackupID names that backup.
+	// by a new backup or one identical to it.
 	LastBackup      time.Time `yaml:"last_backup,omitempty" json:"last_backup,omitzero"`
-	LastBackupID    string    `yaml:"last_backup_id,omitempty" json:"last_backup_id,omitempty"`
 	LastBackupError string    `yaml:"last_backup_error,omitempty" json:"last_backup_error,omitempty"`
 }
 
-// RecordBackup stores a backup run's outcome. id is the backup that holds the
-// working copy's current state, "" when there is none (a clean tree, or a
-// failure); LastBackup moves only when there is one.
-func (b *BackupStatus) RecordBackup(id string, err error, now time.Time) {
+// RecordBackup stores a backup run's outcome. saved reports that a backup
+// holds the working copy's current state, which a clean tree or a failure
+// doesn't; LastBackup moves only when one does.
+func (b *BackupStatus) RecordBackup(saved bool, err error, now time.Time) {
 	b.LastBackupError = ""
 	if err != nil {
 		b.LastBackupError = err.Error()
 	}
-	if id != "" {
-		b.LastBackup, b.LastBackupID = now, id
+	if saved {
+		b.LastBackup = now
 	}
 }
 

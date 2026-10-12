@@ -97,7 +97,7 @@ git-mgr [global flags] <command> [command flags] [args]
 | `--state` | `~/.local/share/git-mgr/state.yaml` | State file path |
 | `--verbose` / `-v` | false | Verbose output |
 | `--quiet` / `-q` | false | Suppress non-error output |
-| `--concurrency` / `-j` | 8 | Max concurrent git operations |
+| `--concurrency` / `-j` | 8 | Max concurrent git operations: fetches, backups, and the clones and other changes of different repos that `sync` and `apply` make |
 
 ### Commands
 
@@ -773,7 +773,14 @@ log:
 
 **File**: `~/.local/share/git-mgr/state.yaml` (XDG-compliant, overridable with `--state` or `GIT_MGR_STATE` env var)
 
-The state file is the source of truth for all managed repos. It is read/written atomically with flock protection.
+The state file records what git-mgr applied to each repo and workgroup -- what
+the reconciler compares with config to turn a config edit into moves, URL and
+git config changes -- and what the last run found, which `status` shows without
+touching any repo. It is one YAML file, read and written atomically under flock.
+Every write rewrites the whole file, so its cost grows with the number of
+tracked repos (about 60 ms at 1,000 and 400 ms at 5,000 on an M2 Pro; nearly all
+of it YAML encoding); apply shares writes between actions to keep their number
+small (see [Reconciliation](#reconciliation)).
 
 ```yaml
 # State schema version. Older files are migrated on load; a file newer than the
@@ -783,55 +790,45 @@ version: 2
 # Last time any sync operation completed.
 last_sync: "2026-04-17T10:30:00Z"
 
+# Names this machine in offsite refs; set on first use.
+machine: mac-1a2b3c
+
 # Map of repos, keyed by canonical identifier (host/owner/name).
 repos:
   github.com/ashtonian/git-mgr:
-    # --- Identity ---
+    # --- What git-mgr applied ---
     clone_url: "git@github.com:ashtonian/git-mgr.git"
     host: "github.com"
     owner: "your-login"
     name: "git-mgr"
     full_name: "ashtonian/git-mgr"
-    provider: "github.com"                               # Provider instance name
     provider_id: "4242"            # the host's repo ID; survives renames and transfers
     copy_id: "8ed3b5a3e9e769c3"    # the working copy's ID (also in .git/git-mgr-copy-id)
-
-    # --- Local State ---
     local_path: "/Users/me/repos/github.com/ashtonian/git-mgr"
     cloned: true
-    default_branch: "main"
-    head_commit: "abc123def456..."
-    current_branch: "feat/backup"
-
-    # --- Metadata ---
-    discovered_by: "my-github"
-    is_fork: false
-    is_archived: false
-    language: "Go"
-    topics: ["cli", "git"]
-    tags: ["personal", "oss"]                             # Combined: rule tags + user_tags
-    user_tags: ["oss"]                                    # Given by hand (clone/adopt --tag, manifest)
-    description: "CLI tool for managing git repos"
-
-    # --- Sync State ---
-    last_fetch: "2026-04-17T10:30:00Z"
-    last_fetch_error: ""
-    last_backup: "2026-04-17T10:30:00Z"   # last time the current state was known to be saved
-    last_backup_id: "20260417T103000.000Z"
-    last_backup_error: ""
-    status: "dirty"                # clean, dirty, conflict, error, uncloned, missing, stale
-    error: ""
-
-    # --- Discovery State ---
-    first_seen: "2026-04-01T00:00:00Z"
-    last_discovered: "2026-04-17T10:00:00Z"
-    stale_since: ""                # Set when no longer found by any discovery rule
-    manually_added: false          # true if added by hand (clone, adopt, manifest import): path and URL are pinned
-
-    # --- Applied git config ---
+    discovered_by: "my-github"     # the rule that finds it; absent for one added by hand
+    tags: ["personal", "oss"]      # rule tags + user_tags
+    user_tags: ["oss"]             # given by hand (clone/adopt --tag, manifest)
+    manually_added: false          # added by hand (clone, adopt, manifest import): path and URL are pinned
     managed_config:                # repo-local keys git-mgr set, and the values it set
       core.sshcommand: "ssh -i '/Users/me/.ssh/id_work' -o IdentitiesOnly=yes"
       user.email: "you@acme.com"
+    is_archived: false             # for repo sets with exclude_archived
+    stale_since: ""                # when discovery first missed it; cleanup's grace period runs from here
+
+    # --- What the last run found ---
+    status: "dirty"                # clean, dirty, conflict, error, missing, stale
+    current_branch: "feat/backup"
+    last_fetch: "2026-04-17T10:30:00Z"
+    last_fetch_error: ""
+    last_backup: "2026-04-17T10:30:00Z"   # last time the current state was known to be saved
+    last_backup_error: ""
+    offsite_remote: origin                # what remote_sync last left offsite, so the next push
+    offsite_namespace: refs/git-mgr/mac-1a2b3c/8ed3b5a3e9e769c3   # sends only what changed and
+    offsite_wip: ["20260417T103000.000Z"]                         # deletes only refs it made
+    offsite_heads: {feat/backup: 0123abcd...}
+    last_offsite: "2026-04-17T10:30:00Z"
+    last_offsite_error: ""
 
 # Workgroups. declared: true means config declares it, so removing the
 # declaration removes the workgroup; workgroups created from flags or adopted
@@ -845,7 +842,7 @@ workgroups:
     declared: true
     members:
       - {name: agent-1, path: "/Users/me/workgroups/fleet/agent-1", branch: agent-1, copy_id: "1f2e3d4c5b6a7980",
-         last_backup: 2026-10-12T14:00:00Z, last_backup_id: "20261012T140000.000Z"}
+         last_backup: 2026-10-12T14:00:00Z}
 
 # Background syncs `install-agent` installed, so doctor can check them and
 # --uninstall can remove them by name.
@@ -906,11 +903,20 @@ repo the same run clones). The first plan is made against the state as it will
 be once the run's clones are done; a disruptive workgroup action in the second
 plan runs only if the first showed it.
 
-`Plan.Apply` first records observations (copy IDs, provider IDs, discovery
-metadata), then runs the selected actions in order -- renames first -- saving
-state after each and skipping later actions on a target whose earlier action
-failed. Every action looks at the disk before acting, so repeating an
-interrupted run finishes it instead of failing on what the first run did.
+`Plan.Apply` first records observations (copy IDs, provider IDs, the archived
+flag), then runs the selected actions. A repo's actions run in plan order --
+rename first, move last -- and an action on a target whose earlier action
+failed is skipped. Different repos' actions run at once, up to `concurrency`
+doing disk work (a clone, a `git config` write). Each action does its disk work
+first and then records the result; an action waiting for its record to be saved
+gives up its slot, and the records that arrive while one state write runs are
+saved together by the next (`state.GroupCommit`), so 1,000 changes cost a
+couple of writes rather than 1,000. A move renames its directory, and tidies
+the parents it emptied, as it is recorded, under the state lock. Workgroup
+actions run after the repos', one at a time, since a workgroup's members share
+its record and its source repo. Every action looks at the disk before acting,
+so repeating an interrupted run finishes it instead of failing on what the first
+run did.
 
 `sync` and `discover --apply` apply repo actions selected by `reconcile.auto`
 (`safe`: non-disruptive; `all`; `none`). `wg ensure` applies non-disruptive
@@ -939,14 +945,17 @@ the outcome with an update:
 
 Commands that apply a plan (`sync`, `apply`, `clone`, `adopt`, `discover
 --apply`, `manifest import`, `wg create`, `wg ensure`, `setup`) read state
-without the lock and update it once per change, so two runs' changes never
-overwrite each other. The sync run lock keeps syncs from overlapping; it never
+without the lock and record each change with an update, sharing the update with
+the changes recorded meanwhile, so two runs' changes never overwrite each
+other. The sync run lock keeps syncs from overlapping; it never
 waits, and a sync that finds it held exits 0. Locks are per open file
 description, so a process never holds the state lock while asking for it again.
 
 Stale cleanup under `remove_and_delete` follows the same protocol: repos are
 marked stale under the lock, their files archived and deleted without it, and
-untracked under the lock only if still stale at the same path.
+untracked under the lock only if still stale at the same path. A repo whose
+files cleanup kept stays tracked, is retried next run, and is listed with the
+reason; `sync` counts it as a failure.
 
 ---
 

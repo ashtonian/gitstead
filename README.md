@@ -400,7 +400,9 @@ git-mgr run    --set active-backend -- go test ./...
 git-mgr keeps a state file (`~/.local/share/git-mgr/state.yaml`) recording what
 it last set for every repo and workgroup: path, origin URL, tags, the
 discovering rule, the provider's repo ID, the copy ID, the repo-local git config
-it wrote, and each workgroup's members. On every run it compares three things:
+it wrote, and each workgroup's members. It also keeps what the last run found --
+status, branch, the last fetch, backup and offsite push and their errors --
+which is what `git-mgr status` shows. On every run it compares three things:
 
 - **desired** — what config and this run's discovery ask for;
 - **recorded** — what git-mgr set, from state;
@@ -448,6 +450,13 @@ Repos added by hand (`clone`, `adopt`, `manifest import`) keep the path and URL
 they were given; only their tags and managed git config follow config. A
 workgroup created from flags or adopted is kept as recorded: `wg ensure <name>`
 recreates its missing members, and nothing removes it but `wg rm`.
+
+Changes to different repos run at once, up to `concurrency` doing disk work; a
+repo's own changes run in order, and stop at the first that fails. Each change
+is recorded in state as soon as it is made, and the changes recorded while one
+state write runs share the next, so a first run that clones a thousand repos
+writes the state a handful of times rather than a thousand. Workgroup changes
+run after the repos', one at a time.
 
 An interrupted run is safe to repeat. Every change looks at the disk first: a
 clone that finished before the interruption is adopted, a move that finished is
@@ -573,7 +582,9 @@ rebase or merge. If there is any, it is written to one git bundle in
 `git bundle verify` before anything is deleted. For a worktree, its branches stay
 in the source repo, so only the working tree and detached commits are archived.
 If git-mgr can't inspect the repo or write the bundle, nothing is deleted and the
-repo stays tracked.
+repo stays tracked. Stale cleanup lists each repo it kept and why: `discover
+--apply` prints them, and `sync` reports each as a failure (exit code 3) until a
+later run deletes it.
 
 Each bundle has a `.json` file beside it recording the source path, remotes,
 branch, what was saved and the restore command:
@@ -833,8 +844,8 @@ go build -ldflags="-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD)" .
 | `main.go`, `internal/cmd` | The CLI: flags, wiring, output. Commands load config and state, call the packages below, print. |
 | `internal/config` | Loading, defaults, validation, per-repo overrides, SSH key and protocol resolution. |
 | `internal/discovery` | Provider clients (GitHub, GitLab, Gitea/Forgejo), rule filtering, stale detection. |
-| `internal/reconcile` | Desired vs recorded vs on-disk: plans and applies repo and workgroup changes. |
-| `internal/state` | The state file: schema, migrations, locking, atomic writes. |
+| `internal/reconcile` | Desired vs recorded vs on-disk: plans repo and workgroup changes and applies them, several repos at once. |
+| `internal/state` | The state file: schema, migrations, locking, atomic writes, and `GroupCommit`, which saves concurrent changes in one write. |
 | `internal/gitops` | Everything that runs git: clone, fetch, status, snapshots, backups, restore, archives, copy IDs, worktrees. |
 | `internal/workgroup` | Workgroup specs, member creation, health, removal. |
 | `internal/repourl` | Parsing remote URLs into host/owner/name keys. |

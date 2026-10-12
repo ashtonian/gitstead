@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/ashtonian/git-mgr/internal/ctxutil"
 	"github.com/ashtonian/git-mgr/internal/gitops"
@@ -132,8 +131,8 @@ func planTrackedRepo(p *Plan, d Repo, a *state.RepoState, sameKey bool, seen See
 	}
 	actions = append(actions, planURL(p, d, a, here, overwrite)...)
 	actions = append(actions, planConfig(p, KindConfig, d.Key, d.Config, a.ManagedConfig, here.Config, overwrite,
-		func(k, v string, unset, recordOnly bool) func(context.Context, *Env) (string, error) {
-			return setConfig(d.Key, k, v, unset, recordOnly)
+		func(k, v string, unset, recordOnly bool) func(context.Context, *Env) (outcome, error) {
+			return setConfig(d.Key, a.LocalPath, k, v, unset, recordOnly)
 		})...)
 	if !d.Pinned && d.Path != a.LocalPath {
 		if there := seen.at(d.Path); there.Exists {
@@ -149,7 +148,7 @@ func planTrackedRepo(p *Plan, d Repo, a *state.RepoState, sameKey bool, seen See
 func planURL(p *Plan, d Repo, a *state.RepoState, here Copy, overwrite bool) []Action {
 	want, recorded, have := d.URL, a.CloneURL, here.Origin
 	set := func(from, note string) []Action {
-		return []Action{{Kind: KindURL, Target: d.Key, From: from, To: want, Note: note, run: setURL(d.Key, want)}}
+		return []Action{{Kind: KindURL, Target: d.Key, From: from, To: want, Note: note, run: setURL(d.Key, a.LocalPath, want)}}
 	}
 	switch {
 	case have == want && recorded == want:
@@ -168,7 +167,7 @@ func planURL(p *Plan, d Repo, a *state.RepoState, here Copy, overwrite bool) []A
 
 // configSetter builds the action that applies one managed config change to a
 // copy and records it.
-type configSetter func(key, value string, unset, recordOnly bool) func(context.Context, *Env) (string, error)
+type configSetter func(key, value string, unset, recordOnly bool) func(context.Context, *Env) (outcome, error)
 
 // planConfig plans one copy's managed git config: want is what config asks
 // for, recorded what git-mgr set, have what is set now. A key set by hand is
@@ -240,8 +239,8 @@ func occupied(path string, c Copy) string {
 }
 
 // recordRepo stores what this run observed of a tracked repo: that it is on
-// disk, its copy ID (created if missing), its provider ID and discovery's
-// metadata.
+// disk, its copy ID (created if missing), its provider ID and whether the
+// provider has archived it.
 func recordRepo(d Repo, here Copy) func(context.Context, *state.State) {
 	return func(ctx context.Context, st *state.State) {
 		a := st.Repos[d.Key]
@@ -261,73 +260,63 @@ func recordRepo(d Repo, here Copy) func(context.Context, *state.State) {
 			}
 		}
 		if d.Found != nil {
-			setDiscoveryMetadata(a, d)
-			a.LastDiscovered = time.Now()
+			a.IsArchived = d.Found.IsArchived
 		}
 	}
-}
-
-func setDiscoveryMetadata(a *state.RepoState, d Repo) {
-	f := d.Found
-	a.DefaultBranch, a.IsFork, a.IsArchived = f.DefaultBranch, f.IsFork, f.IsArchived
-	a.Language, a.Languages, a.Topics, a.Description = f.Language, f.Languages, f.Topics, f.Description
 }
 
 // cloneRepo clones d to its path, or with adopt takes the clone already
 // there, then writes its managed git config and records it. The clone runs
 // outside the state lock, within env.CloneTimeout; one that fails removes
 // what it left behind, so a half-made clone is never adopted later.
-func cloneRepo(d Repo, adopt bool) func(context.Context, *Env) (string, error) {
-	return func(ctx context.Context, env *Env) (string, error) {
+func cloneRepo(d Repo, adopt bool) func(context.Context, *Env) (outcome, error) {
+	return func(ctx context.Context, env *Env) (outcome, error) {
 		if !adopt {
 			if err := cloneInto(ctx, env, d); err != nil {
-				_ = env.Update(func(st *state.State) error {
+				return outcome{record: func(st *state.State) error {
 					if a := st.Repos[d.Key]; a != nil {
-						a.Cloned, a.Status, a.Error = false, "missing", err.Error()
+						a.Cloned, a.Status = false, "missing"
 					}
 					return nil
-				})
-				return "", err
+				}}, err
 			}
 		}
 		c := observeCopy(ctx, d.Path)
 		if !c.IsRepo || c.Err != nil {
-			return "", fmt.Errorf("%s is not a readable git repository", d.Path)
+			return outcome{}, fmt.Errorf("%s is not a readable git repository", d.Path)
 		}
 		if c.Origin != d.URL {
 			if err := gitops.SetOriginURL(ctx, d.Path, d.URL); err != nil {
-				return "", err
+				return outcome{}, err
 			}
 		}
 		managed, err := writeManagedConfig(ctx, d.Path, d.Config, c.Config)
 		if err != nil {
-			return "", err
+			return outcome{}, err
 		}
 		copyID, err := gitops.CopyID(ctx, d.Path)
 		if err != nil {
-			return "", err
+			return outcome{}, err
 		}
 
-		return "", env.Update(func(st *state.State) error {
-			now := env.now()
+		return outcome{record: func(st *state.State) error {
 			a := st.Repos[d.Key]
 			if a == nil {
-				a = &state.RepoState{FirstSeen: now, ManuallyAdded: d.Pinned}
+				a = &state.RepoState{ManuallyAdded: d.Pinned}
 				st.Repos[d.Key] = a
 			}
-			a.Host, a.Owner, a.Name, a.FullName, a.Provider = d.Host, d.Owner, d.Name, d.FullName, d.Host
+			a.Host, a.Owner, a.Name, a.FullName = d.Host, d.Owner, d.Name, d.FullName
 			a.CloneURL, a.LocalPath, a.CopyID, a.ManagedConfig = d.URL, d.Path, copyID, managed
 			a.Tags, a.UserTags, a.DiscoveredBy = d.Tags, d.UserTags, d.Rule
-			a.Cloned, a.Status, a.Error = true, "clean", ""
+			a.Cloned, a.Status = true, "clean"
 			if d.ProviderID != "" {
 				a.ProviderID = d.ProviderID
 			}
 			if d.Found != nil {
-				setDiscoveryMetadata(a, d)
-				a.LastDiscovered = now
+				a.IsArchived = d.Found.IsArchived
 			}
 			return nil
-		})
+		}}, nil
 	}
 }
 
@@ -366,9 +355,9 @@ func writeManagedConfig(ctx context.Context, path string, want, have map[string]
 	return managed, nil
 }
 
-func renameRepo(old string, d Repo) func(context.Context, *Env) (string, error) {
-	return func(_ context.Context, env *Env) (string, error) {
-		return "", env.Update(func(st *state.State) error {
+func renameRepo(old string, d Repo) func(context.Context, *Env) (outcome, error) {
+	return func(context.Context, *Env) (outcome, error) {
+		return outcome{record: func(st *state.State) error {
 			a := st.Repos[old]
 			if a == nil {
 				return fmt.Errorf("%s is no longer tracked", old)
@@ -387,62 +376,58 @@ func renameRepo(old string, d Repo) func(context.Context, *Env) (string, error) 
 				}
 			}
 			return nil
-		})
+		}}, nil
 	}
 }
 
-func retag(d Repo) func(context.Context, *Env) (string, error) {
-	return func(_ context.Context, env *Env) (string, error) {
-		return "", env.Update(func(st *state.State) error {
+func retag(d Repo) func(context.Context, *Env) (outcome, error) {
+	return func(context.Context, *Env) (outcome, error) {
+		return outcome{record: func(st *state.State) error {
 			a, err := trackedRepo(st, d.Key)
 			if err != nil {
 				return err
 			}
 			a.Tags, a.DiscoveredBy = d.Tags, d.Rule
 			return nil
-		})
+		}}, nil
 	}
 }
 
-func setURL(key, url string) func(context.Context, *Env) (string, error) {
-	return func(ctx context.Context, env *Env) (string, error) {
-		a, err := trackedRepo(env.State, key)
-		if err != nil {
-			return "", err
-		}
-		if have, err := gitops.Git(ctx, a.LocalPath, "remote", "get-url", "origin"); err != nil || have != url {
-			if err := gitops.SetOriginURL(ctx, a.LocalPath, url); err != nil {
-				return "", err
+// setURL sets the origin URL of the copy at path, where the repo key was
+// when the plan was made.
+func setURL(key, path, url string) func(context.Context, *Env) (outcome, error) {
+	return func(ctx context.Context, _ *Env) (outcome, error) {
+		if have, err := gitops.Git(ctx, path, "remote", "get-url", "origin"); err != nil || have != url {
+			if err := gitops.SetOriginURL(ctx, path, url); err != nil {
+				return outcome{}, err
 			}
 		}
-		return "", env.Update(func(st *state.State) error {
+		return outcome{record: func(st *state.State) error {
 			a, err := trackedRepo(st, key)
 			if err == nil {
 				a.CloneURL = url
 			}
 			return err
-		})
+		}}, nil
 	}
 }
 
-func setConfig(key, name, value string, unset, recordOnly bool) func(context.Context, *Env) (string, error) {
-	return func(ctx context.Context, env *Env) (string, error) {
-		a, err := trackedRepo(env.State, key)
-		if err != nil {
-			return "", err
-		}
+// setConfig sets or unsets one managed git config key of the copy at path,
+// where the repo key was when the plan was made.
+func setConfig(key, path, name, value string, unset, recordOnly bool) func(context.Context, *Env) (outcome, error) {
+	return func(ctx context.Context, _ *Env) (outcome, error) {
 		if !recordOnly {
-			if err := writeConfig(ctx, a.LocalPath, name, value, unset); err != nil {
-				return "", err
+			if err := writeConfig(ctx, path, name, value, unset); err != nil {
+				return outcome{}, err
 			}
 		}
-		return "", env.Update(func(st *state.State) error {
+		return outcome{record: func(st *state.State) error {
 			a, err := trackedRepo(st, key)
 			if err == nil {
 				recordConfig(&a.ManagedConfig, name, value, unset)
 			}
 			return err
-		})
+		}}, nil
 	}
 }
 
@@ -480,45 +465,48 @@ func recordConfig(managed *map[string]string, name, value string, unset bool) {
 // moveRepo renames the repo's directory to its desired path, reconnects its
 // linked worktrees and points workgroups that use it as their source at the
 // new path. It refuses a move across filesystems, which would be a copy. The
-// rename happens under the state lock, so no other run sees the repo missing
-// from the path state records.
-func moveRepo(key, from, to string) func(context.Context, *Env) (string, error) {
-	return func(ctx context.Context, env *Env) (string, error) {
-		err := env.Update(func(st *state.State) error {
-			if _, err := os.Lstat(to); err == nil {
-				return fmt.Errorf("cannot move to %s: it already exists", to)
-			}
-			if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
-				return err
-			}
-			if err := os.Rename(from, to); err != nil {
-				if errors.Is(err, syscall.EXDEV) {
-					return fmt.Errorf("%s and %s are on different filesystems; move it yourself and run git-mgr apply to record it", from, to)
+// rename is made as the move is recorded, under the state lock, so no other
+// run sees the repo missing from the path state records; so is the tidying of
+// the parent directories it emptied, so no other move or clone of this run
+// has a directory removed from under it.
+func moveRepo(key, from, to string) func(context.Context, *Env) (outcome, error) {
+	return func(_ context.Context, env *Env) (outcome, error) {
+		return outcome{
+			record: func(st *state.State) error {
+				if _, err := os.Lstat(to); err == nil {
+					return fmt.Errorf("cannot move to %s: it already exists", to)
 				}
-				return err
-			}
-			recordMoved(st, key, from, to)
-			return nil
-		})
-		if err != nil {
-			return "", err
-		}
-		env.noteMove(from, to)
-		removeEmptyParents(env, from)
-		if err := gitops.WorktreeRepair(ctx, to); err != nil {
-			return "", fmt.Errorf("moved, but reconnecting its worktrees failed (run `git worktree repair` in %s): %w", to, err)
-		}
-		return "", nil
+				if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+					return err
+				}
+				if err := os.Rename(from, to); err != nil {
+					if errors.Is(err, syscall.EXDEV) {
+						return fmt.Errorf("%s and %s are on different filesystems; move it yourself and run git-mgr apply to record it", from, to)
+					}
+					return err
+				}
+				recordMoved(st, key, from, to)
+				env.noteMove(from, to)
+				removeEmptyParents(env, from)
+				return nil
+			},
+			after: func(ctx context.Context) (string, error) {
+				if err := gitops.WorktreeRepair(ctx, to); err != nil {
+					return "", fmt.Errorf("moved, but reconnecting its worktrees failed (run `git worktree repair` in %s): %w", to, err)
+				}
+				return "", nil
+			},
+		}, nil
 	}
 }
 
-func recordMove(key, from, to string) func(context.Context, *Env) (string, error) {
-	return func(_ context.Context, env *Env) (string, error) {
+func recordMove(key, from, to string) func(context.Context, *Env) (outcome, error) {
+	return func(_ context.Context, env *Env) (outcome, error) {
 		env.noteMove(from, to)
-		return "", env.Update(func(st *state.State) error {
+		return outcome{record: func(st *state.State) error {
 			recordMoved(st, key, from, to)
 			return nil
-		})
+		}}, nil
 	}
 }
 

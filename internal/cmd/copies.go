@@ -125,7 +125,7 @@ func recordCopies(st *state.State, outcomes []copyOutcome) {
 		if o.job.repoKey == "" {
 			if m := memberAt(st, o.job.workgroup, o.job.member, o.job.path); m != nil {
 				if o.job.backup != nil {
-					m.RecordBackup(o.backupID(), o.backupErr, o.at)
+					m.RecordBackup(o.saved(), o.backupErr, o.at)
 				}
 				o.recordOffsite(&m.OffsiteStatus)
 			}
@@ -139,7 +139,7 @@ func recordCopies(st *state.State, outcomes []copyOutcome) {
 
 func (o copyOutcome) recordRepo(repo *state.RepoState) {
 	if o.job.backup != nil {
-		repo.RecordBackup(o.backupID(), o.backupErr, o.at)
+		repo.RecordBackup(o.saved(), o.backupErr, o.at)
 	}
 	o.recordOffsite(&repo.OffsiteStatus)
 	if o.fetched {
@@ -152,7 +152,7 @@ func (o copyOutcome) recordRepo(repo *state.RepoState) {
 		}
 	}
 	if o.status != nil {
-		repo.HeadCommit, repo.CurrentBranch = o.status.HeadCommit, o.status.CurrentBranch
+		repo.CurrentBranch = o.status.CurrentBranch
 	}
 	// A failing fetch shows until a fetch succeeds; stale is discovery's call.
 	switch {
@@ -164,12 +164,8 @@ func (o copyOutcome) recordRepo(repo *state.RepoState) {
 	}
 }
 
-func (o copyOutcome) backupID() string {
-	if o.backup == nil {
-		return ""
-	}
-	return o.backup.ID
-}
+// saved reports that a backup holds the copy's current state.
+func (o copyOutcome) saved() bool { return o.backup != nil && o.backup.ID != "" }
 
 func memberAt(st *state.State, workgroup, name, path string) *state.WorkgroupMemberState {
 	ws := st.Workgroups[workgroup]
