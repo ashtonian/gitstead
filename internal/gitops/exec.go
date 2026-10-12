@@ -11,16 +11,28 @@ import (
 	"github.com/ashtonian/git-mgr/internal/shellutil"
 )
 
-// Git executes a git command in the given repo directory and returns stdout.
+// Git executes a git command in the given repo directory and returns stdout
+// with surrounding whitespace trimmed. Use GitOutput when the bytes matter.
 func Git(ctx context.Context, repoPath string, args ...string) (string, error) {
+	out, err := GitOutput(ctx, repoPath, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// GitOutput executes a git command in the given repo directory and returns
+// stdout unchanged. Patches need this: trimming drops the final newline and
+// leaves a patch git refuses to apply.
+func GitOutput(ctx context.Context, repoPath string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repoPath}, args...)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return stdout.Bytes(), nil
 }
 
 // GitWithSSHKey executes a git command with a custom SSH key.

@@ -29,11 +29,17 @@ func setupTestRepo(t *testing.T) string {
 		}
 	}
 
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test"), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	ctx := context.Background()
-	gitops.Git(ctx, dir, "add", ".")
-	gitops.Git(ctx, dir, "commit", "-m", "initial")
+	if _, err := gitops.Git(ctx, dir, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if _, err := gitops.Git(ctx, dir, "commit", "-m", "initial"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
 
 	return dir
 }
