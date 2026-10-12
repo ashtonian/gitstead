@@ -62,7 +62,7 @@ func (c *WGPruneCmd) Run(ctx *Context) error {
 	}
 	archiveDir := cfg.Backup.ArchiveDir
 
-	reaped := 0
+	reaped, failedRemovals := 0, 0
 	for _, name := range names {
 		ws, ok := st.Workgroups[name]
 		if !ok {
@@ -112,6 +112,7 @@ func (c *WGPruneCmd) Run(ctx *Context) error {
 			archived, rerr := workgroup.RemoveMember(ctx.GoCtx(), spec, m, archiveDir, false)
 			if rerr != nil {
 				fmt.Fprintf(os.Stderr, "  %s/%s: kept: %v\n", name, m.Name, rerr)
+				failedRemovals++
 				continue
 			}
 			if archived != "" {
@@ -134,10 +135,10 @@ func (c *WGPruneCmd) Run(ctx *Context) error {
 	}
 	if c.DryRun {
 		fmt.Printf("%d member(s) reapable.\n", reaped)
-	} else {
-		fmt.Printf("Reaped %d member(s).\n", reaped)
+		return nil
 	}
-	return nil
+	fmt.Printf("Reaped %d member(s).\n", reaped)
+	return outcome(failedRemovals, reaped+failedRemovals, "members could not be removed")
 }
 
 // dropMembers returns members with the named reaped members removed.

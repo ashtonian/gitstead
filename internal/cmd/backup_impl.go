@@ -115,7 +115,7 @@ func (c *BackupCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	saved, failed := 0, 0
+	saved, failed, attempted := 0, 0, 0
 	for key, repo := range st.Repos {
 		if !pass(key, repo) || !repo.Cloned {
 			continue
@@ -123,6 +123,7 @@ func (c *BackupCmd) Run(ctx *Context) error {
 
 		repoCfg := cfg.ResolveForRepo(key)
 		backupCfg := backupConfigFor(cfg, repoCfg, key, repo.DiscoveredBy, c.PushBranch, c.PushRemote)
+		attempted++
 
 		br, err := gitops.Backup(ctx.GoCtx(), repo.LocalPath, backupCfg)
 		recordBackup(repo, br, err, time.Now())
@@ -149,10 +150,7 @@ func (c *BackupCmd) Run(ctx *Context) error {
 	if !ctx.Quiet {
 		fmt.Printf("Saved %d new backup(s)\n", saved)
 	}
-	if failed > 0 {
-		return fmt.Errorf("%d repo(s) failed to back up", failed)
-	}
-	return nil
+	return outcome(failed, attempted, "repos failed to back up")
 }
 
 func (c *BackupCmd) runList(ctx *Context, cfg *config.Config, st *state.State) error {

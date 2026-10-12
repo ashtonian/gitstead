@@ -53,6 +53,6 @@ func main() {
 		Ctx:        rootCtx,
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		os.Exit(cmd.ExitCode(err))
 	}
 }

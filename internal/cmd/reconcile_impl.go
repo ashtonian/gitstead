@@ -76,7 +76,8 @@ func (c *ApplyCmd) Run(ctx *Context) error {
 	}
 	results := reconcile.ApplyPlan(ctx.GoCtx(), cfg, reconcileEnv(cfg, st), plan, scope, reconcile.All)
 	logResults(ctx, results)
-	return errors.Join(printResults(results, resultsSummary), blockedErr(plan))
+	printResults(results, resultsSummary)
+	return changesOutcome(results, plan)
 }
 
 // fullPlan discovers and plans every repo and workgroup.
@@ -109,15 +110,32 @@ func reconcileEnv(cfg *config.Config, st *state.State) *reconcile.Env {
 
 // applyAuto applies what reconcile.auto allows, prints what happened and
 // what is left, and returns the failures.
-func applyAuto(ctx *Context, cfg *config.Config, st *state.State, plan *reconcile.Plan, include func(reconcile.Action) bool) error {
+func applyAuto(ctx *Context, cfg *config.Config, st *state.State, plan *reconcile.Plan, include func(reconcile.Action) bool) []reconcile.Result {
 	results := plan.Apply(ctx.GoCtx(), reconcileEnv(cfg, st), include)
 	logResults(ctx, results)
 	if ctx.Quiet {
-		return printResults(results, resultsQuiet)
+		printResults(results, resultsQuiet)
+		return results
 	}
-	failed := printResults(results, resultsEach)
+	printResults(results, resultsEach)
 	printPending(plan, include)
-	return failed
+	return results
+}
+
+// changesOutcome is the outcome of applying a plan: each failed or blocked
+// change counts against the changes attempted.
+func changesOutcome(results []reconcile.Result, plan *reconcile.Plan) error {
+	return outcome(failedChanges(results)+len(plan.Blocked), len(results)+len(plan.Blocked), "changes failed or could not be made")
+}
+
+func failedChanges(results []reconcile.Result) int {
+	n := 0
+	for _, r := range results {
+		if r.Err != nil {
+			n++
+		}
+	}
+	return n
 }
 
 func confirm(question string) bool {
@@ -206,9 +224,8 @@ const (
 	resultsSummary                    // failures, notes and a count, after the plan was printed
 )
 
-// printResults prints how applied actions went and returns the failures.
-func printResults(results []reconcile.Result, style resultStyle) error {
-	var errs []error
+// printResults prints how applied actions went.
+func printResults(results []reconcile.Result, style resultStyle) {
 	done := 0
 	for _, r := range results {
 		line := describeAction(r.Action)
@@ -218,8 +235,7 @@ func printResults(results []reconcile.Result, style resultStyle) error {
 				fmt.Println(line + "   skipped")
 			}
 		case r.Err != nil:
-			fmt.Fprintln(os.Stderr, line+"   FAILED: "+r.Err.Error())
-			errs = append(errs, fmt.Errorf("%s %s: %w", r.Action.Kind, r.Action.Target, r.Err))
+			fmt.Fprintln(os.Stderr, line+"   FAILED: "+tildify(r.Err.Error()))
 		case r.Info != "":
 			done++
 			if style != resultsQuiet {
@@ -235,10 +251,6 @@ func printResults(results []reconcile.Result, style resultStyle) error {
 	if style == resultsSummary && len(results) > 0 {
 		fmt.Printf("Applied %d of %d %s.\n", done, len(results), plural(len(results), "change", "changes"))
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("%d %s failed", len(errs), plural(len(errs), "change", "changes"))
-	}
-	return nil
 }
 
 func plural(n int, one, many string) string {
@@ -249,10 +261,7 @@ func plural(n int, one, many string) string {
 }
 
 func blockedErr(p *reconcile.Plan) error {
-	if len(p.Blocked) > 0 {
-		return fmt.Errorf("%d change(s) could not be made", len(p.Blocked))
-	}
-	return nil
+	return outcome(len(p.Blocked), len(p.Blocked), "changes could not be made")
 }
 
 func logResults(ctx *Context, results []reconcile.Result) {

@@ -580,6 +580,17 @@ Or wire it up by hand:
 */15 * * * * /usr/local/bin/git-mgr sync --quiet 2>> ~/.local/share/git-mgr/git-mgr.log
 ```
 
+Exit codes are stable, so a scheduler or script can tell a flaky repo from a
+broken setup. With `--quiet`, only failures are printed, to stderr.
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Everything succeeded. `sync` also exits 0 when another run holds the lock, since overlapping scheduled runs are routine. |
+| 1 | The command failed: bad config, unreadable state, or every target failed. |
+| 3 | Partial failure: some repos, members or changes failed and the rest succeeded. Each failure is printed to stderr. |
+| 75 | Another git-mgr run holds the lock; try again (EX_TEMPFAIL). |
+| 80 | Usage error: unknown command or flag. |
+
 ## Resilience
 
 GitHub and Gitea requests retry automatically on rate-limit (429 / secondary

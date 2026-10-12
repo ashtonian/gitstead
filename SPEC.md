@@ -1558,7 +1558,7 @@ The tool is cron-safe because:
 1. **flock** prevents concurrent execution -- overlapping runs exit cleanly
 2. **min_fetch_interval** makes frequent runs cheap
 3. **auto_discover** picks up new repos without a separate command
-4. **Non-zero exit code** only on errors, zero on "already running" skip
+4. **Non-zero exit code** only on errors (3 for a partial failure), zero on "already running" skip
 5. **--quiet** suppresses normal output
 6. **Notifications** (optional) fire OS toast on errors so you don't need to watch logs
 
@@ -1569,8 +1569,16 @@ The tool is cron-safe because:
 1. **Per-repo errors don't abort the run** -- collect all, continue with remaining
 2. **Network errors retry** with exponential backoff (configurable)
 3. **Lock conflicts skip gracefully** -- log warning, move to next repo
-4. **State file lock conflict exits cleanly** -- code 0, message to stderr
-5. **Exit codes**: 0 = success (or skipped), 1 = some repos failed, 2 = fatal (bad config)
+4. **State file lock conflict**: `sync` exits 0 with a message to stderr; every other command exits 75
+5. **Exit codes**:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Everything succeeded. `sync` also exits 0 when another run holds the lock, since overlapping scheduled runs are routine. |
+| 1 | The command failed: bad config, unreadable state, or every target failed. |
+| 3 | Partial failure: some repos, members or changes failed and the rest succeeded. Each failure is printed to stderr. |
+| 75 | Another git-mgr run holds the lock; try again (EX_TEMPFAIL). |
+| 80 | Usage error: unknown command or flag. |
 6. **All errors include repo context** -- `fmt.Errorf("fetching %s: %w", repo.FullName, err)`
 
 ---

@@ -27,7 +27,7 @@ func (c *RemoteSyncCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	pushed := 0
+	pushed, failed := 0, 0
 	for key, repo := range st.Repos {
 		if !pass(key, repo) || !repo.Cloned {
 			continue
@@ -55,7 +55,8 @@ func (c *RemoteSyncCmd) Run(ctx *Context) error {
 		refspec := "refs/git-mgr/*:refs/git-mgr/*"
 		_, err := gitops.GitWithSSHKey(ctx.GoCtx(), repo.LocalPath, sshKey, "push", remoteName, refspec)
 		if err != nil {
-			fmt.Printf("  %s: push failed: %v\n", key, err)
+			fmt.Fprintf(os.Stderr, "  %s: push failed: %v\n", key, err)
+			failed++
 			continue
 		}
 		pushed++
@@ -67,7 +68,7 @@ func (c *RemoteSyncCmd) Run(ctx *Context) error {
 	if !ctx.Quiet {
 		fmt.Printf("Pushed backup refs for %d repos\n", pushed)
 	}
-	return nil
+	return outcome(failed, pushed+failed, "repos failed to push backup refs")
 }
 
 func (c *RemoveCmd) Run(ctx *Context) error {
@@ -134,10 +135,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 	if err := st.Save(); err != nil {
 		return err
 	}
-	if len(kept) > 0 {
-		return fmt.Errorf("%d of %d repos could not be deleted and are still tracked: %s", len(kept), len(toRemove), strings.Join(kept, ", "))
-	}
-	return nil
+	return outcome(len(kept), len(toRemove), "repos could not be deleted and are still tracked: %s", strings.Join(kept, ", "))
 }
 
 func (c *ConfigCmd) Run(ctx *Context) error {

@@ -87,8 +87,5 @@ func (c *RunCmd) Run(ctx *Context) error {
 		}
 	}
 	fmt.Printf("\nran in %d repos, %d failed\n", len(targets), failed)
-	if failed > 0 {
-		return fmt.Errorf("%d repos failed", failed)
-	}
-	return nil
+	return outcome(failed, len(targets), "repos failed")
 }

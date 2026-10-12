@@ -135,3 +135,16 @@ func TestLoad_RefusesNewerVersion(t *testing.T) {
 		t.Fatalf("Load of a newer state = %v, want ErrNewerState", err)
 	}
 }
+
+func TestAcquireLock_HeldIsErrLocked(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.yaml")
+	first, _ := state.Load(path)
+	if err := first.AcquireLock(); err != nil {
+		t.Fatal(err)
+	}
+	defer first.ReleaseLock()
+	second, _ := state.Load(path)
+	if err := second.AcquireLock(); !errors.Is(err, state.ErrLocked) {
+		t.Fatalf("second lock = %v, want ErrLocked", err)
+	}
+}

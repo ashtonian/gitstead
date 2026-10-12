@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -58,7 +57,8 @@ func addByHand(ctx *Context, cfg *config.Config, st *state.State, d reconcile.Re
 	printDriftAndBlocked(plan)
 	results := plan.Apply(ctx.GoCtx(), reconcileEnv(cfg, st), reconcile.All)
 	logResults(ctx, results)
-	return errors.Join(printResults(results, resultsEach), blockedErr(plan))
+	printResults(results, resultsEach)
+	return changesOutcome(results, plan)
 }
 
 func splitTags(s string) []string {

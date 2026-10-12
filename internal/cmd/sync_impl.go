@@ -13,10 +13,12 @@ import (
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/notify"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
+	"github.com/ashtonian/git-mgr/internal/state"
 	"golang.org/x/sync/errgroup"
 )
 
 type syncResult struct {
+	attempted     int // fetches and backups tried
 	fetched       int
 	skippedRecent int
 	skippedLocked int
@@ -42,10 +44,14 @@ func (c *SyncCmd) Run(ctx *Context) error {
 
 	// Acquire lock
 	if err := st.AcquireLock(); err != nil {
+		if !errors.Is(err, state.ErrLocked) {
+			return err
+		}
+		// A scheduled sync overlapping a running one is routine: exit 0.
 		if !ctx.Quiet {
 			fmt.Fprintln(os.Stderr, "Another git-mgr instance is running, skipping.")
 		}
-		return nil // exit 0, not an error
+		return nil
 	}
 	defer st.ReleaseLock()
 
@@ -56,7 +62,6 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	}
 
 	log := ctx.Logger()
-	var reconcileErr error
 
 	// Discover, then bring repos in line with config as far as reconcile.auto
 	// allows. Without discovery only hand-added repos can be judged.
@@ -75,9 +80,8 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		}
 	}
 	plan := reconcile.Compute(ctx.GoCtx(), cfg, st, scope)
-	if err := applyAuto(ctx, cfg, st, plan, reconcile.AutoFilter(cfg.Reconcile.Auto)); err != nil {
-		reconcileErr = err
-	}
+	changes := applyAuto(ctx, cfg, st, plan, reconcile.AutoFilter(cfg.Reconcile.Auto))
+	changesFailed, changesTried := failedChanges(changes)+len(plan.Blocked), len(changes)+len(plan.Blocked)
 
 	// Detect stale -- but only if every rule succeeded. On a partial failure the
 	// discovered set is incomplete, and marking the missing repos stale (or
@@ -140,6 +144,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 					sshKey := cfg.ResolveSSHKey(key, repo.DiscoveredBy)
 					err := fetchWithRetry(repoCtx, repo.LocalPath, sshKey, repoCfg.Sync)
 					mu.Lock()
+					result.attempted++
 					switch {
 					case err == nil:
 						result.fetched++
@@ -164,6 +169,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 				backupCfg := backupConfigFor(cfg, repoCfg, key, repo.DiscoveredBy, c.PushBranch, "")
 				br, err := gitops.Backup(repoCtx, repo.LocalPath, backupCfg)
 				mu.Lock()
+				result.attempted++
 				recordBackup(repo, br, err, time.Now())
 				if err != nil {
 					result.failed++
@@ -210,6 +216,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 					continue
 				}
 				br, berr := gitops.Backup(ctx.GoCtx(), m.Path, bcfg)
+				result.attempted++
 				if berr != nil {
 					result.failed++
 					result.errors = append(result.errors, syncError{repo: wgName + "/" + m.Name, err: berr})
@@ -237,15 +244,11 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	if !ctx.Quiet {
 		fmt.Printf("Synced: %d fetched, %d skipped (recent), %d skipped (locked), %d failed, %d backed up\n",
 			result.fetched, result.skippedRecent, result.skippedLocked, result.failed, result.backedUp)
-		for _, e := range result.errors {
-			fmt.Printf("  %s: %v\n", e.repo, e.err)
-		}
 	}
-
-	if len(result.errors) > 0 {
-		return errors.Join(fmt.Errorf("%d repos failed", len(result.errors)), reconcileErr)
+	for _, e := range result.errors {
+		fmt.Fprintf(os.Stderr, "  %s: %v\n", e.repo, e.err)
 	}
-	return reconcileErr
+	return outcome(len(result.errors)+changesFailed, result.attempted+changesTried, "sync operations failed")
 }
 
 func fetchWithRetry(ctx context.Context, repoPath, sshKey string, cfg config.SyncConfig) error {
