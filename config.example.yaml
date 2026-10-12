@@ -48,6 +48,14 @@ accounts: []
   #   owners: [acme, acme-labs]
   #   ssh_key: "~/.ssh/id_work"
   #   git: {name: "Your Name", email: "you@acme.com"}
+  #   signing:
+  #     mode: required                 # inherit (default): leave signing to your
+  #                                    # global config; required: sign every
+  #                                    # commit and tag; off: never sign here
+  #     key: "~/.ssh/id_work.pub"      # user.signingkey; .pub or key:: = SSH, else GPG
+  #     format: ssh                    # optional: ssh | openpgp | x509
+  #     program: ""                    # optional signer, e.g. 1Password's op-ssh-sign
+  #     allowed_signers: ""            # optional gpg.ssh.allowedSignersFile
 
 # =============================================================================
 # Provider Instances

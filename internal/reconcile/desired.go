@@ -2,9 +2,11 @@ package reconcile
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/discovery"
@@ -22,6 +24,44 @@ const (
 	keyUserEmail  = "user.email"
 )
 
+// AccountConfig is the repo-local git config an account asks for: its commit
+// identity and signing settings. The SSH key's core.sshCommand is added per
+// repo, since it depends on the remote.
+func AccountConfig(a *config.Account) map[string]string {
+	cfg := map[string]string{}
+	if a == nil {
+		return cfg
+	}
+	if a.Git.Name != "" {
+		cfg[keyUserName] = a.Git.Name
+	}
+	if a.Git.Email != "" {
+		cfg[keyUserEmail] = a.Git.Email
+	}
+	switch s := a.Signing; s.Mode {
+	case "required":
+		format := s.SigningFormat()
+		cfg["commit.gpgsign"], cfg["tag.gpgsign"], cfg["gpg.format"] = "true", "true", format
+		if s.Key != "" {
+			key := s.Key
+			if format == "ssh" && !strings.HasPrefix(key, "key::") {
+				key = config.ExpandHome(key)
+			}
+			cfg["user.signingkey"] = key
+		}
+		if s.Program != "" {
+			program := map[string]string{"ssh": "gpg.ssh.program", "openpgp": "gpg.program", "x509": "gpg.x509.program"}[format]
+			cfg[program] = config.ExpandHome(s.Program)
+		}
+		if s.AllowedSigners != "" && format == "ssh" {
+			cfg["gpg.ssh.allowedsignersfile"] = config.ExpandHome(s.AllowedSigners)
+		}
+	case "off":
+		cfg["commit.gpgsign"], cfg["tag.gpgsign"] = "false", "false"
+	}
+	return cfg
+}
+
 // Repo is what config and discovery want for one tracked repo.
 type Repo struct {
 	Key, Host, Owner, Name, FullName string
@@ -29,9 +69,8 @@ type Repo struct {
 	ProviderID string
 	Path       string
 	URL        string
-	SSHKey     string // the key git-mgr uses for this repo; "" for ssh's own choice
-	Account    string // the account covering it; "" for none
-	Identity   config.GitIdentity
+	SSHKey     string   // the key git-mgr uses for this repo; "" for ssh's own choice
+	Account    string   // the account covering it; "" for none
 	Tags       []string // sorted
 	UserTags   []string
 	Rule       string            // discovering rule; "_manual" for repos: entries
@@ -42,6 +81,9 @@ type Repo struct {
 	Pinned bool
 	// Found is this run's discovery result; nil when discovery didn't see it.
 	Found *discovery.Repo
+	// accountConfig is the managed config the account adds; Config is it
+	// plus the SSH key's.
+	accountConfig map[string]string
 }
 
 // SSHCommand is the core.sshCommand git-mgr writes for a repo with a
@@ -52,17 +94,14 @@ func SSHCommand(key string) string {
 }
 
 // managedConfig is the repo-local git config git-mgr keeps for a copy: the
-// SSH key for SSH remotes, and the covering account's commit identity.
-func managedConfig(url, sshKey string, id config.GitIdentity) map[string]string {
-	cfg := map[string]string{}
+// SSH key for SSH remotes, and what the covering account asks for.
+func managedConfig(url, sshKey string, accountConfig map[string]string) map[string]string {
+	cfg := maps.Clone(accountConfig)
+	if cfg == nil {
+		cfg = map[string]string{}
+	}
 	if sshKey != "" && !repourl.IsHTTP(url) {
 		cfg[keySSHCommand] = SSHCommand(sshKey)
-	}
-	if id.Name != "" {
-		cfg[keyUserName] = id.Name
-	}
-	if id.Email != "" {
-		cfg[keyUserEmail] = id.Email
 	}
 	if len(cfg) == 0 {
 		return nil
@@ -74,11 +113,13 @@ func managedConfig(url, sshKey string, id config.GitIdentity) map[string]string 
 // gives r, which must already have its key, rule and URL.
 func (r *Repo) access(cfg *config.Config) {
 	r.SSHKey = cfg.ResolveSSHKey(r.Key, r.Rule)
-	r.Account, r.Identity = "", config.GitIdentity{}
-	if a := cfg.AccountFor(r.Key, r.Rule); a != nil {
-		r.Account, r.Identity = a.Name, a.Git
+	a := cfg.AccountFor(r.Key, r.Rule)
+	r.Account = ""
+	if a != nil {
+		r.Account = a.Name
 	}
-	r.Config = managedConfig(r.URL, r.SSHKey, r.Identity)
+	r.accountConfig = AccountConfig(a)
+	r.Config = managedConfig(r.URL, r.SSHKey, r.accountConfig)
 }
 
 // Repos returns what config wants for every repo this run can judge: those

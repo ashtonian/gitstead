@@ -191,6 +191,9 @@ func validateAccounts(cfg *Config) error {
 		if names[a.Name] {
 			return fmt.Errorf("duplicate account name: %q", a.Name)
 		}
+		if a.Signing.Mode == "required" && a.Signing.Key == "" && a.Signing.SigningFormat() != "openpgp" {
+			return fmt.Errorf("account %q: signing.mode required with format %s needs signing.key", a.Name, a.Signing.SigningFormat())
+		}
 		names[a.Name] = true
 		owners := a.Owners
 		if len(owners) == 0 {

@@ -41,7 +41,7 @@ func PlanRepos(desired map[string]Repo, st *state.State, seen Seen, overwrite bo
 			if applied.ManuallyAdded {
 				d.Pinned, d.Path, d.URL, d.UserTags = true, applied.LocalPath, applied.CloneURL, applied.UserTags
 				d.Tags = tagUnion(d.Tags, applied.UserTags)
-				d.Config = managedConfig(d.URL, d.SSHKey, d.Identity)
+				d.Config = managedConfig(d.URL, d.SSHKey, d.accountConfig)
 			}
 			first = append(first, Action{
 				Kind: KindRename, Target: key, From: old, To: key,

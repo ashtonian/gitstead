@@ -102,3 +102,11 @@ func TestValidate_RejectsURLCredentials(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestValidate_RequiredSSHSigningNeedsAKey(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Accounts = []config.Account{{Name: "work", Signing: config.Signing{Mode: "required", Format: "ssh"}}}
+	if err := config.Validate(cfg); err == nil || !strings.Contains(err.Error(), "needs signing.key") {
+		t.Fatalf("err = %v", err)
+	}
+}

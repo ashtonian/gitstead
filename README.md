@@ -259,6 +259,10 @@ accounts:
     owners: [acme, acme-labs]          # these owners, and their GitLab subgroups
     ssh_key: ~/.ssh/id_work
     git: {name: Ashton Kinslow, email: you@acme.com}
+    signing:
+      mode: required                   # inherit (default) | required | off
+      key: ~/.ssh/id_work.pub          # .pub or key:: means SSH signing; a key ID means GPG
+      program: /Applications/1Password.app/Contents/MacOS/op-ssh-sign   # optional
   - name: ghe
     ssh_key: ~/.ssh/id_ghe             # covers only what names it below
 providers:
@@ -279,6 +283,13 @@ into the repo's own git config, so your own git commands there behave the same:
 | --- | --- |
 | `core.sshCommand = ssh -i <key> -o IdentitiesOnly=yes` | the repo has an SSH remote and a key |
 | `user.name`, `user.email` | the account sets them; otherwise your global identity applies |
+| `commit.gpgsign`, `tag.gpgsign`, `gpg.format`, `user.signingkey`, `gpg.ssh.program`/`gpg.program`/`gpg.x509.program`, `gpg.ssh.allowedSignersFile` | `signing.mode: required` |
+| `commit.gpgsign = false`, `tag.gpgsign = false` | `signing.mode: off`, so an agent never stalls on a passphrase prompt |
+
+With `signing.mode: required`, `git-mgr doctor` makes a test signature the way
+an agent would — no terminal, 20-second limit — and fails if it can't: SSH
+signing through an agent or a passphrase-less key works unattended; GPG needs
+a gpg-agent holding the passphrase.
 
 Workgroup clone members get the same keys as the repo they come from, so
 agents commit as the right account; worktree members share their source repo's

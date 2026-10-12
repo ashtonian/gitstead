@@ -386,3 +386,36 @@ func TestApplyPlan_RunsOnlyDisruptionsThatWereShown(t *testing.T) {
 		t.Fatal("a removal that wasn't shown must not run")
 	}
 }
+
+// Signing settings follow the account: required writes them, off turns
+// signing off, inherit hands it back to your global config.
+func TestApply_AccountSigning(t *testing.T) {
+	root := t.TempDir()
+	remote := bareRemote(t, root, "app")
+	w := newWorld(t, root)
+	w.cfg.Accounts = []config.Account{{Name: "work", Hosts: []string{"local"},
+		Signing: config.Signing{Mode: "required", Key: "/keys/sign.pub"}}}
+	w.cfg.Repos = []config.ManualRepo{{URL: remote}}
+	w.converge()
+	repo := w.st.Repos["local/remotes/app"].LocalPath
+	for k, v := range map[string]string{"commit.gpgsign": "true", "gpg.format": "ssh", "user.signingkey": "/keys/sign.pub"} {
+		if got := mustGit(t, repo, "config", "--local", k); got != v {
+			t.Errorf("%s = %q, want %q", k, got, v)
+		}
+	}
+
+	w.cfg.Accounts[0].Signing = config.Signing{Mode: "off"}
+	w.converge()
+	if got := mustGit(t, repo, "config", "--local", "commit.gpgsign"); got != "false" {
+		t.Errorf("commit.gpgsign = %q after turning signing off", got)
+	}
+	if _, err := gitops.Git(context.Background(), repo, "config", "--local", "gpg.format"); err == nil {
+		t.Error("gpg.format should be unset once signing is off")
+	}
+
+	w.cfg.Accounts[0].Signing = config.Signing{}
+	w.converge()
+	if _, err := gitops.Git(context.Background(), repo, "config", "--local", "commit.gpgsign"); err == nil {
+		t.Error("commit.gpgsign should be unset under inherit")
+	}
+}
