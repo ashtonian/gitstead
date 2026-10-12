@@ -57,6 +57,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 	}
 
 	var kept []string
+	var archives []state.ArchiveEntry
 	untrack := map[string]string{} // key -> the path it was removed at
 	for _, key := range toRemove {
 		repo := st.Repos[key]
@@ -74,6 +75,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 			}
 			if archived != "" {
 				fmt.Printf("  Archived unique work of %s to %s\n", key, archived)
+				archives = append(archives, archiveEntry(archived, key, repo.LocalPath))
 			}
 			fmt.Printf("  Deleted %s\n", repo.LocalPath)
 		}
@@ -81,6 +83,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 	}
 
 	err = st.Update(cfg.LockTimeout, func(st *state.State) error {
+		st.Archives = append(st.Archives, archives...)
 		for key, path := range untrack {
 			// A repo moved meanwhile wasn't the one deleted, and one a
 			// workspace started using meanwhile is still needed.

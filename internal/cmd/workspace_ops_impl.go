@@ -617,6 +617,32 @@ func printAgents(st *state.State, name string, runs map[string]agentRun) {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", r.Agent, ar.state, profile, last)
 	}
 	tw.Flush()
+	for _, r := range ws.Replicas {
+		for _, c := range r.Copies {
+			if c.PR != "" {
+				fmt.Printf("%s published %s: %s\n", workspace.LabelOf(ws, r.Agent, c.Path), c.Published.Local().Format(time.DateTime), c.PR)
+			}
+		}
+	}
+	var retired []state.Tombstone
+	for _, t := range st.Tombstones {
+		if t.Workspace == name {
+			retired = append(retired, t)
+		}
+	}
+	if n := len(retired); n > 5 {
+		retired = retired[n-5:]
+	}
+	for _, t := range retired {
+		line := fmt.Sprintf("retired %s/%s %s", t.Workspace, t.Agent, t.Retired.Local().Format(time.DateTime))
+		if t.Archive != "" {
+			line += ", archive " + t.Archive
+		}
+		if t.PR != "" {
+			line += ", " + t.PR
+		}
+		fmt.Println(line)
+	}
 	fmt.Println()
 }
 

@@ -2,8 +2,10 @@ package gitops_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -42,7 +44,7 @@ func TestInspectUniqueWork(t *testing.T) {
 		want      func(u gitops.UniqueWork) bool
 		lostClone bool
 	}{
-		{"pushed and clean", func(t *testing.T, c string) {}, func(u gitops.UniqueWork) bool { return u == gitops.UniqueWork{} }, false},
+		{"pushed and clean", func(t *testing.T, c string) {}, func(u gitops.UniqueWork) bool { return reflect.DeepEqual(u, gitops.UniqueWork{}) }, false},
 		{"changed file", func(t *testing.T, c string) { writeFile(t, filepath.Join(c, "a.txt"), []byte("b\n")) },
 			func(u gitops.UniqueWork) bool { return u.Changed == 1 }, true},
 		{"untracked file", func(t *testing.T, c string) { writeFile(t, filepath.Join(c, "u.txt"), []byte("u\n")) },
@@ -254,5 +256,86 @@ func TestRemoveWorktree_KeepsBranchAndArchivesWorkingTree(t *testing.T) {
 	}
 	if got := mustGit(t, source, "show", worktreeRef+":agent.txt"); got != "uncommitted" {
 		t.Errorf("restored worktree file = %q", got)
+	}
+}
+
+// A submodule's own unpushed commits and changes are unique work of the copy
+// that checked it out, and are archived before the copy is deleted.
+func TestRemoveClone_ArchivesSubmoduleWork(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	subRemote := filepath.Join(root, "sub.git")
+	mustGit(t, root, "init", "-q", "--bare", "-b", "main", subRemote)
+	seed := filepath.Join(root, "seed")
+	mustGit(t, root, "clone", "-q", subRemote, seed)
+	mustGit(t, seed, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "s")
+	mustGit(t, seed, "push", "-q", "origin", "HEAD:main")
+
+	superRemote := filepath.Join(root, "super.git")
+	mustGit(t, root, "init", "-q", "--bare", "-b", "main", superRemote)
+	clone := filepath.Join(root, "clone")
+	mustGit(t, root, "clone", "-q", superRemote, clone)
+	mustGit(t, clone, "-c", "protocol.file.allow=always", "submodule", "add", "-q", subRemote, "lib")
+	mustGit(t, clone, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "add lib")
+	mustGit(t, clone, "push", "-q", "origin", "HEAD:main")
+
+	sub := filepath.Join(clone, "lib")
+	mustGit(t, sub, "checkout", "-q", "-b", "work")
+	mustGit(t, sub, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "unpushed")
+	writeFile(t, filepath.Join(sub, "wip.txt"), []byte("wip\n"))
+
+	work, err := gitops.InspectUniqueWork(ctx, clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w, ok := work.Submodules["lib"]; !ok || w.UnpushedCommits != 1 || w.Untracked != 1 || !work.LostWithClone() || !work.LostWithWorktree() {
+		t.Fatalf("work = %+v", work)
+	}
+	archive := filepath.Join(root, "archive")
+	path, err := gitops.RemoveClone(ctx, clone, archive, "super", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(clone); !os.IsNotExist(err) {
+		t.Fatal("the clone wasn't removed")
+	}
+	var meta gitops.ArchiveMeta
+	data, err := os.ReadFile(strings.TrimSuffix(path, ".bundle") + ".json")
+	if err != nil || json.Unmarshal(data, &meta) != nil {
+		t.Fatalf("meta: %s, %v", data, err)
+	}
+	subBundle := meta.Submodules["lib"]
+	if subBundle == "" {
+		t.Fatalf("no submodule archive in %+v", meta)
+	}
+	heads := mustGit(t, root, "bundle", "list-heads", subBundle)
+	if !strings.Contains(heads, "refs/heads/work") || !strings.Contains(heads, "worktree") {
+		t.Errorf("the submodule's bundle lacks its branch or working tree:\n%s", heads)
+	}
+}
+
+// A clone's Git LFS objects aren't in a bundle, which holds pointers to
+// them: they are kept beside it, hardlinked.
+func TestRemoveClone_KeepsLFSObjects(t *testing.T) {
+	ctx := context.Background()
+	_, clone := remoteAndClone(t)
+	objects := filepath.Join(clone, ".git", "lfs", "objects", "ab", "cd")
+	if err := os.MkdirAll(objects, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(objects, "abcd1234"), []byte("big file\n"))
+	writeFile(t, filepath.Join(clone, "wip.txt"), []byte("wip\n"))
+
+	path, err := gitops.RemoveClone(ctx, clone, filepath.Join(t.TempDir(), "archive"), "app", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta gitops.ArchiveMeta
+	data, _ := os.ReadFile(strings.TrimSuffix(path, ".bundle") + ".json")
+	if err := json.Unmarshal(data, &meta); err != nil || meta.LFS == "" {
+		t.Fatalf("meta: %s, %v", data, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(meta.LFS, "ab", "cd", "abcd1234")); err != nil || string(got) != "big file\n" {
+		t.Errorf("the LFS object wasn't kept: %q, %v", got, err)
 	}
 }

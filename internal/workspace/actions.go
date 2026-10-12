@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/config"
@@ -278,42 +279,24 @@ func DropCopies(ws *state.WorkspaceState, agent string, paths ...string) {
 	}
 }
 
-// removeCopy archives a copy's unique work and removes it, outside the state
-// lock; on any failure the copy stays on disk and in state.
+// removeCopy retires a copy (see Retire), outside the state lock; on any
+// failure it stays on disk and in state.
 func removeCopy(name, agent, path string) reconcile.RunFunc {
 	return func(ctx context.Context, env *reconcile.Env) (reconcile.Outcome, error) {
 		ws, err := recorded(env.State, name)
 		if err != nil {
 			return reconcile.Outcome{}, err
 		}
-		spec := FromState(nil, env.State, ws)
-		for _, l := range spec.Copies() {
-			if l.Agent != agent || l.Path != path {
-				continue
-			}
-			if err := CheckStopped(env.StateDir, name, agent); err != nil {
-				return reconcile.Outcome{}, err
-			}
-			archived, err := RemoveCopy(ctx, spec.Isolation, l.Copy, env.ArchiveDir, ArchiveName(l), false)
-			if err != nil {
-				return reconcile.Outcome{}, err
-			}
-			return reconcile.Outcome{
-				Info:   archivedInfo(archived),
-				Record: dropCopy(name, agent, path),
-				After: func(context.Context) (string, error) {
-					reconcile.RemoveEmptyParents(env, path)
-					if r := env.State.Workspaces[name]; r == nil || r.Replica(agent) == nil {
-						ForgetRuns(env.StateDir, name, agent)
-					}
-					return "", nil
-				},
-			}, nil
+		r := Retire(ctx, FromState(nil, env.State, ws), ws, agent, []string{path}, retireOptions(env))
+		if len(r.Kept) > 0 {
+			return reconcile.Outcome{}, r.Kept[0].Err
 		}
-		return reconcile.Outcome{}, nil
+		return retiredOutcome(env, name, map[string]Retired{agent: r}), nil
 	}
 }
 
+// removeWorkspace retires every copy of a workspace no longer declared, and
+// forgets the workspace once none is left.
 func removeWorkspace(name string) reconcile.RunFunc {
 	return func(ctx context.Context, env *reconcile.Env) (reconcile.Outcome, error) {
 		ws, err := recorded(env.State, name)
@@ -321,49 +304,68 @@ func removeWorkspace(name string) reconcile.RunFunc {
 			return reconcile.Outcome{}, err
 		}
 		spec := FromState(nil, env.State, ws)
-		var infos []string
+		retired := map[string]Retired{}
 		var errs []error
-		removed := map[string][]string{}
-		for _, l := range spec.Copies() {
-			if err := CheckStopped(env.StateDir, name, l.Agent); err != nil {
-				errs = append(errs, fmt.Errorf("%s kept: %w", l.Label(spec), err))
-				continue
-			}
-			archived, err := RemoveCopy(ctx, spec.Isolation, l.Copy, env.ArchiveDir, ArchiveName(l), false)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("%s kept: %w", l.Label(spec), err))
-				continue
-			}
-			removed[l.Agent] = append(removed[l.Agent], l.Path)
-			if archived != "" {
-				infos = append(infos, l.Label(spec)+": "+archivedInfo(archived))
+		for _, rs := range ws.Replicas {
+			r := Retire(ctx, spec, ws, rs.Agent, nil, retireOptions(env))
+			retired[rs.Agent] = r
+			for _, k := range r.Kept {
+				errs = append(errs, fmt.Errorf("%s kept: %w", k.Label(spec), k.Err))
 			}
 		}
-		return reconcile.Outcome{
-			Info: strings.Join(infos, "; "),
-			Record: func(st *state.State) error {
-				ws, err := recorded(st, name)
-				if err != nil {
-					return err
+		out := retiredOutcome(env, name, retired)
+		record := out.Record
+		out.Record = func(st *state.State) error {
+			if err := record(st); err != nil {
+				return err
+			}
+			if ws := st.Workspaces[name]; ws != nil && (ws.Isolation == config.IsolationShared || len(ws.Replicas) == 0) {
+				delete(st.Workspaces, name)
+			}
+			return nil
+		}
+		return out, errors.Join(errs...)
+	}
+}
+
+func retireOptions(env *reconcile.Env) RetireOptions {
+	return RetireOptions{StateDir: env.StateDir, ArchiveDir: env.ArchiveDir}
+}
+
+// retiredOutcome records retirements: the copies dropped, their tombstones
+// and archives; then tidies the directories and leases they left.
+func retiredOutcome(env *reconcile.Env, name string, retired map[string]Retired) reconcile.Outcome {
+	var infos []string
+	for _, r := range retired {
+		for _, a := range r.Archives {
+			infos = append(infos, archivedInfo(a.Path))
+		}
+	}
+	slices.Sort(infos)
+	return reconcile.Outcome{
+		Info: strings.Join(infos, "; "),
+		Record: func(st *state.State) error {
+			ws, err := recorded(st, name)
+			if err != nil {
+				return err
+			}
+			for agent, r := range retired {
+				DropCopies(ws, agent, r.Paths()...)
+				st.Bury(r.Tombstones, r.Archives)
+			}
+			return nil
+		},
+		After: func(context.Context) (string, error) {
+			for agent, r := range retired {
+				for _, p := range r.Paths() {
+					reconcile.RemoveEmptyParents(env, p)
 				}
-				for agent, paths := range removed {
-					DropCopies(ws, agent, paths...)
-				}
-				if ws.Isolation == config.IsolationShared || len(ws.Replicas) == 0 {
-					delete(st.Workspaces, name)
-				}
-				return nil
-			},
-			After: func(context.Context) (string, error) {
-				for agent, paths := range removed {
-					for _, p := range paths {
-						reconcile.RemoveEmptyParents(env, p)
-					}
+				if ws := env.State.Workspaces[name]; ws == nil || ws.Replica(agent) == nil {
 					ForgetRuns(env.StateDir, name, agent)
 				}
-				return "", nil
-			},
-		}, errors.Join(errs...)
+			}
+			return "", nil
+		},
 	}
 }
 

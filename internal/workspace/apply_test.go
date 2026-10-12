@@ -489,3 +489,47 @@ func TestApply_KeepsARunningAgentsCopy(t *testing.T) {
 		t.Error("the removed agent's lease file should be gone")
 	}
 }
+
+// Retiring an agent archives its copy's uncommitted work, removes the copy
+// and returns a tombstone and the archive's catalog entry; an agent whose
+// run holds its lease is kept.
+func TestRetire(t *testing.T) {
+	root := t.TempDir()
+	w := newWorld(t, root)
+	w.cfg.Repos = []config.ManualRepo{{URL: bareRemote(t, root, "app")}}
+	w.cfg.Workspaces = []config.Workspace{{Name: "app", Repos: []string{"local/remotes/app"}, Agents: 2}}
+	w.converge()
+	ws := w.st.Workspaces["app"]
+	spec := workspace.FromState(w.cfg, w.st, ws)
+	a1 := filepath.Join(w.cfg.WorkspaceDefaults.Root, "app", "agent-1")
+	writeFile(t, filepath.Join(a1, "wip.txt"), "unsaved\n")
+	opts := workspace.RetireOptions{StateDir: w.st.Dir(), ArchiveDir: w.cfg.Backup.ArchiveDir}
+
+	r := workspace.Retire(context.Background(), spec, ws, "agent-1", nil, opts)
+	if len(r.Kept) != 0 || len(r.Removed) != 1 || len(r.Tombstones) != 1 || len(r.Archives) != 1 {
+		t.Fatalf("retired = %+v", r)
+	}
+	if _, err := os.Stat(a1); !os.IsNotExist(err) {
+		t.Error("the copy wasn't removed")
+	}
+	a := r.Archives[0]
+	if a.Workspace != "app" || a.Agent != "agent-1" || a.Repo != "local/remotes/app" || a.Branch != "agents/app/agent-1" || a.ID == "" || !strings.Contains(a.Work, "untracked") {
+		t.Errorf("catalog entry = %+v", a)
+	}
+	if tomb := r.Tombstones[0]; tomb.Archive != a.ID || tomb.CopyID == "" {
+		t.Errorf("tombstone = %+v", tomb)
+	}
+	if _, err := os.Stat(a.Path); err != nil {
+		t.Errorf("the archive isn't on disk: %v", err)
+	}
+
+	lease, err := agents.Acquire(agents.LeasePath(w.st.Dir(), "app", "agent-2"), agents.Holder{PID: os.Getpid()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	r = workspace.Retire(context.Background(), spec, ws, "agent-2", nil, opts)
+	if len(r.Removed) != 0 || len(r.Kept) != 1 || !strings.Contains(r.Kept[0].Err.Error(), "--stop") {
+		t.Errorf("retiring a running agent = %+v", r)
+	}
+}

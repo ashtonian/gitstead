@@ -41,6 +41,9 @@ type ReplicaState struct {
 	// Run is the agent's latest run here; nil before its first. Whether it
 	// is running now is its lease's to say, not this record's.
 	Run *RunState `yaml:"run,omitempty" json:"run,omitempty"`
+	// Retiring is when retiring the agent began; it stays set when retiring
+	// was interrupted, until a retire finishes.
+	Retiring time.Time `yaml:"retiring,omitempty" json:"retiring,omitzero"`
 }
 
 // RunState is an agent's latest run in its replica.
@@ -68,6 +71,10 @@ type CopyState struct {
 	// repo's.
 	URL    string `yaml:"url,omitempty" json:"url,omitempty"`
 	CopyID string `yaml:"copy_id,omitempty" json:"copy_id,omitempty"`
+	// Published is when `ws publish` last pushed the branch; PR is the pull
+	// or merge request it opened or found.
+	Published time.Time `yaml:"published,omitempty" json:"published,omitzero"`
+	PR        string    `yaml:"pr,omitempty" json:"pr,omitempty"`
 	// ManagedConfig holds the git config keys git-mgr set in a clone, as
 	// RepoState.ManagedConfig does for a repo. Worktrees share their repo's.
 	ManagedConfig map[string]string `yaml:"managed_config,omitempty" json:"managed_config,omitempty"`
@@ -194,6 +201,51 @@ func (s *State) RenameRepo(from, to string) {
 				}
 			}
 		}
+	}
+}
+
+// ArchiveEntry is an archive of unique work git-mgr saved before deleting a
+// copy or a repo.
+type ArchiveEntry struct {
+	// ID is the archive's file name, without its extension.
+	ID string `yaml:"id" json:"id"`
+	// Path is the bundle, or the description of an archive that only holds
+	// submodules' bundles.
+	Path      string    `yaml:"path" json:"path"`
+	Repo      string    `yaml:"repo,omitempty" json:"repo,omitempty"`
+	Workspace string    `yaml:"workspace,omitempty" json:"workspace,omitempty"`
+	Agent     string    `yaml:"agent,omitempty" json:"agent,omitempty"`
+	Source    string    `yaml:"source" json:"source"` // where the deleted copy was
+	Branch    string    `yaml:"branch,omitempty" json:"branch,omitempty"`
+	CopyID    string    `yaml:"copy_id,omitempty" json:"copy_id,omitempty"`
+	Work      string    `yaml:"work" json:"work"` // what was saved
+	Created   time.Time `yaml:"created" json:"created"`
+}
+
+// Tombstone records a workspace copy that was retired.
+type Tombstone struct {
+	Workspace string    `yaml:"workspace" json:"workspace"`
+	Agent     string    `yaml:"agent" json:"agent"`
+	Repo      string    `yaml:"repo,omitempty" json:"repo,omitempty"`
+	Path      string    `yaml:"path" json:"path"`
+	Branch    string    `yaml:"branch,omitempty" json:"branch,omitempty"`
+	CopyID    string    `yaml:"copy_id,omitempty" json:"copy_id,omitempty"`
+	PR        string    `yaml:"pr,omitempty" json:"pr,omitempty"`
+	Retired   time.Time `yaml:"retired" json:"retired"`
+	// Archive is the ID of the archive of its unique work; "" when it had
+	// none.
+	Archive string `yaml:"archive,omitempty" json:"archive,omitempty"`
+}
+
+// maxTombstones bounds the tombstones kept; the oldest go first.
+const maxTombstones = 500
+
+// Bury records retired copies' tombstones and their archives.
+func (s *State) Bury(tombstones []Tombstone, archives []ArchiveEntry) {
+	s.Archives = append(s.Archives, archives...)
+	s.Tombstones = append(s.Tombstones, tombstones...)
+	if n := len(s.Tombstones) - maxTombstones; n > 0 {
+		s.Tombstones = slices.Delete(s.Tombstones, 0, n)
 	}
 }
 

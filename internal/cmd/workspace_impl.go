@@ -35,6 +35,8 @@ type WorkspaceCmd struct {
 	Open     WSOpenCmd     `cmd:"" help:"Open the workspace's agents with a launcher: tmux, iTerm, Muxy or a plugin."`
 	Run      WSRunCmd      `cmd:"" help:"Run an agent in its replica, in this terminal: what each pane of 'ws open' runs."`
 	Stop     WSStopCmd     `cmd:"" help:"End agents' runs, as closing their terminals would."`
+	Publish  WSPublishCmd  `cmd:"" help:"Push agents' branches, and with --pr open a pull request per repo."`
+	Retire   WSRetireCmd   `cmd:"" help:"Retire agents: archive their copies' unique work, remove the copies, keep tombstones."`
 	Backup   WSBackupCmd   `cmd:"" help:"Back up every copy's uncommitted work."`
 	Recover  WSRecoverCmd  `cmd:"" help:"Recover a copy's backed-up work (print, --into or --apply)."`
 	Prune    WSPruneCmd    `cmd:"" help:"Remove copies with no unique work (clean, nothing unpushed); never touches work in progress."`
@@ -309,11 +311,13 @@ func (c *WSListCmd) Run(ctx *Context) error {
 
 // WSRemoveCmd forgets a workspace or removes its copies.
 type WSRemoveCmd struct {
-	Name    string `arg:"" help:"Workspace to remove." predictor:"workspace"`
-	Delete  bool   `help:"Also remove each copy from disk, archiving its unique work first."`
-	Yes     bool   `help:"Skip confirmation."`
-	Force   bool   `help:"Discard copies' unique work instead of archiving it."`
-	Offsite bool   `help:"Push each copy's WIP and unpushed commits offsite (remote_sync) before deleting it; a copy that can't be pushed is kept."`
+	Name    string        `arg:"" help:"Workspace to remove." predictor:"workspace"`
+	Delete  bool          `help:"Also retire each copy: archive its unique work, then remove it."`
+	Yes     bool          `help:"Skip confirmation."`
+	Force   bool          `help:"Discard copies' unique work instead of archiving it."`
+	Offsite bool          `help:"Push each copy's WIP and unpushed commits offsite (remote_sync) before deleting it; a copy that can't be pushed is kept."`
+	Stop    bool          `help:"Stop running agents first, instead of keeping their copies."`
+	Timeout time.Duration `help:"With --stop, how long to wait for each run to end." default:"30s"`
 }
 
 func (c *WSRemoveCmd) Run(ctx *Context) error {
@@ -371,67 +375,94 @@ func (c *WSRemoveCmd) Run(ctx *Context) error {
 			return err
 		}
 	}
-	removed := map[string][]string{}
+	opts := workspace.RetireOptions{StateDir: st.Dir(), ArchiveDir: cfg.Backup.ArchiveDir, Stop: c.Stop, StopTimeout: c.Timeout, Discard: c.Force}
+	retired := map[string]workspace.Retired{}
 	kept := 0
-	for _, l := range copies {
-		label := l.Label(spec)
-		if err := workspace.CheckStopped(st.Dir(), c.Name, l.Agent); err != nil {
-			kept++
-			fmt.Fprintf(os.Stderr, "  %s: kept: %v\n", label, err)
-			continue
-		}
-		if c.Offsite && !c.Force && gitops.HasGitDir(l.Path) {
-			if cs := st.CopyAt(c.Name, l.Agent, l.Path); cs != nil {
-				job := copyJobFor(cfg, st, ws, l.Agent, *cs, true)
-				job.offsite = copyOffsite(cfg, st, machine, c.Name, *cs, job.sshKey)
-				if errs := runCopies(ctx.GoCtx(), ctx.Logger(), []copyJob{job}, 1)[0].failed(); len(errs) > 0 {
-					kept++
-					fmt.Fprintf(os.Stderr, "  %s: kept, it couldn't be taken offsite: %v\n", label, errors.Join(errs...))
-					continue
+	for _, r := range ws.Replicas {
+		var paths []string
+		for _, l := range workspace.OfAgent(copies, r.Agent) {
+			if c.Offsite && !c.Force && gitops.HasGitDir(l.Path) {
+				if cs := st.CopyAt(c.Name, l.Agent, l.Path); cs != nil {
+					job := copyJobFor(cfg, st, ws, l.Agent, *cs, true)
+					job.offsite = copyOffsite(cfg, st, machine, c.Name, *cs, job.sshKey)
+					if errs := runCopies(ctx.GoCtx(), ctx.Logger(), []copyJob{job}, 1)[0].failed(); len(errs) > 0 {
+						kept++
+						fmt.Fprintf(os.Stderr, "  %s: kept, it couldn't be taken offsite: %v\n", l.Label(spec), errors.Join(errs...))
+						continue
+					}
 				}
 			}
+			paths = append(paths, l.Path)
 		}
-		archived, rerr := workspace.RemoveCopy(ctx.GoCtx(), spec.Isolation, l.Copy, cfg.Backup.ArchiveDir, workspace.ArchiveName(l), c.Force)
-		if rerr != nil {
-			kept++
-			fmt.Fprintf(os.Stderr, "  %s: kept: %v\n", label, rerr)
+		if len(paths) == 0 {
 			continue
 		}
-		removed[l.Agent] = append(removed[l.Agent], l.Path)
-		if !ctx.Quiet {
-			if archived != "" {
-				fmt.Printf("  %s: removed, unique work archived to %s\n", label, tildify(archived))
-			} else {
-				fmt.Printf("  %s: removed\n", label)
-			}
+		res := workspace.Retire(ctx.GoCtx(), spec, ws, r.Agent, paths, opts)
+		retired[r.Agent] = res
+		kept += len(res.Kept)
+		reportRetired(spec, res, ctx.Quiet)
+	}
+	if err := recordRetired(cfg, st, c.Name, retired, kept == 0); err != nil {
+		return err
+	}
+	if kept > 0 {
+		return outcome(kept, len(copies), "copies of %q could not be removed and are still recorded", c.Name)
+	}
+	logEvent(ctx, "ws_remove", c.Name, "")
+	return nil
+}
+
+// reportRetired prints what a retirement removed and kept.
+func reportRetired(spec *workspace.Spec, r workspace.Retired, quiet bool) {
+	archived := map[string]string{}
+	for _, a := range r.Archives {
+		archived[a.Source] = a.Path
+	}
+	for _, l := range r.Removed {
+		if quiet {
+			continue
+		}
+		if a := archived[l.Path]; a != "" {
+			fmt.Printf("  %s: removed, unique work archived to %s\n", l.Label(spec), tildify(a))
+		} else {
+			fmt.Printf("  %s: removed\n", l.Label(spec))
 		}
 	}
-	err = st.Update(cfg.LockTimeout, func(st *state.State) error {
-		ws := st.Workspaces[c.Name]
+	for _, k := range r.Kept {
+		fmt.Fprintf(os.Stderr, "  %s: kept: %v\n", k.Label(spec), k.Err)
+	}
+}
+
+// recordRetired drops the retired copies from state with their tombstones
+// and archives, forgetting the workspace when forget is set and nothing of
+// it is left, then tidies the directories and leases they left.
+func recordRetired(cfg *config.Config, st *state.State, name string, retired map[string]workspace.Retired, forget bool) error {
+	err := st.Update(cfg.LockTimeout, func(st *state.State) error {
+		ws := st.Workspaces[name]
 		if ws == nil {
 			return nil
 		}
-		for agent, paths := range removed {
-			workspace.DropCopies(ws, agent, paths...)
+		for agent, r := range retired {
+			workspace.DropCopies(ws, agent, r.Paths()...)
+			st.Bury(r.Tombstones, r.Archives)
 		}
-		if kept == 0 {
-			delete(st.Workspaces, c.Name)
+		if forget && (len(ws.Replicas) == 0 || ws.Isolation == config.IsolationShared) {
+			delete(st.Workspaces, name)
 		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	for agent, paths := range removed {
-		for _, p := range paths {
-			reconcile.RemoveEmptyParents(reconcileEnv(cfg, st), p)
+	env := reconcileEnv(cfg, st)
+	for agent, r := range retired {
+		for _, p := range r.Paths() {
+			reconcile.RemoveEmptyParents(env, p)
 		}
-		workspace.ForgetRuns(st.Dir(), c.Name, agent)
+		if ws := st.Workspaces[name]; ws == nil || ws.Replica(agent) == nil {
+			workspace.ForgetRuns(st.Dir(), name, agent)
+		}
 	}
-	if kept > 0 {
-		return outcome(kept, len(copies), "copies of %q could not be removed and are still recorded", c.Name)
-	}
-	logEvent(ctx, "ws_remove", c.Name, "")
 	return nil
 }
 

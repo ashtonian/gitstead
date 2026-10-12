@@ -3,11 +3,8 @@ package cmd
 import (
 	"fmt"
 	"maps"
-	"os"
 	"slices"
 
-	"github.com/ashtonian/git-mgr/internal/reconcile"
-	"github.com/ashtonian/git-mgr/internal/state"
 	"github.com/ashtonian/git-mgr/internal/workspace"
 )
 
@@ -61,10 +58,6 @@ func (c *WSPruneCmd) Run(ctx *Context) error {
 			if !reapable(h) {
 				continue
 			}
-			if err := workspace.CheckStopped(st.Dir(), name, h.Agent); err != nil {
-				fmt.Printf("  keeping %s: its agent is running\n", h.Label(spec))
-				continue
-			}
 			// Health is a summary; deletion needs the full inspection, and
 			// anything it can't vouch for is kept.
 			if work, lost, werr := workspace.UniqueWorkOf(ctx.GoCtx(), spec.Isolation, h.Copy); werr != nil || lost {
@@ -90,44 +83,21 @@ func (c *WSPruneCmd) Run(ctx *Context) error {
 			continue
 		}
 
-		removed := map[string][]string{}
+		byAgent := map[string][]string{}
 		for _, l := range reap {
-			archived, rerr := workspace.RemoveCopy(ctx.GoCtx(), spec.Isolation, l.Copy, cfg.Backup.ArchiveDir, workspace.ArchiveName(l), false)
-			if rerr != nil {
-				fmt.Fprintf(os.Stderr, "  %s: kept: %v\n", l.Label(spec), rerr)
-				failedRemovals++
-				continue
-			}
-			if archived != "" {
-				fmt.Printf("  %s: archived to %s\n", l.Label(spec), tildify(archived))
-			}
-			removed[l.Agent] = append(removed[l.Agent], l.Path)
-			reaped++
+			byAgent[l.Agent] = append(byAgent[l.Agent], l.Path)
 		}
-		err := st.Update(cfg.LockTimeout, func(st *state.State) error {
-			ws := st.Workspaces[name]
-			if ws == nil {
-				return nil
-			}
-			for agent, paths := range removed {
-				workspace.DropCopies(ws, agent, paths...)
-			}
-			if len(ws.Replicas) == 0 {
-				delete(st.Workspaces, name)
-			}
-			return nil
-		})
-		if err != nil {
+		retired := map[string]workspace.Retired{}
+		opts := workspace.RetireOptions{StateDir: st.Dir(), ArchiveDir: cfg.Backup.ArchiveDir}
+		for _, agent := range slices.Sorted(maps.Keys(byAgent)) {
+			r := workspace.Retire(ctx.GoCtx(), spec, ws, agent, byAgent[agent], opts)
+			retired[agent] = r
+			reaped += len(r.Removed)
+			failedRemovals += len(r.Kept)
+			reportRetired(spec, r, ctx.Quiet)
+		}
+		if err := recordRetired(cfg, st, name, retired, true); err != nil {
 			return fmt.Errorf("recording %s's removed copies: %w", name, err)
-		}
-		env := reconcileEnv(cfg, st)
-		for agent, paths := range removed {
-			for _, p := range paths {
-				reconcile.RemoveEmptyParents(env, p)
-			}
-			if ws := st.Workspaces[name]; ws == nil || ws.Replica(agent) == nil {
-				workspace.ForgetRuns(st.Dir(), name, agent)
-			}
 		}
 	}
 

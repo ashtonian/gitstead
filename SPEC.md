@@ -873,7 +873,10 @@ workspaces:
             copy_id: "1f2e3d4c5b6a7980"
             url: ""              # a clone's origin, as git-mgr set it
             managed_config: {}   # a clone's managed git config
+            published: 2026-10-12T17:00:00Z    # when ws publish last pushed the branch
+            pr: https://github.com/ashtonian/git-mgr/pull/42
             last_backup: 2026-10-12T14:00:00Z   # backup and offsite status, as for repos
+        retiring: ""             # when a retire began; set until it finishes
         run:                     # the agent's latest run; whether it runs now is its lease's to say
           profile: claude
           command: "claude --continue"
@@ -884,6 +887,27 @@ workspaces:
           stop_requested: ""     # when `ws stop` asked it to end
           ended: 2026-10-12T17:30:00Z
           exit_code: 0
+
+# What each fleet's last open left: the launcher, and the Muxy projects made.
+fleets:
+  daily: {name: daily, launcher: muxy, opened: 2026-10-12T15:00:00Z, muxy_projects: {app: "8f2c..."}}
+
+# Unique work saved before copies and repos were deleted.
+archives:
+  - id: app-agent-3-git-mgr-20261012T170000.000000000Z
+    path: /Users/me/.local/share/git-mgr/archive/app-agent-3-git-mgr-20261012T170000.000000000Z.bundle
+    repo: github.com/ashtonian/git-mgr
+    workspace: app
+    agent: agent-3
+    source: /Users/me/workspaces/app/agent-3
+    branch: agents/app/agent-3
+    work: 2 changed files, 1 untracked file
+    created: 2026-10-12T17:00:00Z
+
+# Copies retired, newest last (the newest 500 are kept).
+tombstones:
+  - {workspace: app, agent: agent-3, repo: github.com/ashtonian/git-mgr, path: /Users/me/workspaces/app/agent-3,
+     branch: agents/app/agent-3, pr: "", retired: 2026-10-12T17:00:00Z, archive: app-agent-3-git-mgr-20261012T170000.000000000Z}
 
 # Background syncs `install-agent` installed, so doctor can check them and
 # --uninstall can remove them by name.
@@ -1844,6 +1868,46 @@ JSON on stdin, with `options` from `launchers.plugins.<name>`.
 | Muxy | A project per workspace, a tab per agent | `muxy [--host h] project add <dir> --name <n> --reuse --json`, `project set-color`, then by `open`: `layout` writes `.muxy/layouts/<name>.json` (`{"tabs": [{"name", "command"}]}`) through `muxy exec`; `sessions` runs `session create <project> --directory <replica> -- <command>` for each agent not running; `state` waits for the app to list the projects, quits it (asking under `restart: ask`), adds tabs to projects with none in `~/Library/Application Support/Muxy 2/desktop-state.json` (format 3 only; each pane's command in `startup_commands`), saves the old file beside it, relaunches the app and waits for the sessions. `prune_projects` deletes the projects recorded for workspaces no longer in the fleet. |
 | plugin | Whatever it does | The plan on stdin; its exit status is the launch's. |
 
+### Publish
+
+`ws publish` pushes each selected copy's branch (`git push -u origin
+<branch>`, with the repo's SSH key) and records `published`. With `--pr` it
+opens a request per copy: `gh pr create --repo [host/]owner/name --head
+<branch> --base <base> --title --body [--draft]` for a GitHub host,
+`glab mr create --repo owner/name --source-branch --target-branch --title
+--description --yes [--draft]` for a GitLab host, the host's kind and token
+coming from the provider whose rule discovered the repo (else the provider on
+its host): `GH_TOKEN`/`GH_HOST` or `GITLAB_TOKEN`/`GITLAB_HOST`. An open
+request is found (the URL in gh's error, or `gh pr view`/`glab mr view`)
+rather than duplicated. The base defaults to origin's default branch, the
+title to the branch's last commit subject, the body to `git log --format='- %s'
+origin/<base>..<branch>`. Other hosts get the compare URL. The URL is
+recorded as the copy's `pr`.
+
+### Retire
+
+`workspace.Retire` is the one way a copy is deleted -- `ws retire`, `ws rm
+--delete`, `ws prune`, `remove-copy` and `remove-workspace` on apply:
+
+1. Take the agent's lease (`git-mgr retire` as its holder), so no `ws run`
+   starts. Held by a run: with `--stop`, `agent.Stop` it and take the lease;
+   otherwise keep every copy.
+2. Per copy, `RemoveCopy`: `gitops.InspectUniqueWork` (working tree, index,
+   untracked files, stashes, commits no remote has, detached commits, an
+   operation in progress, and each checked-out submodule from `git submodule
+   status --recursive`); if anything would be lost, archive it (a verified
+   bundle, one per submodule with work, the clone's `lfs/objects` hardlinked
+   or copied to `<id>.lfs`, and `<id>.json` describing it all); then `git
+   worktree remove` or delete the clone. Any failure keeps the copy.
+3. Return a tombstone per copy removed and a catalog entry per archive; the
+   caller drops the copies and records both (`State.Bury`, keeping the newest
+   500 tombstones), then removes empty directories and the lease files of
+   replicas that are gone.
+
+`ws retire` first records `retiring` on each agent; it is cleared with the
+replica once every copy is gone, and an agent left with copies shows as
+`retiring`.
+
 ### WIP safety
 
 - **`ws backup`** snapshots every copy's uncommitted work, and the scheduled
@@ -1860,3 +1924,6 @@ JSON on stdin, with `options` from `launchers.plugins.<name>`.
   on) snapshots dirty copies first.
 - A tracked repo with workspace copies, or with linked worktrees, is never
   untracked or deleted (`remove`, stale cleanup) until they are gone.
+- Every archive -- of a retired copy, or of a repo `remove --delete` or stale
+  cleanup deleted -- is catalogued under `archives:` in state; `git-mgr
+  archives ls|show` lists them and prints their restore steps.
