@@ -14,7 +14,7 @@ import (
 )
 
 // CurrentVersion is the state schema this build reads and writes.
-const CurrentVersion = 2
+const CurrentVersion = 3
 
 // ErrLocked reports that another git-mgr run holds the state lock.
 var ErrLocked = errors.New("another git-mgr instance is running")
@@ -30,7 +30,7 @@ type State struct {
 	// Machine names this machine in offsite refs; set on first use.
 	Machine    string                     `yaml:"machine,omitempty"`
 	Repos      map[string]*RepoState      `yaml:"repos"`
-	Workgroups map[string]*WorkgroupState `yaml:"workgroups,omitempty"`
+	Workspaces map[string]*WorkspaceState `yaml:"workspaces,omitempty"`
 	Schedules  map[string]*ScheduleState  `yaml:"schedules,omitempty"`
 
 	// Internal: path to the state file for Save()
@@ -87,40 +87,6 @@ type RepoState struct {
 	LastFetchError string    `yaml:"last_fetch_error,omitempty" json:"last_fetch_error,omitempty"`
 	BackupStatus   `yaml:",inline"`
 	OffsiteStatus  `yaml:",inline"`
-}
-
-// WorkgroupState is the observed on-disk state of a managed workgroup. Like
-// RepoState, each field carries a json tag mirroring its yaml tag so JSON output
-// uses the same snake_case keys as the config and state file.
-type WorkgroupState struct {
-	Name    string                 `yaml:"name"                json:"name"`
-	Kind    string                 `yaml:"kind"                json:"kind"`
-	Root    string                 `yaml:"root"                json:"root"`
-	Source  string                 `yaml:"source,omitempty"    json:"source,omitempty"`
-	BaseRef string                 `yaml:"base_ref,omitempty"  json:"base_ref,omitempty"`
-	Members []WorkgroupMemberState `yaml:"members"             json:"members"`
-	// Declared marks a workgroup created from a config declaration; removing
-	// the declaration then means removing the workgroup. Workgroups created
-	// from flags or adopted have no declaration and are kept as recorded.
-	Declared  bool      `yaml:"declared,omitempty" json:"declared,omitempty"`
-	CreatedAt time.Time `yaml:"created_at"          json:"created_at"`
-	LastCheck time.Time `yaml:"last_check,omitempty" json:"last_check,omitempty"`
-}
-
-// WorkgroupMemberState is one working directory within a workgroup.
-type WorkgroupMemberState struct {
-	Name     string `yaml:"name"               json:"name"`
-	Path     string `yaml:"path"               json:"path"`
-	Branch   string `yaml:"branch,omitempty"   json:"branch,omitempty"`
-	RepoURL  string `yaml:"repo_url,omitempty" json:"repo_url,omitempty"`
-	RepoKey  string `yaml:"repo_key,omitempty" json:"repo_key,omitempty"`
-	Upstream string `yaml:"upstream,omitempty" json:"upstream,omitempty"`
-	CopyID   string `yaml:"copy_id,omitempty"  json:"copy_id,omitempty"`
-	// ManagedConfig holds the git config keys git-mgr set in a clone member,
-	// as RepoState.ManagedConfig does for a repo.
-	ManagedConfig map[string]string `yaml:"managed_config,omitempty" json:"managed_config,omitempty"`
-	BackupStatus  `yaml:",inline"`
-	OffsiteStatus `yaml:",inline"`
 }
 
 // OffsiteStatus is what git-mgr last left offsite for a working copy, so the
@@ -186,7 +152,7 @@ func Load(path string) (*State, error) {
 	s := &State{
 		Version:    CurrentVersion,
 		Repos:      make(map[string]*RepoState),
-		Workgroups: make(map[string]*WorkgroupState),
+		Workspaces: make(map[string]*WorkspaceState),
 		Schedules:  make(map[string]*ScheduleState),
 		path:       path,
 	}
@@ -211,19 +177,21 @@ func Load(path string) (*State, error) {
 	if s.Repos == nil {
 		s.Repos = make(map[string]*RepoState)
 	}
-	if s.Workgroups == nil {
-		s.Workgroups = make(map[string]*WorkgroupState)
+	if s.Workspaces == nil {
+		s.Workspaces = make(map[string]*WorkspaceState)
 	}
 	if s.Schedules == nil {
 		s.Schedules = make(map[string]*ScheduleState)
 	}
-	s.migrate()
+	if err := s.migrate(data); err != nil {
+		return nil, fmt.Errorf("migrating state file %s: %w", path, err)
+	}
 	return s, nil
 }
 
 // migrate upgrades a state read from an older schema in memory; Save writes
-// it back as CurrentVersion.
-func (s *State) migrate() {
+// it back as CurrentVersion. data is the file it was read from.
+func (s *State) migrate(data []byte) error {
 	if s.Version < 2 {
 		// Version 1 kept one tag list. Tags on hand-added repos were given by
 		// hand; tags on discovered repos came from their rules.
@@ -233,7 +201,20 @@ func (s *State) migrate() {
 			}
 		}
 	}
+	if s.Version < 3 {
+		// Version 2 kept workgroups, each a set of members.
+		var old struct {
+			Workgroups map[string]workgroupV2 `yaml:"workgroups"`
+		}
+		if err := yaml.Unmarshal(data, &old); err != nil {
+			return err
+		}
+		for name, wg := range old.Workgroups {
+			s.Workspaces[name] = s.workspaceFromV2(name, wg)
+		}
+	}
 	s.Version = CurrentVersion
+	return nil
 }
 
 // Save writes the state file atomically (write to tmp + rename).

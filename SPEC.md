@@ -20,7 +20,7 @@
 
 ## Non-Goals
 
-- The discover/sync/backup subsystem is read-only with respect to your working tree and branches -- it never `git pull`s, merges, or commits. (The opt-in **workgroup** subsystem is separate and *does* mutate on request; see [Workgroups](#workgroups).)
+- The discover/sync/backup subsystem is read-only with respect to your working tree and branches -- it never `git pull`s, merges, or commits. (The opt-in **workspace** subsystem is separate and *does* mutate on request; see [Workspaces](#workspaces).)
 - Not a replacement for git workflows (no branch management, no PR creation)
 - Not a monorepo/subrepo tool (no manifest-based dependency linking)
 
@@ -191,7 +191,7 @@ Use --apply to make the changes that move and delete nothing, or `git-mgr apply`
 Discover, apply the plan's changes as far as `reconcile.auto` allows (default:
 everything that moves and deletes nothing), fetch all tracked repos and back up
 uncommitted changes. This is the primary command for cron usage. It never
-touches workgroups.
+creates, moves or removes workspace copies; it backs them up.
 
 | Flag | Description |
 |---|---|
@@ -216,7 +216,7 @@ Syncing 83 repos (concurrency: 8)...
 **Cron safety:**
 - Takes the sync run lock (`<state_file>.sync.lock`) -- if another sync is running, exits immediately with code 0
 - Holds the state lock only to record each change and, at the end, every repo's outcome in one write; clones, fetches and backups run without it
-- Backs up each working copy first on `sync.backup_timeout`, then fetches on `sync.timeout_per_repo`; tracked repos and workgroup members share the `concurrency` pool, and each working copy is visited once
+- Backs up each working copy first on `sync.backup_timeout`, then fetches on `sync.timeout_per_repo`; tracked repos and workspace copies share the `concurrency` pool, and each working copy is visited once
 - Respects `min_fetch_interval` -- skips repos fetched within the window
 - All errors are collected, not fatal -- partial success is fine
 
@@ -332,7 +332,7 @@ Stop tracking repos.
 
 Back up each selected working copy and take it offsite now, under the
 `remote_sync` policy it resolves to (enabled or not); with no selection,
-workgroup members too.
+workspace copies too.
 
 | Flag | Description |
 |---|---|
@@ -389,14 +389,14 @@ config).
 | Command | Description |
 |---|---|
 | `bootstrap` | One-command machine setup: init (if missing) → doctor → discover --apply → sync → install-agent. `--profile` (tag scope; also names the schedule and limits it to the tag), `--no-agent`, `--dry-run`. |
-| `plan [--json]` | Discover and show every change config asks for -- repos and workgroups -- with drift and blocked changes. Changes nothing. |
+| `plan [--json]` | Discover and show every change config asks for -- repos and workspaces -- with drift and blocked changes. Changes nothing. |
 | `apply [--yes]` | Discover and make every change, including moves and removals; asks before those unless `--yes` (refuses without a terminal). Saves state after each change; non-zero exit if any change failed or was blocked. |
 | `doctor` | Offline, read-only preflight: git present, config valid, base_dir writable, provider tokens resolve, configured SSH keys exist, whether a sync is running, state lock free within 5s (held longer, its holder is reported as stuck), each recorded schedule installed with its binary present and lingering on (systemd), doctor itself passing in each schedule's recorded environment, tracked repos on disk with matching origin. Non-zero exit on failure. |
 | `install-agent` | Install a named background sync (`--name`, default `default`) running `sync --quiet` plus its selection (`--repos`/`--tag`/`--set`) every `--interval` (must divide an hour or a day). Records a stable binary path (refuses `/nix/store`, Cellar and temporary paths), the current `PATH` and a long-lived `SSH_AUTH_SOCK`; runs at nice 10 with idle I/O. launchd: LaunchAgent, or `--daemon` LaunchDaemon with `UserName` via sudo. systemd: `OnCalendar=` + `Persistent=true`; `--linger` enables lingering. cron: refuses to rewrite an unreadable crontab, backs it up first, touches only lines with its marker. Recorded in state under `schedules`; `--list`, `--uninstall`, `--print`. |
 | `run [--set/--tag/--repos] -- <cmd>` | Run a command in each matching repo (parallel, bounded by concurrency). `--fail-fast`; non-zero exit if any failed. |
 | `manifest export [--out]` / `import <file>` | Portable `{url,tags,path}` manifest of the tracked set, to rehydrate a new machine (captures manual adoptions). import is idempotent and clones over the url's transport. |
 | `restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` (clone+apply to a scratch dir), or `--apply` onto the tree (refuses dirty without `--force`). id defaults to `latest`. |
-| `report [--since]` / `log [-n]` | Summarize / list recent activity from the operation log (clone/sync/backup/remove/wg events). |
+| `report [--since]` / `log [-n]` | Summarize / list recent activity from the operation log (clone/sync/backup/remove/workspace events and applied changes). |
 | `config --redact` | Print the resolved config with inline provider tokens blanked (token_env/token_command kept), safe to share. |
 
 The **operation log** is an append-only JSONL file next to the state file
@@ -460,9 +460,24 @@ sets:
     tags: ["backend"]
     exclude_archived: true
 
-# Named agent commands for `wg open --agent <name>` (each pane runs the command).
+# Agent profiles: commands typed into an interactive shell in an agent's replica.
 agents:
-  claude: "claude"
+  - name: claude
+    command: "claude"
+    resume: "claude --continue"
+
+# Settings every workspace starts from; see Workspaces.
+workspace_defaults:
+  root: "~/workspaces"
+  isolation: worktree        # worktree | clone | reference-clone | shared
+  agents: 1
+  agent_name: "agent-{{.N}}"
+  branch: "agents/{{.Workspace}}/{{.Agent}}"
+
+workspaces:
+  - name: app
+    repos: ["github.com/acme/api"]   # keys, globs, local paths or URLs; or set:, or path:
+    agents: 4
 
 # ============================================================================
 # Provider Instances
@@ -773,7 +788,7 @@ log:
 
 **File**: `~/.local/share/git-mgr/state.yaml` (XDG-compliant, overridable with `--state` or `GIT_MGR_STATE` env var)
 
-The state file records what git-mgr applied to each repo and workgroup -- what
+The state file records what git-mgr applied to each repo and workspace -- what
 the reconciler compares with config to turn a config edit into moves, URL and
 git config changes -- and what the last run found, which `status` shows without
 touching any repo. It is one YAML file, read and written atomically under flock.
@@ -785,7 +800,7 @@ small (see [Reconciliation](#reconciliation)).
 ```yaml
 # State schema version. Older files are migrated on load; a file newer than the
 # running git-mgr is refused rather than rewritten.
-version: 2
+version: 3
 
 # Last time any sync operation completed.
 last_sync: "2026-04-17T10:30:00Z"
@@ -830,19 +845,29 @@ repos:
     last_offsite: "2026-04-17T10:30:00Z"
     last_offsite_error: ""
 
-# Workgroups. declared: true means config declares it, so removing the
-# declaration removes the workgroup; workgroups created from flags or adopted
-# are kept as recorded.
-workgroups:
-  fleet:
-    name: fleet
-    kind: worktree
-    root: "/Users/me/workgroups/fleet"
-    source: "/Users/me/repos/github.com/ashtonian/git-mgr"
+# Workspaces. declared: true means config declares it, so removing the
+# declaration removes the workspace; workspaces created from flags or adopted
+# are kept as recorded. Version 2's workgroups are migrated to workspaces: each
+# member becomes an agent's replica with one copy.
+workspaces:
+  app:
+    name: app
+    dir: "/Users/me/workspaces/app"
+    isolation: worktree          # worktree | clone | reference-clone | shared
+    base_ref: ""                 # "" = the upstream's default branch
     declared: true
-    members:
-      - {name: agent-1, path: "/Users/me/workgroups/fleet/agent-1", branch: agent-1, copy_id: "1f2e3d4c5b6a7980",
-         last_backup: 2026-10-12T14:00:00Z}
+    created_at: 2026-10-12T14:00:00Z
+    replicas:                    # one per agent
+      - agent: agent-1
+        path: "/Users/me/workspaces/app/agent-1"
+        copies:                  # one per repo; the replica itself when there is one repo
+          - repo: github.com/ashtonian/git-mgr   # the tracked repo it is made from; "" if untracked
+            path: "/Users/me/workspaces/app/agent-1"
+            branch: agents/app/agent-1
+            copy_id: "1f2e3d4c5b6a7980"
+            url: ""              # a clone's origin, as git-mgr set it
+            managed_config: {}   # a clone's managed git config
+            last_backup: 2026-10-12T14:00:00Z   # backup and offsite status, as for repos
 
 # Background syncs `install-agent` installed, so doctor can check them and
 # --uninstall can remove them by name.
@@ -861,14 +886,16 @@ schedules:
 
 ## Reconciliation
 
-Package `internal/reconcile` brings disk and state in line with config. Each
-run compares, for every repo and workgroup:
+Package `internal/reconcile` brings tracked repos on disk and in state in line
+with config, and is the plan engine the workspace subsystem
+(`internal/workspace`, see [Workspaces](#workspaces)) builds its actions on. Each
+run compares, for every repo and workspace:
 
-- **desired** -- `reconcile.Repos` and `reconcile.Workgroups` derive it from
-  config and this run's discovery through one resolver: path
-  (`base_dir`/`path_template` after overrides), origin URL (`clone_protocol`),
-  SSH key (override, `repos:` entry, rule, provider), tags (rule tags ∪
-  `user_tags`), rule, provider ID, managed git config, workgroup members;
+- **desired** -- `reconcile.Repos` derives it from config and this run's
+  discovery through one resolver: path (`base_dir`/`path_template` after
+  overrides), origin URL (`clone_protocol`), SSH key (override, `repos:` entry,
+  rule, provider), tags (rule tags ∪ `user_tags`), rule, provider ID, managed
+  git config; `workspace.Desired` derives each workspace's replicas and copies;
 - **recorded** -- what git-mgr set, from state;
 - **on disk** -- `reconcile.Observe`: whether the path exists and is a repo,
   and with one `git config --local --list` its origin and local config, plus its
@@ -882,26 +909,30 @@ left unless `reconcile.drift: overwrite`.
 |---|---|---|
 | `clone` | no | Clone a new repo, or one gone from disk; write managed config; record. |
 | `adopt` | no | Record a clone already at the desired path (an interrupted clone, or `adopt`). |
-| `rename` | no | A tracked repo with the same provider ID on the same host that discovery no longer finds under its key: rekey state and workgroup references. |
+| `rename` | no | A tracked repo with the same provider ID on the same host that discovery no longer finds under its key: rekey it and the workspace copies made from it. |
 | `url` | no | `git remote set-url origin`. |
-| `config`, `member-config` | no | Set or unset a managed key (`core.sshcommand`, `user.name`, `user.email`, the signing keys) in a repo or clone member, or start/stop managing one already set to the wanted value. |
+| `config`, `copy-config` | no | Set or unset a managed key (`core.sshcommand`, `user.name`, `user.email`, the signing keys) in a repo or workspace clone, or start/stop managing one already set to the wanted value. |
 | `tags` | no | Update tags and discovering rule in state. |
-| `move` | yes | Rename the directory (same filesystem only), `git worktree repair`, repoint workgroup sources, remove now-empty parents below `base_dir`. A move already done by hand or before an interruption is just recorded. |
-| `create-workgroup`, `create-member` | no | `workgroup.Ensure`; record members with copy IDs; `sync: true` tracks the repos. |
-| `move-member` | yes | `git worktree move`, or a rename for a clone member. |
-| `remove-member`, `remove-workgroup` | yes | Archive unique work to `backup.archive_dir`, then remove; a member that can't be archived is kept. |
-| `forget-member`, `member-url`, `workgroup` | no | State-only or origin URL changes for members. |
+| `move` | yes | Rename the directory (same filesystem only), remove now-empty parents below `base_dir`, then reconnect what was made from it: `git worktree repair`, and each workspace clone's `git-mgr` remote and alternates. A move already done by hand or before an interruption is just recorded. |
+| `create-workspace` | no | Record a declared workspace (and, shared, its agents). |
+| `create-copy` | no | Make an agent's copy from the repo's clone (worktree, local clone or `--shared` clone), write a clone's managed config, record it with its copy ID; or record one already there. |
+| `copy` | no | Record which tracked repo a copy is of (a copy migrated or adopted without one). |
+| `move-copy` | yes | `git worktree move`, or a rename for a clone. |
+| `remove-copy`, `remove-workspace` | yes | Archive unique work to `backup.archive_dir`, then remove; a copy that can't be archived is kept. |
+| `forget-copy`, `copy-url`, `copy-source`, `workspace` | no | Drop a copy gone from disk; a clone's origin URL; a clone's `git-mgr` remote after its repo moved; a workspace's own settings. |
 
 Repos added by hand are pinned: their path and URL are the recorded ones. A
 repo whose rule failed, or that a filtered run didn't cover, is not judged.
-Paths wanted by two repos, occupied destinations, kind or source changes of a
-workgroup and branch changes of an existing member are reported as blocked.
+Paths wanted by two repos, occupied destinations, an isolation change of a
+workspace, and a copy that would move into or out of its own folder are
+reported as blocked. A workspace naming an untracked local repo or URL adds an
+`adopt` or `clone` of it to the repo part of the plan.
 
-`ApplyPlan` runs repo actions first, then plans workgroups again against the
-updated state, since workgroups are built from repos (a member cloned from a
-repo the same run clones). The first plan is made against the state as it will
-be once the run's clones are done; a disruptive workgroup action in the second
-plan runs only if the first showed it.
+`workspace.Apply` runs repo actions first, then plans workspaces again against
+the updated state, since copies are made from repos (a copy of a repo the same
+run clones). The first plan is made against the state as it will be once the
+run's clones are done; a disruptive workspace action in the second plan runs
+only if the first showed it.
 
 `Plan.Apply` first records observations (copy IDs, provider IDs, the archived
 flag), then runs the selected actions. A repo's actions run in plan order --
@@ -912,15 +943,15 @@ first and then records the result; an action waiting for its record to be saved
 gives up its slot, and the records that arrive while one state write runs are
 saved together by the next (`state.GroupCommit`), so 1,000 changes cost a
 couple of writes rather than 1,000. A move renames its directory, and tidies
-the parents it emptied, as it is recorded, under the state lock. Workgroup
-actions run after the repos', one at a time, since a workgroup's members share
-its record and its source repo. Every action looks at the disk before acting,
+the parents it emptied, as it is recorded, under the state lock. Serial
+actions -- every workspace action -- run after the others, one at a time, since
+a workspace's copies share its record and their repos must be in place. Every action looks at the disk before acting,
 so repeating an interrupted run finishes it instead of failing on what the first
 run did.
 
 `sync` and `discover --apply` apply repo actions selected by `reconcile.auto`
-(`safe`: non-disruptive; `all`; `none`). `wg ensure` applies non-disruptive
-workgroup actions. `apply` applies everything.
+(`safe`: non-disruptive; `all`; `none`). `ws ensure` applies non-disruptive
+workspace actions. `apply` applies everything.
 
 ### State File Locking
 
@@ -944,7 +975,7 @@ the outcome with an update:
 5. Release the lock
 
 Commands that apply a plan (`sync`, `apply`, `clone`, `adopt`, `discover
---apply`, `manifest import`, `wg create`, `wg ensure`, `setup`) read state
+--apply`, `manifest import`, `ws create`, `ws ensure`, `setup`) read state
 without the lock and record each change with an update, sharing the update with
 the changes recorded meanwhile, so two runs' changes never overwrite each
 other. The sync run lock keeps syncs from overlapping; it never
@@ -1065,7 +1096,7 @@ always kept. A failed backup prunes nothing.
 
 ### Restore
 
-| Form | In place (`restore --apply`, `wg recover --apply`) | Scratch (`--into <dir>`) |
+| Form | In place (`restore --apply`, `ws recover --apply`) | Scratch (`--into <dir>`) |
 |---|---|---|
 | Snapshot ref | `git stash apply --index W`; on an unborn branch, `read-tree` + `checkout-index` of W and U, then `read-tree` of I | clone, check out B detached (or an orphan branch), then the same |
 | Patch only | `git apply --index staged.patch`, `git apply unstaged.patch`, untar refusing to overwrite or leave the tree | clone, check out the recorded base, then the same |
@@ -1437,76 +1468,25 @@ func Resolve(tmpl string, data RepoData) (string, error) {
 
 ```
 git-mgr/
-├── main.go                           # Entry point
-├── go.mod                            # Go 1.24+ (latest stable)
-├── go.sum
-├── Dockerfile                        # Multi-arch build (amd64 + arm64)
-├── .github/
-│   └── workflows/
-│       └── docker.yml                # Build + push multi-arch Docker image
-├── SPEC.md                           # This file
-│
-├── internal/
-│   ├── cmd/                          # Kong CLI command definitions
-│   │   ├── root.go                   # CLI struct, global flags
-│   │   ├── init.go                   # `init` command
-│   │   ├── discover.go               # `discover` command
-│   │   ├── sync.go                   # `sync` command
-│   │   ├── backup.go                 # `backup` command
-│   │   ├── status.go                 # `status` command
-│   │   ├── clone.go                  # `clone` command
-│   │   ├── adopt.go                  # `adopt` command
-│   │   ├── remove.go                 # `remove` command
-│   │   ├── remote_sync.go            # `remote-sync` command
-│   │   ├── config.go                 # `config` command
-│   │   └── version.go                # `version` command
-│   │
-│   ├── config/                       # Configuration (koanf-based)
-│   │   ├── config.go                 # Struct definitions, Load(), expandHome()
-│   │   ├── defaults.go               # Default values, XDG path resolution
-│   │   ├── resolve.go                # ResolveForRepo() -- per-repo override merging
-│   │   └── validate.go               # Config validation (go-playground/validator)
-│   │
-│   ├── state/                        # State persistence
-│   │   ├── state.go                  # State + RepoState struct definitions
-│   │   ├── store.go                  # Load(), Save() with flock + atomic write
-│   │   └── lock.go                   # File locking (flock wrapper)
-│   │
-│   ├── discovery/                    # Repo discovery
-│   │   ├── provider.go               # Provider interface + Repo type
-│   │   ├── github.go                 # GitHub/GHE implementation (go-github)
-│   │   ├── gitlab.go                 # GitLab implementation (official SDK)
-│   │   ├── filter.go                 # Include/exclude filtering
-│   │   └── stale.go                  # Stale repo detection + cleanup policy
-│   │
-│   ├── gitops/                       # Git CLI operations
-│   │   ├── exec.go                   # Git command execution wrapper
-│   │   ├── clone.go                  # Clone with SSH key support
-│   │   ├── fetch.go                  # Fetch with lock checking
-│   │   ├── backup.go                 # Transparent backup algorithm
-│   │   ├── refs.go                   # Custom ref CRUD + pruning
-│   │   ├── lock.go                   # Git lock file detection
-│   │   ├── status.go                 # Working tree status detection
-│   │   └── adopt.go                  # Parse remote URL, detect host/owner/name
-│   │
-│   ├── sync/                         # Sync orchestration
-│   │   └── sync.go                   # Concurrent sync loop with errgroup
-│   │
-│   ├── remote/                       # Remote sync backends
-│   │   ├── remote.go                 # Interface definition
-│   │   └── git_push.go               # Push refs to remote
-│   │
-│   ├── pathtemplate/                  # Path template resolution
-│   │   └── template.go
-│   │
-│   ├── notify/                        # OS notifications
-│   │   └── notify.go                  # osascript (macOS) / notify-send (Linux)
-│   │
-│   └── ui/                           # Terminal output
-│       ├── table.go                  # Status table formatting
-│       ├── progress.go               # Progress display for sync/clone
-│       └── logger.go                 # slog setup (JSON/text, file output)
+├── main.go                 # entry point: signal handling, kong wiring
+├── config.example.yaml     # annotated reference config (loaded by a test)
+├── e2e/                    # end-to-end tests: Forgejo in Docker, plus local ones
+└── internal/
+    ├── cmd/                # the CLI: one *_impl.go per command family
+    ├── config/             # loading (pkg config), defaults, validation, resolution, edits
+    ├── discovery/          # provider clients, filters, stale detection and cleanup
+    ├── reconcile/          # desired vs recorded vs on-disk for repos; the plan engine
+    ├── workspace/          # workspaces: specs, planning, copies, health (depends on the above)
+    ├── state/              # the state file: schema, migrations, locks, GroupCommit
+    ├── gitops/             # everything that runs git
+    ├── scheduler/          # launchd, systemd, cron
+    ├── setup/              # the setup wizard's detection, answers and checks
+    ├── repourl/            # remote URL parsing and redaction
+    ├── oplog/, notify/     # operation log, desktop notifications
+    └── pathtemplate/, pathutil/, shellutil/, ctxutil/
 ```
+
+The README's code map says what each package owns.
 
 ---
 
@@ -1692,7 +1672,7 @@ The tool is cron-safe because:
 | --- | --- |
 | 0 | Everything succeeded. `sync` also exits 0 when another run holds the lock, since overlapping scheduled runs are routine. |
 | 1 | The command failed: bad config, unreadable state, or every target failed. |
-| 3 | Partial failure: some repos, members or changes failed and the rest succeeded. Each failure is printed to stderr. |
+| 3 | Partial failure: some repos, copies or changes failed and the rest succeeded. Each failure is printed to stderr. |
 | 75 | Another git-mgr run holds the lock; try again (EX_TEMPFAIL). |
 | 80 | Usage error: unknown command or flag. |
 6. **All errors include repo context** -- `fmt.Errorf("fetching %s: %w", repo.FullName, err)`
@@ -1711,101 +1691,93 @@ The tool is cron-safe because:
 
 ---
 
-## Workgroups
+## Workspaces
 
-The workgroup subsystem manages a parent directory of *N* member working
-directories operated on as a unit. Unlike discover/sync/backup (read-only with
-respect to the working tree), workgroup commands **deliberately mutate** on
-request — creating worktrees/clones and running commit/pull/push. It is a
-distinct, opt-in subsystem with its own command family (`workgroup`, alias `wg`).
+The workspace subsystem (`internal/workspace`, commands `workspace`, aliases
+`ws` and `wg`) manages repos worked on by several agents at once. Unlike
+discover/sync/backup (read-only with respect to the working tree), workspace
+commands **deliberately mutate** on request — making worktrees and clones and
+running commit/pull/push. It depends on the inventory (tracked repos, the
+reconcile engine) and never the reverse: inventory code reads workspace records
+from state only to keep them consistent (a rename rekeys copies, a move
+reconnects them, a repo with copies is never untracked).
 
-### Kinds
+### Model
 
-- **clone** (the default kind) — N independent clones (distinct repos), e.g. a
-  microservice bundle, or N isolated agent workspaces on one repo. Members are
-  listed explicitly, selected from tracked repos via `from_tag`, or expanded
-  from a single repo with `--count`. "In sync" = present, on a branch, not
-  behind upstream.
-- **worktree** — N `git worktree`s of a single source repo, each on its own
-  branch (shared object store; cheap; pass `--source`). For running N agents on
-  one project in isolation. "In sync" = present, on the expected branch, not
-  behind base.
+| Concept | What it is |
+| --- | --- |
+| Workspace | One repo or several related ones (`repos:` keys, globs, local paths, URLs; or `set:`), or a shared folder (`path:`), × `agents`. Its directory is `<root>/<name>`. |
+| Replica | One agent's folder: `<dir>/<agent>`; with shared isolation, the shared folder. |
+| Copy | One checkout of a repo in a replica: the replica itself when the workspace has one repo, `<replica>/<name>` when it has several (by name, or as much of the key as tells repos apart). Its own copy ID, branch, account config and backup history. |
+| Source | The repo's tracked clone, which every copy is made from. |
 
-A *member* is the unifying abstraction: a working directory with a path,
-branch, and optional upstream. Group operations (status/check/fetch/commit/
-pull/push/exec) treat members identically; only creation and the "in sync"
-predicate differ by kind.
+Agent names come from `agent_name` (`agent-{{.N}}`); branches from `branch`
+(`agents/{{.Workspace}}/{{.Agent}}`) and must pass git's ref rules. Workspace
+names are letters, digits, `-` and `_`, so they are safe in paths, branches,
+refs and terminal session names.
 
-### Desired state vs observed state
+### Isolation
 
-- **config** declares workgroups (`workgroups:` + `workgroup_base_dir`) — the
-  reproducible, machine-portable source of truth. A workgroup may also set
-  `sync: true` to register its underlying repo(s) as tracked, so the read-only
-  `git-mgr sync` engine keeps them fetched (fetching a worktree source is safe —
-  the object store is shared).
-- **state** records what has been materialised (the `workgroups:` map) — the
-  operational source of truth for group commands.
-- `workgroup ensure` reconciles disk to the declared state (creating missing
-  members, pruning stale worktree registrations); `workgroup check` asserts
-  health and exits non-zero on drift. Together they make a machine restart a
-  non-event: re-running `ensure` + `open` deterministically rebuilds everything.
+- **worktree** — `git worktree add` from the source: on the existing local
+  branch, else tracking origin's branch of that name, else a new branch at
+  `base_ref` (default `origin/HEAD`, else `HEAD`).
+- **clone** — staged like any clone: `git clone --local --no-checkout --origin
+  git-mgr <source>` (objects hardlinked; git copies them across filesystems),
+  `origin` added as the upstream URL, origin's refs fetched from the source with
+  the refspec on the command line (`+refs/remotes/origin/*:refs/remotes/origin/*`;
+  as a remote's refspec it would make git refuse to track origin's branches),
+  `origin/HEAD` copied, the branch checked out as for a worktree, and the
+  source's checked-out branch dropped. The `git-mgr` remote keeps git's default
+  refspec, showing the source's branches as `git-mgr/*`.
+- **reference-clone** — the same with `--shared` (alternates); the source gets
+  `gc.pruneExpire=never` first.
+- **shared** — no copies; agents work in `path`, or the one repo's clone.
 
-### Creating from the CLI
+A partial source (a promisor remote) only gets worktrees: a clone's fetches
+through it fail, since upload-pack refuses lazy fetches. A shallow source is
+cloned through git's local transport (git ignores `--local`). When a source
+moves, the `move` action repairs its worktrees and repoints its clones'
+`git-mgr` remotes and alternates; `ws fetch` and a refresh read the source's
+path from state, never from the remote.
 
-`workgroup create <name>` builds a workgroup two ways: with no defining flags it
-looks `<name>` up in config (the declarative path); with
-`--repo`/`--from-tag`/`--source`/`--count`/`--member` it **synthesizes** a
-`config.Workgroup` from the CLI as a one-off — no config edit required. **Clone
-is the default kind**; `--source` (worktree-specific) selects worktree, or pass
-`--kind` explicitly. A clone group takes members from `--repo`/`--member` (repo
-URLs or tracked keys) or `--from-tag`, and `--repo R --count N` expands to an
-N-clone fleet `agent-1..N` of one repo. A worktree group expands `--count N`
-into members `agent-1..N` with branches namespaced `<name>/agent-N` (so distinct
-groups off one source never collide); `--member name[:branch]` sets members
-explicitly. Both paths converge on the same `Spec` → `ensure` materialisation,
-so a flag-built group is indistinguishable from a declared one.
+### Desired state vs recorded
 
-- `--save` appends the synthesized workgroup back to the config file via a
-  comment-preserving YAML round-trip (the config library is load-only, so this
-  is a `yaml.v3` Node edit, written atomically and re-validated); a name
-  conflict errors unless `--force` overwrites the existing entry.
-- `--sync` registers the group's underlying repo(s) as tracked at create time
-  (tagged `workgroup:<name>`), warning on any whose remote can't be parsed.
+`workspace.Compute` plans tracked repos (with `Scope.Repos`) and workspaces:
+declared ones, ones given on the command line (`Scope.Extra`, recorded as
+undeclared), and recorded undeclared ones, kept as they are. It adds an
+`adopt`/`clone` for each untracked path or URL a workspace names, plans repos,
+then plans workspaces against the state as it will be. Recorded copies match
+wanted ones by agent and repo, or by path for a copy with no repo, judged on
+disk by copy ID, else (worktree) a common git dir equal to the source's, else
+(clone) a `git-mgr` remote at the source or an origin of the repo.
 
-### Health / "in sync"
+### Health
 
-`workgroup check` flags (and exits non-zero on) hard problems that need a human:
-missing members, wrong branch (worktree), an in-progress rebase/merge/cherry-pick,
-a present git lock, or being behind upstream/base. Uncommitted/untracked work is
-reported but not treated as failure — agents are expected to have WIP.
+`ws check` flags (and exits non-zero on) missing copies, a wrong branch, an
+in-progress rebase/merge/cherry-pick, a git lock, or being behind the upstream
+or, for a branch without one, what it started from. Uncommitted and untracked
+work is reported but isn't a failure: agents are expected to have WIP.
 
 ### Terminal integration
 
-`workgroup open` builds a tmux session `wg-<name>` (one pane per member, each
-running `wg check` on startup). Under iTerm it attaches via control mode
-(`tmux -CC`) so panes are native iTerm splits backed by a restart-surviving tmux
-session; `--print` emits the script, `--recreate` rebuilds, `--no-attach` builds
-detached (useful from a login agent). `--cmd <command>` runs a command in each
-pane before the shell, and `--agent <name>` resolves it from config `agents:` --
-so `wg create fleet --repo R --count 4 --open --agent claude` spins up four
-isolated workspaces each running an agent.
+`ws open` builds a tmux session `ws-<name>`, one pane per agent, each running
+`ws check --agent` on startup, then the agent profile's command (or `--cmd`)
+typed into the pane's shell, then a shell. Under iTerm it attaches with control
+mode (`tmux -CC`).
 
-### Agent lifecycle / WIP safety
+### WIP safety
 
-The workgroup subsystem treats agent WIP as precious:
-
-- **`wg backup`** snapshots every member's uncommitted work (and the scheduled
-  `sync` backs up workgroup members too, so the periodic agent protects them).
-  `--offsite` also takes each member offsite under `remote_sync`.
-- **`wg recover`** restores a member's latest backup (`--into <dir>` for safe
-  inspection, `--apply` onto the worktree), completing the backup→recover loop.
-- **`wg rm`** only forgets the workgroup unless `--delete` is given. With
-  `--delete` each member's unique work (changed and untracked files, detached
+- **`ws backup`** snapshots every copy's uncommitted work, and the scheduled
+  `sync` backs copies up too; `--offsite` also takes them offsite under the
+  repo's, then the workspace's, `remote_sync`.
+- **`ws recover`** restores a copy's latest backup (`--into`, `--apply`).
+- **`ws rm`** only forgets the workspace unless `--delete` is given. With
+  `--delete` each copy's unique work (changed and untracked files, detached
   commits, and for clones also stashes and unpushed commits) is archived as a
-  verified git bundle in `backup.archive_dir` before the member is removed;
-  `--force` discards it instead. A member that can't be inspected, archived or
-  removed stays on disk and in state. **`wg prune`** deletes only members a full
-  inspection finds free of unique work, removing an empty workgroup from state. **`wg pull --backup-first`**
-  (default on) snapshots dirty members before a possibly-rebasing pull.
-- A workgroup can be built over a **named set** (`wg create --from-set <name>`):
-  an agent fleet across a tag/glob-selected set of tracked repos.
+  verified git bundle in `backup.archive_dir` before the copy is removed;
+  `--force` discards it instead. A copy that can't be inspected, archived or
+  removed stays on disk and in state. **`ws prune`** removes only copies a full
+  inspection finds free of unique work. **`ws pull --backup-first`** (default
+  on) snapshots dirty copies first.
+- A tracked repo with workspace copies, or with linked worktrees, is never
+  untracked or deleted (`remove`, stale cleanup) until they are gone.

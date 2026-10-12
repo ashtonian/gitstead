@@ -54,7 +54,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 
 	// Discover, then bring repos in line with config as far as reconcile.auto
 	// allows. Without discovery only hand-added repos can be judged.
-	scope := reconcile.Scope{Repos: true}
+	scope := reconcile.Scope{}
 	var results []discovery.DiscoverResult
 	if cfg.Sync.AutoDiscover && !c.NoDiscover {
 		if !ctx.Quiet {
@@ -159,8 +159,8 @@ type syncError struct {
 }
 
 // jobs lists the copies this run backs up, fetches and, under
-// remote_sync.enabled, takes offsite: selected repos, and the workgroup
-// members of selected repos (all of them when nothing is selected). Repos
+// remote_sync.enabled, takes offsite: selected repos, and the workspace
+// copies of selected repos (all of them when nothing is selected). Repos
 // fetched within min_fetch_interval are not fetched again; stale ones are
 // only backed up.
 func (c *SyncCmd) jobs(cfg *config.Config, st *state.State, pass func(string, *state.RepoState) bool, machine string) (jobs []copyJob, skippedRecent int) {
@@ -193,16 +193,16 @@ func (c *SyncCmd) jobs(cfg *config.Config, st *state.State, pass func(string, *s
 		jobs = append(jobs, job)
 	}
 
-	// Agent worktrees and clones never show up as tracked repos; without
-	// this their uncommitted work -- what workgroups exist to keep -- would
-	// be unprotected by the scheduled run.
+	// Agents' copies never show up as tracked repos; without this their
+	// uncommitted work -- what workspaces exist to keep -- would be
+	// unprotected by the scheduled run.
 	if c.NoBackup {
 		return jobs, skippedRecent
 	}
-	jobs = addMemberJobs(jobs, st, selection{c.Repos, c.Tag, c.Set}, pass, func(wgName string, m state.WorkgroupMemberState) *copyJob {
-		job := memberJob(cfg, st, wgName, m, true)
-		if policy := memberRemoteSync(cfg, st, m); policy.Enabled && machine != "" {
-			job.offsite = offsiteFor(cfg, policy, machine, memberIdentity(st, m), job.sshKey, m.OffsiteStatus)
+	jobs = addCopyJobs(jobs, st, selection{c.Repos, c.Tag, c.Set}, pass, func(ws *state.WorkspaceState, agent string, cs state.CopyState) *copyJob {
+		job := copyJobFor(cfg, st, ws, agent, cs, true)
+		if policy := copyRemoteSync(cfg, st, ws.Name, cs); policy.Enabled && machine != "" {
+			job.offsite = offsiteFor(cfg, policy, machine, copyIdentity(st, cs), job.sshKey, cs.OffsiteStatus)
 		}
 		if job.backup == nil && job.offsite == nil {
 			return nil

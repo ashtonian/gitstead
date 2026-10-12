@@ -27,7 +27,7 @@ calling out:
   (`GITHUB_TOKEN` / `GITLAB_TOKEN` / `GITEA_TOKEN`, `FORGEJO_TOKEN`). Prefer
   `token_env` or `token_command` over committing a literal `token:` to config.
 - **Credentials in URLs are refused.** A clone, `repos:` entry, manifest entry,
-  workgroup member or adopted origin whose URL embeds a credential
+  workspace repo or adopted origin whose URL embeds a credential
   (`https://user:token@…`, or any user info in an http(s) URL) is rejected, so
   none reaches state or the event log. Git errors and the event log have URL
   credentials redacted as a second line of defence.
@@ -46,7 +46,7 @@ calling out:
   tokens. They are written with `0600`/`0700` permissions; keep them out of
   version control.
 - **The discover/sync/backup subsystem is read-only** with respect to your
-  working tree — it never pulls, merges, or commits. The opt-in workgroup
+  working tree — it never pulls, merges, or commits. The opt-in workspace
   subsystem does mutate on request.
 - **Backups** of uncommitted work are stored under `refs/git-mgr/backups/*` and
   in the patch directory; treat those as containing potentially sensitive

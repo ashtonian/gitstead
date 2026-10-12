@@ -17,8 +17,7 @@ import (
 // Different repos' actions run at once, up to env.Concurrency doing disk work.
 // Each action records what it did as soon as it has done it, and the records
 // of actions that finish while a state write runs share the next one.
-// Workgroup actions run after the repos', one at a time: a workgroup's members
-// share its record and its source repo.
+// Serial actions run after the others, one at a time.
 func (p *Plan) Apply(ctx context.Context, env *Env, include func(Action) bool) []Result {
 	r := &runner{
 		env:    env,
@@ -45,10 +44,10 @@ func (p *Plan) Apply(ctx context.Context, env *Env, include func(Action) bool) [
 
 	var targets []string
 	chains := map[string][]int{}
-	var workgroups []int
+	var serial []int
 	for i, a := range r.actions {
-		if a.Workgroup() {
-			workgroups = append(workgroups, i)
+		if a.Serial {
+			serial = append(serial, i)
 			continue
 		}
 		if chains[a.Target] == nil {
@@ -62,7 +61,7 @@ func (p *Plan) Apply(ctx context.Context, env *Env, include func(Action) bool) [
 		r.start(ctx, &wg, chains[target])
 	}
 	wg.Wait()
-	r.start(ctx, &wg, workgroups)
+	r.start(ctx, &wg, serial)
 	wg.Wait()
 	return r.results
 }
@@ -119,21 +118,21 @@ func (r *runner) run(ctx context.Context, s *slot, a Action) (string, error) {
 	if err := s.take(ctx); err != nil {
 		return "", err
 	}
-	out, err := a.run(ctx, r.env)
-	if out.record != nil {
+	out, err := a.Run(ctx, r.env)
+	if out.Record != nil {
 		s.give()
-		if rerr := r.commit.Update(out.record); rerr != nil {
-			return out.info, errors.Join(err, rerr)
+		if rerr := r.commit.Update(out.Record); rerr != nil {
+			return out.Info, errors.Join(err, rerr)
 		}
 	}
-	if out.after == nil {
-		return out.info, err
+	if out.After == nil {
+		return out.Info, err
 	}
 	if terr := s.take(ctx); terr != nil {
-		return out.info, errors.Join(err, terr)
+		return out.Info, errors.Join(err, terr)
 	}
-	info, aerr := out.after(ctx)
-	return joinInfo(out.info, info), errors.Join(err, aerr)
+	info, aerr := out.After(ctx)
+	return joinInfo(out.Info, info), errors.Join(err, aerr)
 }
 
 // slot is one chain's claim on a runner slot.

@@ -1,11 +1,12 @@
-// Package reconcile brings repos and workgroups on disk in line with config.
+// Package reconcile brings tracked repos on disk in line with config, and
+// runs plans: the workspace subsystem plans its own actions and applies them
+// with the same engine.
 //
 // Every run compares three views of each object:
 //
-//   - desired: derived from config and this run's discovery (see Repos,
-//     Workgroups);
+//   - desired: derived from config and this run's discovery (see Repos);
 //   - applied: what git-mgr last set, kept in state (path, origin URL, tags,
-//     managed git config, workgroup members);
+//     managed git config);
 //   - actual: what is on disk now (see Observe).
 //
 // Desired against applied gives the actions of a Plan. Actual against applied
@@ -23,7 +24,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/ashtonian/git-mgr/internal/state"
@@ -33,28 +33,19 @@ import (
 type Kind string
 
 const (
-	KindClone           Kind = "clone"            // clone a repo, or re-clone one gone from disk
-	KindAdopt           Kind = "adopt"            // track a clone already at the desired path
-	KindRename          Kind = "rename"           // the provider renamed or transferred the repo
-	KindURL             Kind = "url"              // change the origin URL
-	KindConfig          Kind = "config"           // set or unset a managed git config key
-	KindTags            Kind = "tags"             // change tags or discovering rule (state only)
-	KindMove            Kind = "move"             // move a repo to its desired path
-	KindCreateWorkgroup Kind = "create-workgroup" // materialise a declared workgroup
-	KindWorkgroup       Kind = "workgroup"        // update a workgroup's recorded settings
-	KindCreateMember    Kind = "create-member"    // create, or re-create, a workgroup member
-	KindMoveMember      Kind = "move-member"      // move a member to its desired path
-	KindRemoveMember    Kind = "remove-member"    // archive and remove a member no longer declared
-	KindForgetMember    Kind = "forget-member"    // drop a member that is already gone from disk
-	KindRemoveWorkgroup Kind = "remove-workgroup" // archive and remove a workgroup no longer declared
-	KindMemberURL       Kind = "member-url"       // change a clone member's origin URL
-	KindMemberConfig    Kind = "member-config"    // set or unset a clone member's managed git config key
+	KindClone  Kind = "clone"  // clone a repo, or re-clone one gone from disk
+	KindAdopt  Kind = "adopt"  // track a clone already at the desired path
+	KindRename Kind = "rename" // the provider renamed or transferred the repo
+	KindURL    Kind = "url"    // change the origin URL
+	KindConfig Kind = "config" // set or unset a managed git config key
+	KindTags   Kind = "tags"   // change tags or discovering rule (state only)
+	KindMove   Kind = "move"   // move a repo to its desired path
 )
 
 // Action is one change a plan makes.
 type Action struct {
 	Kind   Kind   `json:"kind"`
-	Target string `json:"target"`          // repo key, workgroup, or workgroup/member
+	Target string `json:"target"`          // repo key, or what the planner names: workspace/agent
 	Field  string `json:"field,omitempty"` // the git config key, for KindConfig
 	From   string `json:"from,omitempty"`
 	To     string `json:"to,omitempty"`
@@ -62,35 +53,32 @@ type Action struct {
 	// Disruptive actions move or delete directories that a shell, editor or
 	// agent may be using; they wait for an explicit `git-mgr apply`.
 	Disruptive bool `json:"disruptive"`
+	// Serial actions run one at a time, in plan order, after all the others.
+	// Workspace actions are serial: their copies share records, and the
+	// repos they are made from must be in place first.
+	Serial bool `json:"-"`
 
-	// run makes the change on disk and returns what to record of it.
-	run func(ctx context.Context, env *Env) (outcome, error)
+	// Run makes the change on disk and returns what to record of it.
+	Run RunFunc `json:"-"`
 }
 
-// outcome is what an action did, and what of it to record.
-type outcome struct {
-	// info reports anything worth showing, such as where removed work was
+// RunFunc makes an action's change on disk, outside the state lock, and
+// returns what to record of it.
+type RunFunc func(ctx context.Context, env *Env) (Outcome, error)
+
+// Outcome is what an action did, and what of it to record.
+type Outcome struct {
+	// Info reports anything worth showing, such as where removed work was
 	// archived.
-	info string
-	// record saves the change in state; nil when there is nothing to save. It
+	Info string
+	// Record saves the change in state; nil when there is nothing to save. It
 	// runs even when the action failed, for the part that was done. A record
 	// that fails must leave the state as it found it, since it shares its
 	// write with other actions' records.
-	record func(st *state.State) error
-	// after, if set, runs once the record is saved; its info is added to the
+	Record func(st *state.State) error
+	// After, if set, runs once the record is saved; its info is added to the
 	// action's.
-	after func(ctx context.Context) (string, error)
-}
-
-// Workgroup reports whether the action changes a workgroup rather than a
-// tracked repo. Only `git-mgr apply` and `wg ensure` make workgroup changes.
-func (a Action) Workgroup() bool {
-	switch a.Kind {
-	case KindCreateWorkgroup, KindWorkgroup, KindCreateMember, KindMoveMember,
-		KindRemoveMember, KindForgetMember, KindRemoveWorkgroup, KindMemberURL, KindMemberConfig:
-		return true
-	}
-	return false
+	After func(ctx context.Context) (string, error)
 }
 
 // Drift is a value git-mgr set that was changed by hand.
@@ -120,6 +108,12 @@ type Plan struct {
 	record []func(ctx context.Context, st *state.State)
 }
 
+// Observed adds a record of what this run observed, saved whenever the plan
+// is applied.
+func (p *Plan) Observed(record func(ctx context.Context, st *state.State)) {
+	p.record = append(p.record, record)
+}
+
 // MarshalJSON writes empty lists as [] rather than null.
 func (p *Plan) MarshalJSON() ([]byte, error) {
 	type plan Plan
@@ -144,6 +138,20 @@ func (p *Plan) Merge(other *Plan) {
 	p.record = append(p.record, other.record...)
 }
 
+// Split separates the plan's serial actions from the others. The parallel
+// part, which applies first, keeps what this run observed.
+func (p *Plan) Split() (parallel, serial *Plan) {
+	parallel, serial = &Plan{record: p.record}, &Plan{}
+	for _, a := range p.Actions {
+		if a.Serial {
+			serial.Actions = append(serial.Actions, a)
+		} else {
+			parallel.Actions = append(parallel.Actions, a)
+		}
+	}
+	return parallel, serial
+}
+
 // Empty reports whether the plan changes nothing.
 func (p *Plan) Empty() bool {
 	return len(p.Actions) == 0 && len(p.Drift) == 0 && len(p.Blocked) == 0
@@ -162,8 +170,8 @@ func (p *Plan) Disruptive() int {
 
 // Env is what applying a plan acts on.
 type Env struct {
-	// State is the state Update keeps current. Workgroup actions read it;
-	// repo actions run at once and read only what their plan gives them.
+	// State is the state Update keeps current. Serial actions read it; repo
+	// actions run at once and read only what their plan gives them.
 	State *state.State
 	// Update applies a change to the latest state and saves it, under the
 	// state lock, so other git-mgr runs can work between actions: an action
@@ -178,40 +186,17 @@ type Env struct {
 	// ArchiveDir receives the unique work of anything removed.
 	ArchiveDir string
 	// KeepDirs are directories never removed when a move leaves its old
-	// parents empty, such as base_dir and the home directory.
+	// parents empty, such as base_dir and the workspace root.
 	KeepDirs []string
 	Now      func() time.Time
-
-	mu sync.Mutex
-	// moved maps paths moved during this run to their new location, so later
-	// actions find a workgroup's source after its repo moved.
-	moved map[string]string
 }
 
-func (env *Env) now() time.Time {
+// Time is the current time, from Now when set.
+func (env *Env) Time() time.Time {
 	if env.Now != nil {
 		return env.Now()
 	}
 	return time.Now()
-}
-
-// resolve returns where path is now, following moves made during this run.
-func (env *Env) resolve(path string) string {
-	env.mu.Lock()
-	defer env.mu.Unlock()
-	if to, ok := env.moved[path]; ok {
-		return to
-	}
-	return path
-}
-
-func (env *Env) noteMove(from, to string) {
-	env.mu.Lock()
-	defer env.mu.Unlock()
-	if env.moved == nil {
-		env.moved = map[string]string{}
-	}
-	env.moved[from] = to
 }
 
 // ErrSkipped marks an action not run because an earlier action on the same
@@ -234,9 +219,9 @@ func All(Action) bool { return true }
 // None selects no action.
 func None(Action) bool { return false }
 
-// removeEmptyParents removes the now-empty directories above path, stopping
+// RemoveEmptyParents removes the now-empty directories above path, stopping
 // at the first one that isn't empty or that env keeps.
-func removeEmptyParents(env *Env, path string) {
+func RemoveEmptyParents(env *Env, path string) {
 	keep := map[string]bool{"/": true}
 	for _, d := range env.KeepDirs {
 		keep[filepath.Clean(d)] = true

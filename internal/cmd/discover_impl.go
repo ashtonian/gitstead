@@ -50,7 +50,7 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 	// Bring repos in line before judging staleness, so a renamed repo is
 	// rekeyed rather than marked stale under its old name.
 	scope := discovery.StaleScopeOf(results, c.Rule, c.Tag)
-	plan := reconcile.Compute(ctx.GoCtx(), cfg, st, reconcile.Scope{Discovered: discovered, Rules: scope, Repos: true})
+	plan := reconcile.Compute(ctx.GoCtx(), cfg, st, reconcile.Scope{Discovered: discovered, Rules: scope})
 	var applyErr error
 	if c.Apply {
 		applyErr = changesOutcome(applyAuto(ctx, cfg, st, plan, reconcile.Safe), plan)

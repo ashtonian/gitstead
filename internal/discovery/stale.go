@@ -91,6 +91,14 @@ func (c Cleanup) Run(st *state.State, discovered map[string]bool, scope StaleSco
 	err := c.Update(func(st *state.State) error {
 		res.NewlyStale, due = c.mark(st, discovered, scope)
 		res.Reapable = len(due)
+		// A repo workspace copies are made from stays until they are gone.
+		due = slices.DeleteFunc(due, func(d staleRepo) bool {
+			if err := st.CheckRemovable(d.key); err != nil {
+				res.keep(d.key, err)
+				return true
+			}
+			return false
+		})
 		if c.Config.Policy == "remove" {
 			for _, d := range due {
 				delete(st.Repos, d.key)
@@ -106,10 +114,7 @@ func (c Cleanup) Run(st *state.State, discovered map[string]bool, scope StaleSco
 	removed := map[string]bool{}
 	for _, d := range due {
 		if err := c.Remove(d.key, &d.repo); err != nil {
-			if res.Kept == nil {
-				res.Kept = map[string]error{}
-			}
-			res.Kept[d.key] = err
+			res.keep(d.key, err)
 			continue
 		}
 		removed[d.key] = true
@@ -120,7 +125,7 @@ func (c Cleanup) Run(st *state.State, discovered map[string]bool, scope StaleSco
 	err = c.Update(func(st *state.State) error {
 		for _, d := range due {
 			repo := st.Repos[d.key]
-			if !removed[d.key] || repo == nil || repo.LocalPath != d.repo.LocalPath || repo.Status != "stale" {
+			if !removed[d.key] || repo == nil || repo.LocalPath != d.repo.LocalPath || repo.Status != "stale" || st.CheckRemovable(d.key) != nil {
 				continue
 			}
 			delete(st.Repos, d.key)
@@ -129,6 +134,13 @@ func (c Cleanup) Run(st *state.State, discovered map[string]bool, scope StaleSco
 		return nil
 	})
 	return res, err
+}
+
+func (r *CleanupResult) keep(key string, err error) {
+	if r.Kept == nil {
+		r.Kept = map[string]error{}
+	}
+	r.Kept[key] = err
 }
 
 type staleRepo struct {

@@ -15,12 +15,12 @@ import (
 )
 
 // copyJob is one working copy a run backs up and fetches: a tracked repo or
-// a workgroup member.
+// a workspace copy.
 type copyJob struct {
-	label     string // the repo key, or workgroup/member
-	repoKey   string // "" for a member
-	workgroup string // "" for a repo
-	member    string
+	label     string // the repo key, or workspace/agent[/folder]
+	repoKey   string // "" for a workspace copy
+	workspace string // "" for a repo
+	agent     string
 	path      string
 
 	backup        *gitops.BackupConfig // nil skips the backup
@@ -123,11 +123,11 @@ func (o copyOutcome) failed() []error {
 func recordCopies(st *state.State, outcomes []copyOutcome) {
 	for _, o := range outcomes {
 		if o.job.repoKey == "" {
-			if m := memberAt(st, o.job.workgroup, o.job.member, o.job.path); m != nil {
+			if c := st.CopyAt(o.job.workspace, o.job.agent, o.job.path); c != nil {
 				if o.job.backup != nil {
-					m.RecordBackup(o.saved(), o.backupErr, o.at)
+					c.RecordBackup(o.saved(), o.backupErr, o.at)
 				}
-				o.recordOffsite(&m.OffsiteStatus)
+				o.recordOffsite(&c.OffsiteStatus)
 			}
 			continue
 		}
@@ -166,19 +166,6 @@ func (o copyOutcome) recordRepo(repo *state.RepoState) {
 
 // saved reports that a backup holds the copy's current state.
 func (o copyOutcome) saved() bool { return o.backup != nil && o.backup.ID != "" }
-
-func memberAt(st *state.State, workgroup, name, path string) *state.WorkgroupMemberState {
-	ws := st.Workgroups[workgroup]
-	if ws == nil {
-		return nil
-	}
-	for i := range ws.Members {
-		if m := &ws.Members[i]; m.Name == name && m.Path == path {
-			return m
-		}
-	}
-	return nil
-}
 
 // repoJob is the job for a tracked repo, backing up when backup is set.
 func repoJob(cfg *config.Config, key string, repo *state.RepoState, backup *gitops.BackupConfig) copyJob {

@@ -39,8 +39,8 @@ lock_timeout: "2m"
 # =============================================================================
 # An account is one identity on one or more hosts. Its SSH key and commit
 # identity are used for git-mgr's own git commands and written into each repo
-# it covers (core.sshCommand, user.name, user.email), including workgroup clone
-# members, so your and your agents' pushes and commits use the right account.
+# it covers (core.sshCommand, user.name, user.email), including workspace
+# clones, so your and your agents' pushes and commits use the right account.
 #
 # A repo's account: the one named by the most specific of an override, its
 # repos: entry, its discovery rule, or that rule's provider (`account:`), else
@@ -291,7 +291,7 @@ reconcile:
   #          repos, change origin URLs, write managed git config, retag
   #   all  - also move repos to new paths
   #   none - only report
-  # Moves and removals of workgroup members always wait for `git-mgr apply`.
+  # Moves and removals of workspace copies always wait for `git-mgr apply`.
   auto: "safe"
 
   # A value git-mgr set (origin URL, core.sshCommand) that was changed by hand:
@@ -428,49 +428,65 @@ log:
   events: true             # write the operation log (events.jsonl, read by report/log); false to disable
 
 # =============================================================================
-# Workgroups
+# Agents and Workspaces
 # =============================================================================
-# A workgroup is a parent directory of N member working directories operated on
-# as a unit -- either N independent clones (kind: clone, the default) or N
-# worktrees of one source repo (kind: worktree). Declare them here, or create
-# one as a one-off from the CLI without editing this file:
+# A workspace is one repo, or several related ones, worked on by N agents.
+# Each agent gets a replica of its own: a linked worktree of each repo's clone
+# by default, on a branch of its own. Declare workspaces here and run
+# `git-mgr apply` (or `git-mgr ws ensure`), or create one from the command line:
 #
-#   git-mgr wg create review --from-tag backend            # clone fleet (default kind)
-#   git-mgr wg create fleet --repo git@github.com:me/app.git --count 3   # 3 clones
-#   git-mgr wg create scratch --source ~/code/app --count 4 --base-ref origin/main  # worktrees
+#   git-mgr ws create app --repo github.com/me/app --agents 4
+#   git-mgr ws create platform --repo github.com/me/api --repo github.com/me/web --agents 2
 #
-# Add --save to append the synthesized workgroup back here (--force to overwrite
-# an existing entry), and --sync to also track its underlying repo(s) for sync.
-# Reconcile with `git-mgr wg ensure`; open a tmux layout with `git-mgr wg open`.
+# --save writes a workspace made from flags back here.
 
-# Named agent commands for `wg open --agent <name>` (and `wg create --agent`):
-# each pane runs the command, so one command spins up an isolated agent per member.
-agents: {}
-  # claude: "claude"
-  # aider:  "aider --no-auto-commits"
+# Agent commands. Each is typed into an interactive shell in the agent's
+# replica, so shell functions and aliases work.
+agents: []
+  # - name: claude
+  #   command: "claude"
+  #   resume: "claude --continue"   # typed instead when the agent ran here before
+  #   env: {}                       # extra environment for the agent
+  # - name: codex
+  #   command: "codex"
 
-# Parent directory for all workgroups (each lives at <workgroup_base_dir>/<name>).
-workgroup_base_dir: "~/workgroups"
+# Settings every workspace starts from.
+workspace_defaults:
+  root: "~/workspaces"              # each workspace lives in <root>/<name>
+  # How each agent's copies are made:
+  #   worktree        - a linked worktree of the repo's clone: shares its
+  #                     objects and fetches, costs only the checkout
+  #   clone           - a clone with objects of its own, hardlinked from the
+  #                     repo's clone (copied across filesystems)
+  #   reference-clone - a clone borrowing the repo's clone's objects; git-mgr
+  #                     stops git gc there from pruning objects the copies use
+  #   shared          - every agent works in one folder: the repo's clone, or
+  #                     a workspace's path
+  isolation: "worktree"
+  agents: 1                         # agents per workspace
+  agent_name: "agent-{{.N}}"        # {{.N}}, {{.Workspace}}
+  # A new copy's branch ({{.Workspace}}, {{.Agent}}, {{.N}}, {{.Repo}});
+  # existing copies keep theirs.
+  branch: "agents/{{.Workspace}}/{{.Agent}}"
+  base_ref: ""                      # new branches start here; "" = upstream's default branch
 
-workgroups:
-  # A multi-repo bundle (or agent fleet) of independent clones -- the default kind.
-  - name: "platform"
-    kind: "clone"
-    from_tag: "platform"                   # members = tracked repos carrying this tag
-    sync: true                             # also track those repos so `git-mgr sync`
-                                           # keeps them fetched (optional; default false)
-    # Or list repos explicitly instead of from_tag:
-    # members:
-    #   - { repo: "git@github.com:org/api.git" }
-    #   - { repo: "git@github.com:org/web.git", name: "web" }
-
-  # N worktrees of one repo -- one isolated checkout per parallel agent, sharing
-  # the source's object store (cheaper than clones).
-  - name: "feature-x"
-    kind: "worktree"
-    source: "github.com/your-login/myapp"  # tracked repo key, or a local path
-    base_ref: "origin/main"                # fork point (optional; default = source HEAD)
-    members:
-      - { name: "agent-1" }                # branch defaults to the member name
-      - { name: "agent-2" }                # (the `wg create --count` CLI path
-      - { name: "agent-3" }                #  namespaces these as <name>/agent-N)
+workspaces: []
+  # One repo, four agents: ~/workspaces/app/agent-1 .. agent-4.
+  # - name: app
+  #   repos: [github.com/me/app]    # tracked keys, globs, local paths or URLs;
+  #   agents: 4                     # an untracked path is adopted, a URL cloned
+  #
+  # Related repos together: each agent gets ~/workspaces/platform/agent-N/{api,web}.
+  # - name: platform
+  #   repos: [github.com/me/api, github.com/me/web]
+  #   agents: 2
+  #   remote_sync: {wip: branch}    # remote_sync for these copies
+  #
+  # Every repo in a named set, one agent reviewing them.
+  # - name: review
+  #   set: backend
+  #
+  # Agents sharing one folder that isn't a repo.
+  # - name: notes
+  #   path: ~/notes                 # path implies isolation: shared
+  #   agents: 2

@@ -322,3 +322,22 @@ func TestCleanup_ProtectsReposEntries(t *testing.T) {
 		t.Errorf("a repos: entry was judged: %+v, %v", res, err)
 	}
 }
+
+// A stale repo that workspace copies are made from is kept, and the reason
+// reported, under either reaping policy.
+func TestCleanup_KeepsARepoWithWorkspaceCopies(t *testing.T) {
+	for _, policy := range []string{"remove", "remove_and_delete"} {
+		st, dir := stalePastGrace(t)
+		st.Workspaces = map[string]*state.WorkspaceState{"app": {Name: "app", Replicas: []state.ReplicaState{
+			{Agent: "agent-1", Copies: []state.CopyState{{Repo: "host/owner/repo", Path: "/ws/app/agent-1"}}},
+		}}}
+		cfg := config.CleanupConfig{Policy: policy, GracePeriod: time.Minute}
+		res := run(t, st, map[string]bool{}, StaleScope{all: true}, cfg, mustNotRemove(t))
+		if st.Repos["host/owner/repo"] == nil || res.Reaped != 0 || !errors.Is(res.Kept["host/owner/repo"], state.ErrHasCopies) {
+			t.Errorf("%s: result %+v, repos %v", policy, res, st.Repos)
+		}
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("%s: the repo's files were deleted", policy)
+		}
+	}
+}

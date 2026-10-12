@@ -31,9 +31,9 @@ type Config struct {
 	Notify      NotifyConfig     `koanf:"notify"        yaml:"notify"`
 	Log         LogConfig        `koanf:"log"           yaml:"log"`
 
-	WorkgroupBaseDir string            `koanf:"workgroup_base_dir" yaml:"workgroup_base_dir" default:"~/workgroups"`
-	Workgroups       []Workgroup       `koanf:"workgroups" yaml:"workgroups,omitempty" validate:"dive"`
-	Agents           map[string]string `koanf:"agents" yaml:"agents,omitempty"` // name -> command for `wg open --agent`
+	Agents            []AgentProfile    `koanf:"agents"             yaml:"agents,omitempty"     validate:"dive"`
+	WorkspaceDefaults WorkspaceDefaults `koanf:"workspace_defaults" yaml:"workspace_defaults"`
+	Workspaces        []Workspace       `koanf:"workspaces"         yaml:"workspaces,omitempty" validate:"dive"`
 }
 
 // Account is one identity on one or more hosts: the SSH key and commit
@@ -251,33 +251,6 @@ func (o *RemoteSyncOverride) apply(r *RemoteSyncConfig) {
 	if o.Keep != nil {
 		r.Keep = *o.Keep
 	}
-}
-
-// Workgroup declares a set of working directories (members) managed as a unit
-// -- either N worktrees of one source repo (kind "worktree") or N independent
-// clones (kind "clone"). Group commands operate on members uniformly.
-type Workgroup struct {
-	Name    string            `koanf:"name"     yaml:"name"               validate:"required"`
-	Kind    string            `koanf:"kind"     yaml:"kind"               validate:"required,oneof=worktree clone"`
-	BaseDir string            `koanf:"base_dir" yaml:"base_dir,omitempty"`
-	Source  string            `koanf:"source"   yaml:"source,omitempty"`
-	BaseRef string            `koanf:"base_ref" yaml:"base_ref,omitempty"`
-	FromTag string            `koanf:"from_tag" yaml:"from_tag,omitempty"`
-	Members []WorkgroupMember `koanf:"members"  yaml:"members,omitempty"`
-	// Sync, when true, registers the workgroup's underlying repo(s) -- the
-	// worktree source, or each clone member -- as tracked repos so the normal
-	// `git-mgr sync` keeps them fetched. Fetch-only; it never touches member
-	// working trees.
-	Sync bool `koanf:"sync" yaml:"sync,omitempty"`
-}
-
-// WorkgroupMember is one working directory within a workgroup. For "worktree"
-// groups Branch is the branch to create/check out; for "clone" groups Repo is
-// the SSH URL (or a tracked repo key) to clone.
-type WorkgroupMember struct {
-	Name   string `koanf:"name"   yaml:"name,omitempty"`
-	Branch string `koanf:"branch" yaml:"branch,omitempty"`
-	Repo   string `koanf:"repo"   yaml:"repo,omitempty"`
 }
 
 // SyncConfig controls sync behavior.

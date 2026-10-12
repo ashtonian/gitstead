@@ -14,7 +14,6 @@ import (
 	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/shellutil"
 	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/workgroup"
 )
 
 // Managed git config keys, in the lower-case form `git config --list` reports.
@@ -248,90 +247,14 @@ func tagUnion(groups ...[]string) []string {
 	return out
 }
 
-// Workgroup is what config wants for one workgroup.
-type Workgroup struct {
-	Spec     *workgroup.Spec
-	Declared bool
-	Track    bool              // sync: true -- track the underlying repos
-	SSHKeys  map[string]string // clone member name -> SSH key
-	// Configs holds each clone member's managed git config. Worktree members
-	// share their source repo's config, which is managed as a repo.
-	Configs map[string]map[string]string
-}
-
-// Workgroups returns what is wanted for every workgroup: those declared in
-// config, and those created from flags or adopted, which are kept as
-// recorded. A workgroup that was declared and no longer is is absent, so the
-// plan removes it.
-func Workgroups(cfg *config.Config, st *state.State) (map[string]Workgroup, []Blocked) {
-	out := map[string]Workgroup{}
-	var blocked []Blocked
-	for i := range cfg.Workgroups {
-		decl := &cfg.Workgroups[i]
-		spec, err := workgroup.SpecFromWorkgroup(cfg, st, decl)
-		if err != nil {
-			blocked = append(blocked, Blocked{Target: decl.Name, Reason: err.Error()})
-			continue
-		}
-		w := Workgroup{Spec: spec, Declared: true, Track: decl.Sync}
-		w.memberAccess(cfg, st)
-		out[decl.Name] = w
+// CopyAccess is what config gives a clone of the repo with key, found by
+// rule, whose origin is url: the SSH key git-mgr fetches it with ("" for
+// ssh's own choice) and the managed git config written into it.
+func CopyAccess(cfg *config.Config, key, rule, url string) (sshKey string, managed map[string]string) {
+	r := Repo{Key: key, Rule: rule, URL: url}
+	r.access(cfg)
+	if repourl.IsHTTP(url) {
+		return "", r.Config
 	}
-	for name, ws := range st.Workgroups {
-		if _, ok := out[name]; ok || ws.Declared {
-			continue
-		}
-		w := Workgroup{Spec: workgroup.FromState(ws)}
-		w.memberAccess(cfg, st)
-		out[name] = w
-	}
-	return out, blocked
-}
-
-// memberAccess resolves each clone member's SSH key and managed git config.
-func (w *Workgroup) memberAccess(cfg *config.Config, st *state.State) {
-	w.SSHKeys, w.Configs = map[string]string{}, map[string]map[string]string{}
-	if w.Spec.Kind != "clone" {
-		return
-	}
-	for _, m := range w.Spec.Members {
-		key, rule, ok := memberRepo(st, m)
-		if !ok {
-			continue
-		}
-		r := Repo{Key: key, Rule: rule, URL: m.RepoURL}
-		r.access(cfg)
-		if r.SSHKey != "" && !repourl.IsHTTP(m.RepoURL) {
-			w.SSHKeys[m.Name] = r.SSHKey
-		}
-		if r.Config != nil {
-			w.Configs[m.Name] = r.Config
-		}
-	}
-}
-
-// memberRepo returns the tracking key and discovering rule of the repo a
-// clone member is cloned from.
-func memberRepo(st *state.State, m workgroup.Member) (key, rule string, ok bool) {
-	if m.RepoKey != "" {
-		if r, tracked := st.Repos[m.RepoKey]; tracked {
-			rule = r.DiscoveredBy
-		}
-		return m.RepoKey, rule, true
-	}
-	id, err := repourl.Parse(m.RepoURL)
-	if err != nil {
-		return "", "", false
-	}
-	return id.Key(), "", true
-}
-
-// MemberSSHKey returns the SSH key for cloning a clone member: that of the
-// tracked repo it comes from, or that config gives its URL.
-func MemberSSHKey(cfg *config.Config, st *state.State, m workgroup.Member) string {
-	key, rule, ok := memberRepo(st, m)
-	if !ok || repourl.IsHTTP(m.RepoURL) {
-		return ""
-	}
-	return cfg.ResolveSSHKey(key, rule)
+	return r.SSHKey, r.Config
 }

@@ -6,8 +6,8 @@ GitLab, and Gitea/Forgejo instances — into one structured local layout.
 git-mgr is built to run two ways: **interactively** when bootstrapping a new
 machine, and as a **cron job** that fetches everything and transparently backs
 up uncommitted work without ever touching your branches or working tree. It also
-manages **workgroups** — fleets of isolated worktrees/clones for running parallel
-agents — keeping their WIP safe.
+manages **workspaces** — a repo, or several related ones, worked on by several
+agents at once, each in a copy of its own — keeping their WIP safe.
 
 ## Highlights
 
@@ -24,9 +24,12 @@ agents — keeping their WIP safe.
   exactly — never touches your working tree, index, `index.lock`, branches or
   stash list; `restore`
   recovers them (into a scratch dir or in place).
-- **Workgroups / agent fleets** — spin up N isolated worktrees or clones and run
-  an agent in each pane (`wg create … --open --cmd claude`); per-member backup,
-  safe teardown, recover, and prune keep agent WIP from ever being lost.
+- **Workspaces for parallel agents** — one repo or several related ones × N
+  agents, each agent in its own worktree (or clone) on its own branch, made from
+  the repo's tracked clone so nothing is downloaded twice
+  (`ws create app --repo github.com/me/app --agents 4 --open --agent claude`);
+  per-copy backup, safe teardown, recover and prune keep agent WIP from ever
+  being lost.
 - **Cron-safe sync** — flock-guarded, fetch-only, with per-repo fetch intervals
   and retry/back-off; an **operation log** (`report`/`log`) records what ran.
 - **Resilient** — one failing provider doesn't abort the run; GitHub/Gitea calls
@@ -95,7 +98,7 @@ git-mgr adopt ~/code/myrepo            # track a clone you already have
 git-mgr clone git@github.com:me/app    # clone + track by URL (your SSH/HTTPS auth)
 git-mgr sync                           # fetch all tracked repos + back up WIP
 git-mgr status                         # table of what you're managing
-git-mgr wg create scratch --source ~/code/app --count 4 --open --cmd claude
+git-mgr ws create app --repo ~/code/myrepo --agents 4 --open --cmd claude
 ```
 
 `git-mgr bootstrap` runs `setup` (if there's no config yet), `doctor`,
@@ -112,7 +115,7 @@ writes a config without asking anything.
 | `git-mgr discover` | Discover repos from providers and show the plan; `--apply` makes the changes that move and delete nothing (clone new repos, update URLs, managed git config, tags). `--rule`, `--tag` to scope. |
 | `git-mgr sync` | Discover, apply config changes as far as `reconcile.auto` allows, fetch all repos, back up uncommitted changes and, with `remote_sync.enabled`, take them offsite (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`. |
 | `git-mgr plan` | Show what config would change on disk and in state, without changing anything. `--json`. See [Config changes](#config-changes-plan-and-apply). |
-| `git-mgr apply` | Make repos and workgroups match config, including the moves and removals sync leaves for you. Asks first; `--yes`. |
+| `git-mgr apply` | Make repos and workspaces match config, including the moves and removals sync leaves for you. Asks first; `--yes`. |
 | `git-mgr backup` | Back up only (no fetch). `--list` to see backups, `--restore <id>` for instructions. |
 | `git-mgr restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` to clone+apply into a scratch dir, or `--apply` onto the tree (dirty-guarded). |
 | `git-mgr status` | Table of managed repos. `--live` inspects working trees now (dirty + ahead/behind, no network); `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
@@ -125,7 +128,7 @@ writes a config without asking anything.
 | `git-mgr remote-sync` | Back up and take WIP and unpushed commits offsite now, under `remote_sync`. `--repos`, `--tag`, `--set`, `--dry-run`; `--list` shows what every machine left offsite and how to restore it. |
 | `git-mgr config` | Print resolved config. `--validate`, `--edit`, `--path`, `--for-repo <key>`, `--redact`. |
 | `git-mgr report` / `log` | Summarize / list recent activity (clones, backups, syncs…) from the operation log. `--since`, `-n`. |
-| `git-mgr workgroup` (`wg`) | Manage workgroups: parallel worktrees or multi-repo bundles. `wg create` builds one from flags or config; `--save`, `--sync`, `open`, `ensure`, `check`. |
+| `git-mgr workspace` (`ws`, `wg`) | Manage workspaces: repos × agents, each agent in a copy of its own. See [Workspaces](#workspaces). |
 | `git-mgr install-agent` | Install, list (`--list`) or remove (`--uninstall`) background syncs (launchd/systemd/cron); `--name` and `--repos`/`--tag`/`--set` for several. |
 | `git-mgr install-completions` | Print a shell completion script (bash/zsh/fish). See [Shell completions](#shell-completions). |
 | `git-mgr version` | Print version, commit, build date. |
@@ -136,7 +139,7 @@ Global flags: `--config`, `--state`, `--verbose`/`-v`, `--quiet`/`-q`,
 ## Shell completions
 
 Tab-completion for commands, flags, and dynamic values — repo keys, tags, named
-sets, and workgroup names are pulled live from your state/config.
+sets, and workspace names are pulled live from your state/config.
 
 ```bash
 # zsh / bash — add to your rc file
@@ -147,9 +150,9 @@ git-mgr install-completions | source
 ```
 
 The dynamic value predictors honor `GIT_MGR_CONFIG` / `GIT_MGR_STATE`, so
-completion reflects the same state your commands use. Note: to complete workgroup
-subcommands, spell out `git-mgr workgroup …` — the `wg` alias does not expand its
-subcommands during completion.
+completion reflects the same state your commands use. Note: to complete workspace
+subcommands, spell out `git-mgr workspace …` — the `ws` and `wg` aliases don't
+expand their subcommands during completion.
 
 ## Configuration
 
@@ -158,7 +161,7 @@ Config lives at `~/.config/git-mgr/config.yaml`. See
 
 If that default file doesn't exist, git-mgr runs on defaults and `GIT_MGR_*`
 environment variables. Only what's switched on runs: discovery needs providers
-and rules, workgroups exist once declared, background sync once the agent is
+and rules, workspaces exist once declared, background sync once the agent is
 installed, offsite backup refs once `remote_sync` is enabled. Backups of
 uncommitted work are on by default. A flat tree with one account and nothing
 else is a complete setup:
@@ -286,7 +289,7 @@ overrides:
 `git-mgr clone <url>` honors the scheme you pass (an `https://` URL clones over
 HTTPS, `git@…`/`ssh://` over SSH). A URL embedding a credential
 (`https://user:token@…`) is refused everywhere — clone, `repos:`, manifests,
-workgroups, adopt — so none lands in state or logs; use a credential helper. `git-mgr doctor` reports whether each
+workspaces, adopt — so none lands in state or logs; use a credential helper. `git-mgr doctor` reports whether each
 provider's token resolves and whether configured SSH keys exist.
 
 ### Accounts
@@ -339,9 +342,8 @@ an agent would — no terminal, 20-second limit — and fails if it can't: SSH
 signing through an agent or a passphrase-less key works unattended; GPG needs
 a gpg-agent holding the passphrase.
 
-Workgroup clone members get the same keys as the repo they come from, so
-agents commit as the right account; worktree members share their source repo's
-config. If you set one of these keys in a repo yourself, git-mgr leaves it and
+Workspace clones get the same keys as the repo they come from, so agents
+commit as the right account; worktrees share their repo's config. If you set one of these keys in a repo yourself, git-mgr leaves it and
 reports the difference (see [Config changes](#config-changes-plan-and-apply)).
 Changing an account updates every repo it covers on the next `sync` or `apply`.
 
@@ -398,9 +400,9 @@ git-mgr run    --set active-backend -- go test ./...
 ## Config changes: plan and apply
 
 git-mgr keeps a state file (`~/.local/share/git-mgr/state.yaml`) recording what
-it last set for every repo and workgroup: path, origin URL, tags, the
+it last set for every repo and workspace: path, origin URL, tags, the
 discovering rule, the provider's repo ID, the copy ID, the repo-local git config
-it wrote, and each workgroup's members. It also keeps what the last run found --
+it wrote, and each workspace's agents and their copies. It also keeps what the last run found --
 status, branch, the last fetch, backup and offsite push and their errors --
 which is what `git-mgr status` shows. On every run it compares three things:
 
@@ -419,8 +421,8 @@ Changes:
   ~ config           github.com/acme/api core.sshcommand: (unset) -> ssh -i '~/.ssh/id_work' -o IdentitiesOnly=yes
   ~ rename           github.com/acme/api-v2: github.com/acme/api -> github.com/acme/api-v2 (same repository (provider ID 4242))
   > move             github.com/acme/web: ~/repos/github.com/acme/web -> ~/repos/acme/web   [needs git-mgr apply]
-  - remove-member    fleet/agent-3: ~/workgroups/fleet/agent-3 (no longer declared; unique work archived first)   [needs git-mgr apply]
-  + create-member    fleet/agent-4: ~/workgroups/fleet/agent-4   [git-mgr apply or wg ensure]
+  - remove-copy      app/agent-3: ~/workspaces/app/agent-3 (no longer wanted; unique work archived first)   [needs git-mgr apply]
+  + create-copy      app/agent-4: ~/workspaces/app/agent-4   [git-mgr apply or ws ensure]
 Changed by hand, left alone (reconcile.drift: overwrite restores them):
   ! github.com/acme/tools origin URL: git-mgr set git@github.com:acme/tools.git, now git@work:acme/tools.git; config wants git@github.com:acme/tools.git
 
@@ -430,37 +432,39 @@ sync applies 3 of 6 on its own (reconcile.auto: safe); `git-mgr apply` makes the
 | Config change | What happens |
 | --- | --- |
 | A new repo matches a rule or `repos:` entry | Cloned (`+ clone`). |
-| `base_dir`, `path_template` or an override's path | The repo moves (`> move`), with its linked worktrees reconnected and workgroups that use it repointed. |
+| `base_dir`, `path_template` or an override's path | The repo moves (`> move`); its linked worktrees, and the workspace clones that fetch or borrow objects from it, are reconnected. |
 | `clone_protocol` | The origin URL changes (`~ url`). |
-| An `ssh_key` or account added, changed or removed | `core.sshCommand`, `user.name` and `user.email` are written, changed or unset in repos (`~ config`) and clone members (`~ member-config`). |
+| An `ssh_key` or account added, changed or removed | `core.sshCommand`, `user.name` and `user.email` are written, changed or unset in repos (`~ config`) and workspace clones (`~ copy-config`). |
 | A rule's tags, or the rule that finds a repo | Tags and rule are updated in state (`~ tags`). |
 | A repo renamed or transferred upstream | Matched by the provider's repo ID: rekeyed, re-pointed, moved; its clone, work and backups stay (`~ rename`). |
 | A tracked clone deleted by hand | Cloned again. |
-| A workgroup declared, or a member added | Created (`+ create-workgroup`, `+ create-member`). |
-| A member or a whole workgroup removed from config | Its unique work is archived, then it is removed (`- remove-member`, `- remove-workgroup`). |
-| A workgroup's `base_dir` | Its members move (`> move-member`). |
+| A workspace declared, or an agent or repo added to one | Created (`+ create-workspace`, `+ create-copy`); a repo it names by path or URL that isn't tracked is adopted or cloned first. |
+| Agents, repos or a whole workspace removed from config | Each copy's unique work is archived, then it is removed (`- remove-copy`, `- remove-workspace`). |
+| A workspace's `root` | Its copies move (`> move-copy`). |
+| A workspace's `isolation` | Not changed in place (`x`): remove the workspace and apply again to make it the new way. |
 
 Changes marked `>` and `-` move or delete directories that a shell, editor or
 agent may be using, so they wait for `git-mgr apply`, which lists them and asks
 first. Everything else is applied by `sync` and `discover --apply` as it comes
-up. `sync` and `discover` handle repos only; workgroups change through `apply`
-and `wg ensure`.
+up. `sync` and `discover` handle repos only; workspaces change through `apply`
+and `ws ensure`.
 
 Repos added by hand (`clone`, `adopt`, `manifest import`) keep the path and URL
 they were given; only their tags and managed git config follow config. A
-workgroup created from flags or adopted is kept as recorded: `wg ensure <name>`
-recreates its missing members, and nothing removes it but `wg rm`.
+workspace created from flags or adopted is kept as recorded: `ws ensure <name>`
+makes its missing copies again, and nothing removes it but `ws rm`.
 
 Changes to different repos run at once, up to `concurrency` doing disk work; a
 repo's own changes run in order, and stop at the first that fails. Each change
 is recorded in state as soon as it is made, and the changes recorded while one
 state write runs share the next, so a first run that clones a thousand repos
-writes the state a handful of times rather than a thousand. Workgroup changes
-run after the repos', one at a time.
+writes the state a handful of times rather than a thousand. Workspace changes
+run after the repos', one at a time, from a plan made afresh once the repos are
+in place.
 
 An interrupted run is safe to repeat. Every change looks at the disk first: a
 clone that finished before the interruption is adopted, a move that finished is
-recorded, a member that was created is recorded.
+recorded, a copy that was made is recorded.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -502,7 +506,7 @@ Guarantees:
   repositories are left out *and reported* with the reason, in the command's
   output and in the backup's metadata.
 - **Failures are loud.** A backup that fails, in whole or in part, makes
-  `backup`, `sync` and `wg backup` exit non-zero, is stored as
+  `backup`, `sync` and `ws backup` exit non-zero, is stored as
   `last_backup_error`, and shows as `failed` in `status`. A patch backup is
   written to a temporary folder and published only when complete, and pruning
   runs only after a backup succeeds.
@@ -521,8 +525,8 @@ git-mgr restore github.com/me/my-repo --apply            # onto the clean workin
 
 Local backups live in the repo; a lost or wiped disk takes them along, with
 every commit you never pushed. With `remote_sync.enabled: true`, each sync
-also takes two things offsite for every working copy, repos and workgroup
-members alike:
+also takes two things offsite for every working copy, repos and workspace
+copies alike:
 
 - **Uncommitted work** (`wip: ref`, the default): each new backup, untracked
   files and the staged/unstaged split included, is pushed to a hidden ref
@@ -550,15 +554,15 @@ don't trigger CI, but anyone who can read the remote can fetch them; point
 | `remote_sync.keep` | `720h` | How long a pushed WIP ref stays. |
 
 Any of these can be set per account (`accounts[].remote_sync`) and per repo
-(`overrides[].remote_sync`); a workgroup member follows the repo it is a copy
-of. The machine name is chosen once (host name plus a random suffix) and kept
+(`overrides[].remote_sync`); a workspace copy follows the repo it is a copy of,
+then its workspace's `remote_sync`. The machine name is chosen once (host name plus a random suffix) and kept
 in the state file. The push runs after the fetch, on `sync.timeout_per_repo`.
 
 ```bash
 git-mgr remote-sync --dry-run          # what would go offsite, from the latest backups
 git-mgr remote-sync --repos "*/my-repo"
 git-mgr remote-sync --list             # what every machine left offsite, with restore commands
-git-mgr wg rm fleet --delete --offsite # take each member offsite before deleting it
+git-mgr ws rm app --delete --offsite   # take each copy offsite before deleting it
 ```
 
 Restoring on another machine needs only the remote:
@@ -574,7 +578,7 @@ git stash apply --index FETCH_HEAD     # the uncommitted work, staged and unstag
 ### Deleting without losing work
 
 Every command that deletes a clone or worktree — `remove --delete`,
-`wg rm --delete`, `wg prune` and the `remove_and_delete` stale-cleanup policy —
+`ws rm --delete`, `ws prune` and the `remove_and_delete` stale-cleanup policy —
 first inspects it for work that exists nowhere else: changed or untracked files,
 stashes, commits no remote has, commits on a detached HEAD and an unfinished
 rebase or merge. If there is any, it is written to one git bundle in
@@ -582,7 +586,8 @@ rebase or merge. If there is any, it is written to one git bundle in
 `git bundle verify` before anything is deleted. For a worktree, its branches stay
 in the source repo, so only the working tree and detached commits are archived.
 If git-mgr can't inspect the repo or write the bundle, nothing is deleted and the
-repo stays tracked. Stale cleanup lists each repo it kept and why: `discover
+repo stays tracked. A repo that workspace copies are made from, or that has
+linked worktrees, is never untracked or deleted until they are gone. Stale cleanup lists each repo it kept and why: `discover
 --apply` prints them, and `sync` reports each as a failure (exit code 3) until a
 later run deletes it.
 
@@ -599,77 +604,116 @@ The `worktree` ref is a commit of the working tree including untracked files;
 `git checkout <ref> -- .` brings them back. Archives are never pruned
 automatically.
 
-## Workgroups
+## Workspaces
 
-A *workgroup* is a parent directory of N working directories operated on as a
-unit. Two kinds:
+A *workspace* is a repo, or several related ones, worked on by several agents
+at once. Each agent gets a *replica*: its own folder holding a *copy* of each of
+the workspace's repos, on a branch of its own. Workspaces are independent of
+each other; open several side by side when you work on unrelated repos at the
+same time.
 
-- **clone** (the default) — N independent clones, e.g. a microservice bundle, or
-  N isolated agent workspaces on one repo. Fully separate object stores.
-- **worktree** — N `git worktree`s of one source repo, each on its own branch,
-  sharing one object store (cheap; pass `--source`).
+```yaml
+agents:
+  - name: claude
+    command: claude
+    resume: "claude --continue"
 
-Unlike sync/backup, workgroup commands deliberately mutate on request. Launch one
-as a one-off from the CLI — no config edit needed:
+workspace_defaults:
+  root: ~/workspaces
+  agents: 4
 
-```bash
-# A clone fleet of every repo tagged "backend" (clone is the default kind):
-git-mgr wg create review --from-tag backend
-git-mgr wg open review                       # tmux session, one pane per member
-
-# 3 independent clones of one repo — 3 agents, isolated working copies:
-git-mgr wg create fleet --repo git@github.com:me/app.git --count 3
-
-# Worktrees instead (shared object store), forked from origin/main:
-git-mgr wg create scratch --source ~/code/app --count 4 --base-ref origin/main
-
-# Persist any of these to config (--force overwrites), and track the underlying
-# repo(s) so `git-mgr sync` keeps them fetched and backed up:
-git-mgr wg create fleet --repo git@github.com:me/app.git --count 3 --save --sync
+workspaces:
+  - name: app                       # ~/workspaces/app/agent-1 .. agent-4
+    repos: [github.com/me/app]
+  - name: platform                  # ~/workspaces/platform/agent-N/{api,web}
+    repos: [github.com/me/api, github.com/me/web]
+    agents: 2
+  - name: notes                     # every agent works in ~/notes
+    path: ~/notes
 ```
 
-**Agent shells, one command.** `wg open --cmd <command>` runs a command in each
-pane before handing it a shell; combined with `--open` on create you get N
-isolated workspaces each running your agent. Under iTerm the panes are native
-splits (tmux `-CC` control mode), elsewhere a normal tmux session:
+`git-mgr apply` (or `git-mgr ws ensure`) makes them. A workspace's repos are
+tracked repo keys, globs over them, a named `set:`, local paths or URLs; a
+local repo or URL git-mgr doesn't track yet is adopted where it is, or cloned
+where config puts repos, first. Every copy is made from the repo's tracked
+clone, its *source*, so nothing is downloaded twice:
+
+| `isolation` | Each copy is | Disk | Notes |
+| --- | --- | --- | --- |
+| `worktree` (default) | a linked worktree of the source | the checkout only | Shares the source's objects, branches and fetches. Works with partial and shallow sources. |
+| `clone` | a clone with objects of its own | hardlinked from the source (copied across filesystems) | Independent history; refreshed from the source without the network. |
+| `reference-clone` | a clone borrowing the source's objects | the checkout and its own new objects | git-mgr sets `gc.pruneExpire=never` in the source so `git gc` there can't prune objects a copy uses; `doctor` checks it. |
+| `shared` | none: every agent works in one folder | — | The workspace's `path`, or its one repo's clone. |
+
+A clone's `origin` is the repo's upstream, and a `git-mgr` remote points at the
+source (its branches show as `git-mgr/<branch>`). `ws fetch` fetches each source
+once and brings the clones' view of origin up to date from it. A source made
+with a partial clone filter can only have worktrees: a clone can't fetch the
+objects it lacks through it.
+
+Each new copy gets the branch `agents/<workspace>/<agent>` (`branch:`), made at
+the upstream's default branch (`base_ref:` to change it). A branch the remote
+already has is checked out tracking it, so a copy made again resumes where its
+agent left off. Existing copies keep their branch when the template changes.
+
+Create one from the command line without editing config:
 
 ```bash
-# 4 clones of a repo, each pane running `claude` (a shell alias works too):
-git-mgr wg create fleet --repo git@github.com:me/app.git --count 4 --open --cmd claude
-
-# or open an existing workgroup the same way:
-git-mgr wg open fleet --cmd claude          # add --no-check to skip the startup status line
+git-mgr ws create app --repo github.com/me/app --agents 4
+git-mgr ws create review --set backend                 # every repo in a set, one agent
+git-mgr ws create spike --repo ~/code/spike --agents 2 --isolation clone
+git-mgr ws create app --repo github.com/me/app --agents 4 --save   # write it to config
+git-mgr ws open app --agent claude                     # tmux session, a pane per agent
 ```
 
-`--member` (repeatable) sets members explicitly — `name[:branch]` for worktree,
-a repo URL/key for clone — overriding `--count`. `wg ensure` creates whatever is
-missing — workgroups declared in config (`workgroups:`), members added to a
-declaration, members gone from disk, including those of workgroups created from
-flags — so a machine restart is a non-event. Members removed from a declaration,
-and new member paths, wait for `git-mgr apply` (see
-[Config changes](#config-changes-plan-and-apply)). `wg check` exits non-zero on
-drift (missing members, wrong branch, in-progress rebase/merge, behind upstream),
-and `wg backup` (plus the scheduled `sync`) keeps every member's WIP safe.
+A workspace created from flags or adopted is kept as recorded: `ws ensure`
+makes its missing copies again, and only `ws rm` removes it. Declared
+workspaces follow config: agents or repos removed from a declaration, a new
+`root`, or a removed declaration are moves and removals that wait for
+`git-mgr apply`; each removed copy's unique work is archived first. Commands
+that act on copies take `--agent` to pick one agent's.
 
-| `wg` subcommand | Description |
+| `ws` subcommand | Description |
 |---|---|
-| `create <name>` | Build from flags (one-off) or config. `--kind`, `--repo`, `--from-tag`, `--from-set`, `--source`, `--count`, `--member`, `--save`, `--sync`, `--open`, `--cmd`/`--agent`. |
-| `ensure [name]` | Create what is missing of one workgroup or all of them; list removals and moves for `git-mgr apply`. Idempotent. |
-| `open <name>` | Build/attach a tmux session, one pane per member. `--cmd <command>` (or `--agent <name>` from config) runs it per pane; `--no-check`, `--print`, `--recreate`, `--no-attach`. |
-| `check <name>` | Assert health; non-zero exit on drift. |
-| `backup <name>` / `recover <name>` | Back up / restore each member's WIP (`--offsite` also takes them offsite; `recover --into`/`--apply`). |
-| `prune <name>` | Delete members with no unique work: clean, no stash, nothing unpushed, verified by a full inspection; anything it can't inspect is kept. `--dry-run`, `--all`. |
-| `ls` / `status <name>` | List workgroups / show member status (`--json`). |
-| `overview` | Member health across all workgroups — the fleet supervisor view (`--json`). |
-| `rm <name>` | Forget the workgroup and leave its files. `--delete` also removes each member after archiving its unique work; `--force` discards that work instead; `--offsite` takes each member offsite first and keeps any it can't. Members that can't be removed stay tracked and the command exits non-zero. |
-| `adopt <name>` | Import an existing directory of working trees. |
+| `create <name>` | Create a workspace from flags (`--repo`, `--set` or `--path`; `--agents`, `--isolation`, `--branch`, `--base-ref`, `--root`), or the one config declares. `--save` (`--force`) writes it to config; `--open` with `--agent`/`--cmd` opens it. |
+| `ensure [name]` | Make what is missing of one workspace or all of them; list moves and removals for `git-mgr apply`. Idempotent. |
+| `open <name>` | Build/attach a tmux session, one pane per agent; `--agent <profile>` or `--cmd <command>` runs in each pane; `--no-check`, `--print`, `--recreate`, `--no-attach`, `--plain`. |
+| `check <name>` | Exit non-zero when a copy is missing, on the wrong branch, mid-rebase or merge, or behind. `--agent`. |
+| `status <name>` / `overview` | Copy status for one workspace / across all of them (`--json`). |
+| `fetch <name>` | Fetch each source once, then refresh the clones from it. |
+| `commit`, `pull`, `push`, `exec` | Run across copies. `pull` backs up dirty copies first. |
+| `backup <name>` / `recover <name>` | Back up / restore each copy's WIP (`--offsite`; `recover --into`/`--apply`). |
+| `prune <name>` | Remove copies with no unique work: clean, no stash, nothing unpushed, verified by a full inspection. `--dry-run`, `--all`. |
+| `ls` | List workspaces, created and declared. |
+| `rm <name>` | Forget the workspace, leaving its files. `--delete` removes each copy after archiving its unique work; `--force` discards it instead; `--offsite` takes each copy offsite first and keeps any it can't. |
+| `adopt <name> <dir>` | Record a directory of existing checkouts as a workspace, one agent per checkout. |
+
+`git-mgr sync` backs up every copy (and, with `remote_sync`, takes it
+offsite) under the policy of the repo it is a copy of, then the workspace's
+own `remote_sync`.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `agents[].name`, `.command` | none | An agent profile. The command is typed into an interactive shell in the replica, so shell functions and aliases work. |
+| `agents[].resume` | none | Typed instead of `command` when the agent ran in the replica before. |
+| `agents[].env` | none | Extra environment for the agent. |
+| `workspace_defaults.root` | `~/workspaces` | Holds a directory per workspace. |
+| `workspace_defaults.isolation` | `worktree` | `worktree`, `clone`, `reference-clone` or `shared`. |
+| `workspace_defaults.agents` | `1` | Agents per workspace (1–64). |
+| `workspace_defaults.agent_name` | `agent-{{.N}}` | Names agent N (`{{.N}}`, `{{.Workspace}}`). |
+| `workspace_defaults.branch` | `agents/{{.Workspace}}/{{.Agent}}` | A new copy's branch (`{{.Workspace}}`, `{{.Agent}}`, `{{.N}}`, `{{.Repo}}`). |
+| `workspace_defaults.base_ref` | upstream's default branch | Where new branches start. |
+| `workspaces[].name` | required | Letters, digits, `-` and `_`. |
+| `workspaces[].repos` / `.set` / `.path` | one required | The repos, or the shared folder. |
+| `workspaces[].root`, `.isolation`, `.agents`, `.agent_name`, `.branch`, `.base_ref` | `workspace_defaults` | Per-workspace settings. |
+| `workspaces[].remote_sync` | the repo's | `remote_sync` for the workspace's copies. |
 
 ## Running on a schedule
 
 `git-mgr sync` is built to run unattended. Only one sync runs at a time; a
 second one exits 0 at once. Clones, fetches and backups run without the state
 lock, which a run takes only for the milliseconds it needs to record a result,
-so `git-mgr wg create` or `git-mgr clone` work normally while a long sync is
+so `git-mgr ws create` or `git-mgr clone` work normally while a long sync is
 running. `min_fetch_interval` skips recently-fetched repos, and `auto_discover`
 picks up new repos. It never pulls or merges, and it moves or deletes a repo
 only if you configure it to (`reconcile.auto: all`,
@@ -767,7 +811,7 @@ broken setup. With `--quiet`, only failures are printed, to stderr.
 | --- | --- |
 | 0 | Everything succeeded. `sync` also exits 0 when another run holds the lock, since overlapping scheduled runs are routine. |
 | 1 | The command failed: bad config, unreadable state, or every target failed. |
-| 3 | Partial failure: some repos, members or changes failed and the rest succeeded. Each failure is printed to stderr. |
+| 3 | Partial failure: some repos, copies or changes failed and the rest succeeded. Each failure is printed to stderr. |
 | 75 | Another git-mgr run held the state lock for longer than `lock_timeout`; try again (EX_TEMPFAIL). `git-mgr doctor` reports a stuck holder. |
 | 80 | Usage error: unknown command or flag. |
 
@@ -844,10 +888,10 @@ go build -ldflags="-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD)" .
 | `main.go`, `internal/cmd` | The CLI: flags, wiring, output. Commands load config and state, call the packages below, print. |
 | `internal/config` | Loading, defaults, validation, per-repo overrides, SSH key and protocol resolution. |
 | `internal/discovery` | Provider clients (GitHub, GitLab, Gitea/Forgejo), rule filtering, stale detection. |
-| `internal/reconcile` | Desired vs recorded vs on-disk: plans repo and workgroup changes and applies them, several repos at once. |
+| `internal/reconcile` | Desired vs recorded vs on-disk for tracked repos, and the plan engine: applies changes, several repos at once, then serial ones. |
 | `internal/state` | The state file: schema, migrations, locking, atomic writes, and `GroupCommit`, which saves concurrent changes in one write. |
 | `internal/gitops` | Everything that runs git: clone, fetch, status, snapshots, backups, restore, archives, copy IDs, worktrees. |
-| `internal/workgroup` | Workgroup specs, member creation, health, removal. |
+| `internal/workspace` | Workspaces: resolving config into replicas and copies, planning their changes on the reconcile engine, making, moving and removing copies, health. Depends on the inventory, never the reverse. |
 | `internal/repourl` | Parsing remote URLs into host/owner/name keys. |
 | `internal/pathtemplate`, `internal/pathutil`, `internal/shellutil`, `internal/ctxutil` | Path templates, deletion guards, shell quoting, optional deadlines. |
 | `internal/scheduler` | launchd, systemd and cron installation. |

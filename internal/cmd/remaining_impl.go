@@ -60,6 +60,11 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 	untrack := map[string]string{} // key -> the path it was removed at
 	for _, key := range toRemove {
 		repo := st.Repos[key]
+		if err := st.CheckRemovable(key); err != nil {
+			fmt.Fprintf(os.Stderr, "  %s: kept and still tracked: %v\n", key, err)
+			kept = append(kept, key)
+			continue
+		}
 		if c.Delete && repo.LocalPath != "" {
 			archived, err := gitops.RemoveClone(ctx.GoCtx(), repo.LocalPath, cfg.Backup.ArchiveDir, key, false)
 			if err != nil {
@@ -77,8 +82,9 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 
 	err = st.Update(cfg.LockTimeout, func(st *state.State) error {
 		for key, path := range untrack {
-			// A repo moved meanwhile wasn't the one deleted; keep tracking it.
-			if repo := st.Repos[key]; repo != nil && (!c.Delete || repo.LocalPath == path) {
+			// A repo moved meanwhile wasn't the one deleted, and one a
+			// workspace started using meanwhile is still needed.
+			if repo := st.Repos[key]; repo != nil && (!c.Delete || repo.LocalPath == path) && st.CheckRemovable(key) == nil {
 				delete(st.Repos, key)
 			}
 		}
@@ -264,10 +270,10 @@ const initExamples = `
 #     user: "your-username"            # or: org: "your-org"
 #     tags: ["personal"]
 #
-# workgroups:                          # clone is the default kind
-#   - name: "review"
-#     kind: "clone"
-#     from_tag: "backend"
+# workspaces:                          # agents' copies; see config.example.yaml
+#   - name: "app"
+#     repos: ["github.com/your-username/app"]
+#     agents: 4
 `
 
 func runShell(cmd string) error {

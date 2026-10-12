@@ -149,6 +149,7 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 	if cloned > 0 && missing == 0 {
 		d.ok(fmt.Sprintf("%d tracked repos present on disk", cloned))
 	}
+	checkWorkspaces(ctx, st, d)
 
 	fmt.Printf("\n%d problem(s), %d warning(s)\n", d.fails, d.warns)
 	if d.fails > 0 {
@@ -261,4 +262,37 @@ func doctorAsScheduled(ctx *Context, s scheduler.Schedule) (fails, warns []strin
 		return nil, nil, fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(out)))
 	}
 	return fails, warns, nil
+}
+
+// checkWorkspaces checks every recorded copy is on disk, and that the clones
+// reference clones borrow objects from keep git gc from pruning them.
+func checkWorkspaces(ctx *Context, st *state.State, d *doctorReport) {
+	copies, missing := 0, 0
+	borrowed := map[string]bool{}
+	for _, name := range slices.Sorted(maps.Keys(st.Workspaces)) {
+		ws := st.Workspaces[name]
+		for _, r := range ws.Replicas {
+			for _, c := range r.Copies {
+				copies++
+				if !gitops.HasGitDir(c.Path) {
+					missing++
+					d.fail(fmt.Sprintf("workspace %s/%s: copy missing (%s); `git-mgr ws ensure %s` makes it again", name, r.Agent, c.Path, name))
+					continue
+				}
+				if ws.Isolation == config.IsolationReferenceClone {
+					if repo := st.Repos[c.Repo]; repo != nil {
+						borrowed[repo.LocalPath] = true
+					}
+				}
+			}
+		}
+	}
+	if copies > 0 && missing == 0 {
+		d.ok(fmt.Sprintf("%d workspace copies present on disk", copies))
+	}
+	for _, src := range slices.Sorted(maps.Keys(borrowed)) {
+		if v, err := gitops.Git(ctx.GoCtx(), src, "config", "--get", "gc.pruneExpire"); err != nil || v != "never" {
+			d.fail(fmt.Sprintf("%s: reference clones borrow its objects, but gc.pruneExpire isn't never, so git gc there can break them; run `git -C %s config gc.pruneExpire never`", src, src))
+		}
+	}
 }

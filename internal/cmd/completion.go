@@ -10,7 +10,7 @@ import (
 )
 
 // CompletionPredictors returns kongplete options that complete dynamic values --
-// repo keys, tags, named sets, and workgroup names -- for any arg/flag tagged
+// repo keys, tags, named sets, and workspace names -- for any arg/flag tagged
 // with the matching `predictor:"..."`. They run at completion time, resolving the
 // state/config path from the env or default, best-effort (no candidates on error).
 func CompletionPredictors() []kongplete.Option {
@@ -18,7 +18,7 @@ func CompletionPredictors() []kongplete.Option {
 		kongplete.WithPredictor("repo", complete.PredictFunc(func(complete.Args) []string { return completionRepoKeys() })),
 		kongplete.WithPredictor("tag", complete.PredictFunc(func(complete.Args) []string { return completionTags() })),
 		kongplete.WithPredictor("set", complete.PredictFunc(func(complete.Args) []string { return completionSetNames() })),
-		kongplete.WithPredictor("workgroup", complete.PredictFunc(func(complete.Args) []string { return completionWorkgroups() })),
+		kongplete.WithPredictor("workspace", complete.PredictFunc(func(complete.Args) []string { return completionWorkspaces() })),
 	}
 }
 
@@ -92,23 +92,23 @@ func completionSetNames() []string {
 	return out
 }
 
-func completionWorkgroups() []string {
+func completionWorkspaces() []string {
 	seen := map[string]bool{}
 	var out []string
+	add := func(n string) {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
 	if st := completionState(); st != nil {
-		for n := range st.Workgroups {
-			if !seen[n] {
-				seen[n] = true
-				out = append(out, n)
-			}
+		for n := range st.Workspaces {
+			add(n)
 		}
 	}
 	if cfg := completionConfig(); cfg != nil {
-		for _, wg := range cfg.Workgroups {
-			if !seen[wg.Name] {
-				seen[wg.Name] = true
-				out = append(out, wg.Name)
-			}
+		for _, w := range cfg.Workspaces {
+			add(w.Name)
 		}
 	}
 	return out

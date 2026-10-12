@@ -141,17 +141,27 @@ func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope
 	return bundle, nil
 }
 
+// ErrHasWorktrees reports a clone with linked worktrees: deleting it would
+// delete their branches and history, and leave their work unreadable.
+var ErrHasWorktrees = errors.New("it has linked worktrees")
+
 // RemoveClone deletes the clone at repoPath. Unless discard is set it first
 // archives the clone's unique work into archiveDir; if that work cannot be
 // inspected or archived the clone is left in place and an error is returned.
-// A clone already gone from disk counts as removed. It returns the archive
-// path, or "" when there was nothing to save.
+// A clone with linked worktrees on disk is always left in place, discard or
+// not. A clone already gone from disk counts as removed. It returns the
+// archive path, or "" when there was nothing to save.
 func RemoveClone(ctx context.Context, repoPath, archiveDir, name string, discard bool) (string, error) {
 	if !filepath.IsAbs(repoPath) {
 		return "", fmt.Errorf("refusing to remove clone at non-absolute path %q", repoPath)
 	}
 	if _, err := os.Lstat(repoPath); errors.Is(err, fs.ErrNotExist) {
 		return "", nil
+	}
+	if linked, err := LinkedWorktrees(ctx, repoPath); err != nil {
+		return "", fmt.Errorf("keeping %s: listing its worktrees: %w", repoPath, err)
+	} else if len(linked) > 0 {
+		return "", fmt.Errorf("keeping %s: %w (%s); remove them first", repoPath, ErrHasWorktrees, strings.Join(linked, ", "))
 	}
 	var archived string
 	if !discard {

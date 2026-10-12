@@ -91,5 +91,12 @@ func validateRemoteSync(cfg *Config) error {
 			}
 		}
 	}
+	for _, w := range cfg.Workspaces {
+		if r := w.RemoteSync; r != nil {
+			if err := check(fmt.Sprintf("workspace %q", w.Name), r.Namespace, r.Remote); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }

@@ -115,6 +115,16 @@ func (c *Config) RemoteSyncFor(repoKey, ruleName string) RemoteSyncConfig {
 	return r
 }
 
+// RemoteSyncInWorkspace resolves remote_sync for a copy of a repo in a
+// workspace: the repo's, then the workspace's.
+func (c *Config) RemoteSyncInWorkspace(repoKey, ruleName, workspace string) RemoteSyncConfig {
+	r := c.RemoteSyncFor(repoKey, ruleName)
+	if w := c.FindWorkspace(workspace); w != nil {
+		w.RemoteSync.apply(&r)
+	}
+	return r
+}
+
 // CloneProtocolFor resolves the clone transport for a repo, in order: a per-repo
 // override, the provider that discovered it (via the discovery rule), then the
 // top-level clone_protocol default.

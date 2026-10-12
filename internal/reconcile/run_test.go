@@ -15,8 +15,8 @@ import (
 
 // recordOnly is an action with no disk work that records key.
 func recordOnly(target string) Action {
-	return Action{Kind: KindTags, Target: target, run: func(context.Context, *Env) (outcome, error) {
-		return outcome{record: func(st *state.State) error {
+	return Action{Kind: KindTags, Target: target, Run: func(context.Context, *Env) (Outcome, error) {
+		return Outcome{Record: func(st *state.State) error {
 			st.Repos[target] = &state.RepoState{}
 			return nil
 		}}, nil
@@ -24,8 +24,8 @@ func recordOnly(target string) Action {
 }
 
 func failing(target string, err error) Action {
-	return Action{Kind: KindURL, Target: target, run: func(context.Context, *Env) (outcome, error) {
-		return outcome{}, err
+	return Action{Kind: KindURL, Target: target, Run: func(context.Context, *Env) (Outcome, error) {
+		return Outcome{}, err
 	}}
 }
 
@@ -129,7 +129,7 @@ func BenchmarkApply_Records(b *testing.B) {
 		key := fmt.Sprintf("github.com/owner/repo-%d", i)
 		st.Repos[key] = &state.RepoState{Host: "github.com", Owner: "owner", Name: fmt.Sprintf("repo-%d", i), FullName: key[len("github.com/"):],
 			LocalPath: "/Users/me/projects/" + key, CloneURL: "git@github.com:" + key + ".git", Cloned: true, Tags: []string{"work"}}
-		actions = append(actions, Action{Kind: KindTags, Target: key, run: retag(Repo{Key: key, Tags: []string{"work", "go"}})})
+		actions = append(actions, Action{Kind: KindTags, Target: key, Run: retag(Repo{Key: key, Tags: []string{"work", "go"}})})
 	}
 	if err := st.Save(); err != nil {
 		b.Fatal(err)
