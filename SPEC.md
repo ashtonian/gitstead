@@ -216,7 +216,8 @@ Syncing 83 repos (concurrency: 8)...
 **Cron safety:**
 - Takes the sync run lock (`<state_file>.sync.lock`) -- if another sync is running, exits immediately with code 0
 - Holds the state lock only to record each change and, at the end, every repo's outcome in one write; clones, fetches and backups run without it
-- Backs up each working copy first on `sync.backup_timeout`, then fetches on `sync.timeout_per_repo`; tracked repos and workspace copies share the `concurrency` pool, and each working copy is visited once
+- Backs up each working copy first on `sync.backup_timeout`, then fetches on `sync.timeout_per_repo`; tracked repos run first, then workspace copies, each phase on the `concurrency` pool, and each working copy is visited once
+- Workspace clones aren't fetched: once their repo's clone has fetched, their `refs/remotes/origin/*` are refreshed from it (`git fetch <clone> +refs/remotes/origin/*:refs/remotes/origin/*`), without the network; worktrees share their repo's refs
 - Respects `min_fetch_interval` -- skips repos fetched within the window
 - All errors are collected, not fatal -- partial success is fine
 
@@ -465,6 +466,11 @@ agents:
   - name: claude
     command: "claude"
     resume: "claude --continue"
+
+# How new clones are made; also accounts[].clone and overrides[].clone.
+clone:
+  filter: ""                 # blob:none | blob:limit=<size> | tree:<depth>
+  depth: 0                   # commits per branch (with --no-single-branch); 0 = all
 
 # Settings every workspace starts from; see Workspaces.
 workspace_defaults:
@@ -1733,8 +1739,9 @@ refs and terminal session names.
   `gc.pruneExpire=never` first.
 - **shared** — no copies; agents work in `path`, or the one repo's clone.
 
-A partial source (a promisor remote) only gets worktrees: a clone's fetches
-through it fail, since upload-pack refuses lazy fetches. A shallow source is
+A partial source (a promisor remote, or `clone.filter` set for the repo) only
+gets worktrees, and `plan` blocks clones of it: a clone's fetches through it
+fail, since upload-pack refuses lazy fetches. A shallow source is
 cloned through git's local transport (git ignores `--local`). When a source
 moves, the `move` action repairs its worktrees and repoints its clones'
 `git-mgr` remotes and alternates; `ws fetch` and a refresh read the source's

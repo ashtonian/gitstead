@@ -134,6 +134,13 @@ func Resolve(cfg *config.Config, st *state.State, decl config.Workspace) (*Spec,
 		return spec, nil
 	}
 
+	if spec.Isolation != config.IsolationWorktree {
+		for _, key := range keys {
+			if cfg.CloneFor(key, st.Repos[key].DiscoveredBy).Filter != "" {
+				return nil, fmt.Errorf("%s is cloned with clone.filter, so only worktree copies can be made from it", key)
+			}
+		}
+	}
 	dirs := copyDirs(keys)
 	for n, agent := range agents {
 		r := Replica{Agent: agent, Path: filepath.Join(spec.Dir, agent)}

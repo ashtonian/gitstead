@@ -604,6 +604,53 @@ func TestE2E_WorkspaceFromFlags(t *testing.T) {
 	}
 }
 
+// TestE2E_SyncRefreshesClones: sync fetches a repo once and brings its
+// workspace clones up to date from that clone, never fetching them itself.
+func TestE2E_SyncRefreshesClones(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+	remote := filepath.Join(tmp, "remotes", "app.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	seed := filepath.Join(tmp, "seed")
+	gitCmd(t, tmp, "clone", "-q", remote, seed)
+	gitCmd(t, seed, "config", "user.email", "e2e@test.local")
+	gitCmd(t, seed, "config", "user.name", "e2e")
+	commit := func(name string) string {
+		if err := os.WriteFile(filepath.Join(seed, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitCmd(t, seed, "add", ".")
+		gitCmd(t, seed, "commit", "-qm", name)
+		gitCmd(t, seed, "push", "-q", "origin", "HEAD:main")
+		return gitCmd(t, seed, "rev-parse", "HEAD")
+	}
+	commit("first")
+	root := filepath.Join(tmp, "workspaces")
+	cfg := fmt.Sprintf("base_dir: %s\nworkspace_defaults:\n  root: %s\nrepos:\n  - url: %s\n", env.baseDir, root, remote)
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := env.run(t, "sync"); code != 0 {
+		t.Fatalf("first sync exit %d:\n%s", code, out)
+	}
+	if out, code := env.run(t, "ws", "create", "app", "--repo", "local/remotes/app", "--isolation", "clone"); code != 0 {
+		t.Fatalf("ws create exit %d:\n%s", code, out)
+	}
+	copyPath := filepath.Join(root, "app", "agent-1")
+	// The copy's own origin is unreachable: anything new must come through
+	// the repo's clone.
+	gitCmd(t, copyPath, "remote", "set-url", "origin", filepath.Join(tmp, "nowhere.git"))
+
+	head := commit("second")
+	out, code := env.run(t, "sync", "--force")
+	if code != 0 {
+		t.Fatalf("sync exit %d:\n%s", code, out)
+	}
+	if got := gitCmd(t, copyPath, "rev-parse", "origin/main"); got != head {
+		t.Errorf("the clone's origin/main = %s, want %s\n%s", got, head, out)
+	}
+}
+
 // TestE2E_RemoteSync adopts a repo whose origin is a local bare remote, gives
 // it uncommitted work and an unpushed commit, and runs `sync` with
 // remote_sync on: both land on the remote under the copy's hidden namespace,

@@ -66,6 +66,7 @@ accounts: []
   #     format: ssh                    # optional: ssh | openpgp | x509
   #     program: ""                    # optional signer, e.g. 1Password's op-ssh-sign
   #     allowed_signers: ""            # optional gpg.ssh.allowedSignersFile
+  #   clone: {filter: "blob:none"}     # how new clones of its repos are made
 
 # =============================================================================
 # Provider Instances
@@ -238,10 +239,25 @@ overrides: []
   #     timeout_per_repo: "15m"
   #   backup:
   #     include_untracked: false            # Too many generated files
+  #   clone:
+  #     filter: "blob:none"                 # file contents fetched as checked out
+  #     depth: 100                          # the last 100 commits of every branch
   #
   # Custom path for dotfiles
   # - repos: ["github.com/your-login/dotfiles"]
   #   path_template: "{{.Name}}"           # Clone to ~/repos/dotfiles
+
+# =============================================================================
+# Clones
+# =============================================================================
+# How new clones of tracked repos are made; also per account and per override.
+# Existing clones keep how they were made. Workspace worktrees share their
+# repo's clone and so its filter and depth; workspace clones can't be made from
+# a partial (filtered) clone, so such repos only get worktrees.
+
+clone:
+  filter: ""          # partial clone: blob:none, blob:limit=<size> or tree:<depth>
+  depth: 0            # commits of history per branch; 0 = all
 
 # =============================================================================
 # Sync Settings

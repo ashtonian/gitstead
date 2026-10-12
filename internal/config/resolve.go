@@ -115,6 +115,21 @@ func (c *Config) RemoteSyncFor(repoKey, ruleName string) RemoteSyncConfig {
 	return r
 }
 
+// CloneFor resolves how a repo is cloned: the top-level clone settings,
+// then its account's, then any override's.
+func (c *Config) CloneFor(repoKey, ruleName string) CloneConfig {
+	r := c.Clone
+	if a := c.AccountFor(repoKey, ruleName); a != nil {
+		a.Clone.apply(&r)
+	}
+	for _, o := range c.Overrides {
+		if matchesOverride(repoKey, o.Repos) {
+			o.Clone.apply(&r)
+		}
+	}
+	return r
+}
+
 // RemoteSyncInWorkspace resolves remote_sync for a copy of a repo in a
 // workspace: the repo's, then the workspace's.
 func (c *Config) RemoteSyncInWorkspace(repoKey, ruleName, workspace string) RemoteSyncConfig {

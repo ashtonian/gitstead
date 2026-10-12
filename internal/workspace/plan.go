@@ -328,6 +328,10 @@ func (pl *planner) copy(spec *Spec, r Replica, c Copy, rec *state.CopyState) {
 	create := func(note, replaces string) {
 		pl.add(reconcile.Action{Kind: KindCreateCopy, Target: target, To: c.Path, Note: note, Run: createCopy(spec, r, c, replaces)})
 	}
+	if spec.Isolation != config.IsolationWorktree && !here.Exists && partial(pl.seen.At(c.Source)) {
+		pl.block(target, fmt.Sprintf("the repo's clone at %s is partial; only worktree copies can be made from it", c.Source))
+		return
+	}
 	switch {
 	case rec == nil && !here.Exists:
 		create("", "")
@@ -449,6 +453,20 @@ func settingsChanged(ws *state.WorkspaceState, spec *Spec) []string {
 		changed = append(changed, fmt.Sprintf("%d agent(s)", len(spec.Replicas)))
 	}
 	return changed
+}
+
+// partial reports whether an observed clone was made with a partial clone
+// filter, from its config: a promisor remote.
+func partial(c reconcile.Copy) bool {
+	if c.Config["extensions.partialclone"] != "" {
+		return true
+	}
+	for k, v := range c.Config {
+		if strings.HasPrefix(k, "remote.") && strings.HasSuffix(k, ".promisor") && v == "true" {
+			return true
+		}
+	}
+	return false
 }
 
 func sameReplicas(ws *state.WorkspaceState, spec *Spec) bool {

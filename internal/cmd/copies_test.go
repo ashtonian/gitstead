@@ -140,7 +140,7 @@ func TestSyncJobs(t *testing.T) {
 		}
 		return p
 	}
-	app, lib, agent := dir("app"), dir("lib"), dir("agent")
+	app, lib, agent, clone := dir("app"), dir("lib"), dir("agent"), dir("clone")
 	cfg := config.Defaults()
 	st := &state.State{
 		Repos: map[string]*state.RepoState{
@@ -148,10 +148,15 @@ func TestSyncJobs(t *testing.T) {
 			"h/o/lib": {LocalPath: lib, Cloned: true},
 			"h/o/old": {LocalPath: dir("old"), Cloned: true, Status: "stale"},
 		},
-		Workspaces: map[string]*state.WorkspaceState{"fleet": {Name: "fleet", Replicas: []state.ReplicaState{
-			{Agent: "agent", Path: agent, Copies: []state.CopyState{{Repo: "h/o/lib", Path: agent}}},
-			{Agent: "app", Path: app, Copies: []state.CopyState{{Repo: "h/o/app", Path: app}}}, // adopted from the tracked clone
-		}}},
+		Workspaces: map[string]*state.WorkspaceState{
+			"fleet": {Name: "fleet", Isolation: "worktree", Replicas: []state.ReplicaState{
+				{Agent: "agent", Path: agent, Copies: []state.CopyState{{Repo: "h/o/lib", Path: agent}}},
+				{Agent: "app", Path: app, Copies: []state.CopyState{{Repo: "h/o/app", Path: app}}}, // adopted from the tracked clone
+			}},
+			"clones": {Name: "clones", Isolation: "clone", Replicas: []state.ReplicaState{
+				{Agent: "a1", Path: clone, Copies: []state.CopyState{{Repo: "h/o/lib", Path: clone}}},
+			}},
+		},
 	}
 	labels := func(c *SyncCmd) []string {
 		pass, err := selection{c.Repos, c.Tag, c.Set}.predicate(cfg)
@@ -165,6 +170,9 @@ func TestSyncJobs(t *testing.T) {
 			if j.fetch {
 				label += "+fetch"
 			}
+			if j.refresh != "" {
+				label += "+refresh"
+			}
 			if j.offsite != nil {
 				label += "+offsite"
 			}
@@ -173,14 +181,17 @@ func TestSyncJobs(t *testing.T) {
 		return out
 	}
 
-	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+fetch h/o/lib+fetch h/o/old fleet/agent" {
-		t.Errorf("jobs = %s; want each working copy once, the stale repo backed up but not fetched", got)
+	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+fetch h/o/lib+fetch h/o/old clones/a1+refresh fleet/agent" {
+		t.Errorf("jobs = %s; want each working copy once, the stale repo backed up but not fetched, clones refreshed", got)
 	}
 	if got := strings.Join(labels(&SyncCmd{Tag: "work"}), " "); got != "h/o/app+fetch" {
 		t.Errorf("jobs for --tag work = %s; copies of unselected repos should be left out", got)
 	}
-	if got := strings.Join(labels(&SyncCmd{NoBackup: true}), " "); got != "h/o/app+fetch h/o/lib+fetch h/o/old" {
-		t.Errorf("jobs for --no-backup = %s; copies are only backed up", got)
+	if got := strings.Join(labels(&SyncCmd{NoBackup: true}), " "); got != "h/o/app+fetch h/o/lib+fetch h/o/old clones/a1+refresh" {
+		t.Errorf("jobs for --no-backup = %s; only clones have more to do than a backup", got)
+	}
+	if got := strings.Join(labels(&SyncCmd{NoBackup: true, NoFetch: true}), " "); got != "h/o/app h/o/lib h/o/old" {
+		t.Errorf("jobs for --no-backup --no-fetch = %s", got)
 	}
 
 	// remote_sync applies to copies by the repo they copy: an override that
@@ -189,12 +200,12 @@ func TestSyncJobs(t *testing.T) {
 	off := false
 	cfg.RemoteSync.Enabled = true
 	cfg.Overrides = []config.Override{{Repos: []string{"h/o/lib"}, RemoteSync: &config.RemoteSyncOverride{Enabled: &off}}}
-	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+fetch+offsite h/o/lib+fetch h/o/old fleet/agent" {
+	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+fetch+offsite h/o/lib+fetch h/o/old clones/a1+refresh fleet/agent" {
 		t.Errorf("jobs with remote_sync = %s", got)
 	}
 	on := true
 	cfg.Workspaces = []config.Workspace{{Name: "fleet", Repos: []string{"h/o/lib"}, RemoteSync: &config.RemoteSyncOverride{Enabled: &on}}}
-	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+fetch+offsite h/o/lib+fetch h/o/old fleet/agent+offsite" {
+	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+fetch+offsite h/o/lib+fetch h/o/old clones/a1+refresh fleet/agent+offsite" {
 		t.Errorf("jobs with the workspace's remote_sync = %s", got)
 	}
 }

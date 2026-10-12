@@ -66,3 +66,36 @@ func TestValidBranch(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateClone(t *testing.T) {
+	bad := "blob:everything"
+	for _, cfg := range []Config{
+		{Clone: CloneConfig{Filter: "blob"}},
+		{Accounts: []Account{{Name: "a", Clone: &CloneOverride{Filter: &bad}}}},
+		{Overrides: []Override{{Repos: []string{"*"}, Clone: &CloneOverride{Filter: &bad}}}},
+	} {
+		if err := validateClone(&cfg); err == nil {
+			t.Errorf("validateClone(%+v) accepted a bad filter", cfg)
+		}
+	}
+	for _, f := range []string{"", "blob:none", "blob:limit=1m", "tree:0"} {
+		if err := validateClone(&Config{Clone: CloneConfig{Filter: f}}); err != nil {
+			t.Errorf("filter %q: %v", f, err)
+		}
+	}
+}
+
+func TestCloneFor_AccountThenOverride(t *testing.T) {
+	none, one := "blob:none", 1
+	cfg := &Config{
+		Clone:     CloneConfig{Depth: 50},
+		Accounts:  []Account{{Name: "work", Hosts: []string{"github.com"}, Owners: []string{"acme"}, Clone: &CloneOverride{Filter: &none}}},
+		Overrides: []Override{{Repos: []string{"github.com/acme/big"}, Clone: &CloneOverride{Depth: &one}}},
+	}
+	if got := cfg.CloneFor("github.com/acme/big", ""); got != (CloneConfig{Filter: "blob:none", Depth: 1}) {
+		t.Errorf("acme/big = %+v", got)
+	}
+	if got := cfg.CloneFor("github.com/me/x", ""); got != (CloneConfig{Depth: 50}) {
+		t.Errorf("me/x = %+v", got)
+	}
+}

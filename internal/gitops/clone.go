@@ -25,16 +25,35 @@ func IsStaging(name string) bool {
 	return strings.HasPrefix(name, stagingPrefix)
 }
 
-// Clone clones url into destPath, creating parent directories. An empty
-// sshKeyPath uses the default SSH configuration. See staged for how destPath
-// is protected.
-func Clone(ctx context.Context, url, destPath, sshKeyPath string) error {
+// CloneOptions shape a clone.
+type CloneOptions struct {
+	// SSHKey is the key to clone with; "" uses the default SSH configuration.
+	SSHKey string
+	// Filter is a partial clone filter, such as blob:none; "" clones every
+	// object.
+	Filter string
+	// Depth limits history to that many commits on every branch; 0 is all.
+	Depth int
+}
+
+// Clone clones url into destPath, creating parent directories. See staged
+// for how destPath is protected.
+func Clone(ctx context.Context, url, destPath string, opts CloneOptions) error {
 	return staged(destPath, func(staging string) error {
 		var env []string
-		if sshKeyPath != "" {
-			env = []string{gitSSHCommandEnv(sshKeyPath)}
+		if opts.SSHKey != "" {
+			env = []string{gitSSHCommandEnv(opts.SSHKey)}
 		}
-		return runClone(ctx, env, url, "clone", "--quiet", url, staging)
+		args := []string{"clone", "--quiet"}
+		if opts.Filter != "" {
+			args = append(args, "--filter="+opts.Filter)
+		}
+		if opts.Depth > 0 {
+			// --depth alone would also limit the clone to one branch, and
+			// agents' copies need the others.
+			args = append(args, fmt.Sprintf("--depth=%d", opts.Depth), "--no-single-branch")
+		}
+		return runClone(ctx, env, url, append(args, url, staging)...)
 	})
 }
 

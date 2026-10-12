@@ -419,3 +419,22 @@ func TestApply_KeepsConcurrentWrites(t *testing.T) {
 		t.Error("the clone was not recorded")
 	}
 }
+
+// clone.filter and clone.depth shape new clones.
+func TestApply_CloneFilterAndDepth(t *testing.T) {
+	root := t.TempDir()
+	remote := bareRemote(t, root, "app")
+	mustGit(t, remote, "config", "uploadpack.allowFilter", "true")
+	w := newWorld(t, root)
+	w.cfg.Clone = config.CloneConfig{Filter: "blob:none", Depth: 1}
+	w.cfg.Repos = []config.ManualRepo{{URL: "file://" + remote}}
+	w.converge()
+	for _, r := range w.st.Repos {
+		if !gitops.IsPartial(context.Background(), r.LocalPath) {
+			t.Error("the clone isn't partial")
+		}
+		if _, err := os.Stat(filepath.Join(r.LocalPath, ".git", "shallow")); err != nil {
+			t.Error("the clone isn't shallow")
+		}
+	}
+}

@@ -106,7 +106,11 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		}
 	}
 	jobs, skippedRecent := c.jobs(cfg, st, pass, machine)
-	outcomes := runCopies(ctx.GoCtx(), log, jobs, cfg.Concurrency)
+	// Repos first: workspace clones are refreshed from what their repo's
+	// clone just fetched.
+	repoJobs, copyJobs := splitJobs(jobs)
+	outcomes := runCopies(ctx.GoCtx(), log, repoJobs, cfg.Concurrency)
+	outcomes = append(outcomes, runCopies(ctx.GoCtx(), log, copyJobs, cfg.Concurrency)...)
 	err = st.Update(cfg.LockTimeout, func(st *state.State) error {
 		recordCopies(st, outcomes)
 		st.LastSync = time.Now()
@@ -162,7 +166,8 @@ type syncError struct {
 // remote_sync.enabled, takes offsite: selected repos, and the workspace
 // copies of selected repos (all of them when nothing is selected). Repos
 // fetched within min_fetch_interval are not fetched again; stale ones are
-// only backed up.
+// only backed up. Workspace clones are refreshed from their repo's clone
+// instead of fetched; worktrees share their repo's fetch.
 func (c *SyncCmd) jobs(cfg *config.Config, st *state.State, pass func(string, *state.RepoState) bool, machine string) (jobs []copyJob, skippedRecent int) {
 	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
 		repo := st.Repos[key]
@@ -196,18 +201,43 @@ func (c *SyncCmd) jobs(cfg *config.Config, st *state.State, pass func(string, *s
 	// Agents' copies never show up as tracked repos; without this their
 	// uncommitted work -- what workspaces exist to keep -- would be
 	// unprotected by the scheduled run.
-	if c.NoBackup {
-		return jobs, skippedRecent
-	}
 	jobs = addCopyJobs(jobs, st, selection{c.Repos, c.Tag, c.Set}, pass, func(ws *state.WorkspaceState, agent string, cs state.CopyState) *copyJob {
-		job := copyJobFor(cfg, st, ws, agent, cs, true)
+		job := copyJobFor(cfg, st, ws, agent, cs, !c.NoBackup)
 		if policy := copyRemoteSync(cfg, st, ws.Name, cs); policy.Enabled && machine != "" {
 			job.offsite = offsiteFor(cfg, policy, machine, copyIdentity(st, cs), job.sshKey, cs.OffsiteStatus)
 		}
-		if job.backup == nil && job.offsite == nil {
+		if !c.NoFetch {
+			job.refresh = refreshSource(cfg, st, ws, cs)
+		}
+		if job.backup == nil && job.offsite == nil && job.refresh == "" {
 			return nil
 		}
 		return &job
 	})
 	return jobs, skippedRecent
+}
+
+// refreshSource is the clone a workspace copy is refreshed from: its repo's,
+// for a clone of a repo sync fetches; "" otherwise.
+func refreshSource(cfg *config.Config, st *state.State, ws *state.WorkspaceState, cs state.CopyState) string {
+	if ws.Isolation != config.IsolationClone && ws.Isolation != config.IsolationReferenceClone {
+		return ""
+	}
+	repo := st.Repos[cs.Repo]
+	if repo == nil || !repo.Cloned || repo.Status == "stale" || !cfg.ResolveForRepo(cs.Repo).Sync.Enabled {
+		return ""
+	}
+	return repo.LocalPath
+}
+
+// splitJobs separates tracked repos' jobs from workspace copies'.
+func splitJobs(jobs []copyJob) (repos, copies []copyJob) {
+	for _, j := range jobs {
+		if j.repoKey != "" {
+			repos = append(repos, j)
+		} else {
+			copies = append(copies, j)
+		}
+	}
+	return repos, copies
 }

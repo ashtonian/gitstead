@@ -26,9 +26,12 @@ type copyJob struct {
 	backup        *gitops.BackupConfig // nil skips the backup
 	backupTimeout time.Duration        // bounds the backup and the status read
 	fetch         bool
-	sshKey        string
-	sync          config.SyncConfig // fetch retries; timeout_per_repo bounds the fetch and the offsite push
-	offsite       *offsiteSpec      // nil keeps everything local
+	// refresh is the path of the repo's clone a workspace clone is brought
+	// up to date from, without the network, in place of a fetch.
+	refresh string
+	sshKey  string
+	sync    config.SyncConfig // fetch retries; timeout_per_repo bounds the fetch and the offsite push
+	offsite *offsiteSpec      // nil keeps everything local
 }
 
 // copyOutcome is what a run did to one copy.
@@ -78,10 +81,16 @@ func runCopy(ctx context.Context, log *slog.Logger, job copyJob) copyOutcome {
 			log.Warn("untracked paths left out of backup", "copy", job.label, "count", len(o.backup.Skipped), "paths", skippedSummary(o.backup.Skipped))
 		}
 	}
-	if job.fetch {
+	switch {
+	case job.fetch:
 		fctx, cancel := ctxutil.WithTimeout(ctx, job.sync.TimeoutPerRepo)
 		o.fetched, o.fetchErr = true, fetchWithRetry(fctx, job.path, job.sshKey, job.sync)
 		o.fetchErr = ctxutil.TimedOut(fctx, o.fetchErr, "fetch", job.sync.TimeoutPerRepo, "sync.timeout_per_repo")
+		cancel()
+	case job.refresh != "":
+		fctx, cancel := ctxutil.WithTimeout(ctx, job.sync.TimeoutPerRepo)
+		o.fetched, o.fetchErr = true, gitops.RefreshFromSource(fctx, job.path, job.refresh)
+		o.fetchErr = ctxutil.TimedOut(fctx, o.fetchErr, "refresh from the repo's clone", job.sync.TimeoutPerRepo, "sync.timeout_per_repo")
 		cancel()
 	}
 	// Offsite after the fetch, which tells which commits a remote already has.

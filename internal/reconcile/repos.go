@@ -330,7 +330,8 @@ func cloneInto(ctx context.Context, env *Env, d Repo) error {
 	}
 	ctx, cancel := ctxutil.WithTimeout(ctx, env.CloneTimeout)
 	defer cancel()
-	return ctxutil.TimedOut(ctx, gitops.Clone(ctx, d.URL, d.Path, sshKey), "clone", env.CloneTimeout, "sync.clone_timeout")
+	opts := gitops.CloneOptions{SSHKey: sshKey, Filter: d.Clone.Filter, Depth: d.Clone.Depth}
+	return ctxutil.TimedOut(ctx, gitops.Clone(ctx, d.URL, d.Path, opts), "clone", env.CloneTimeout, "sync.clone_timeout")
 }
 
 // WriteManagedConfig sets each wanted key that isn't set, and returns what it
