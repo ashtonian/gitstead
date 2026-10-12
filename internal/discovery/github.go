@@ -97,7 +97,7 @@ func (c *ghCore) list(ctx context.Context, scope Scope, rule config.DiscoveryRul
 			vis = rule.Visibility
 			applied[FilterVisibility] = true
 		}
-		repos, err := c.listAuthenticated(ctx, vis)
+		repos, err := c.listAuthenticated(ctx, vis, strings.Join(rule.Affiliation, ","))
 		return repos, applied, nil, err
 	}
 }
@@ -170,10 +170,11 @@ func (c *ghCore) listByUser(ctx context.Context, user string) ([]*github.Reposit
 	return all, nil
 }
 
-func (c *ghCore) listAuthenticated(ctx context.Context, visibility string) ([]*github.Repository, error) {
+func (c *ghCore) listAuthenticated(ctx context.Context, visibility, affiliation string) ([]*github.Repository, error) {
 	var all []*github.Repository
 	opts := &github.RepositoryListByAuthenticatedUserOptions{
 		Visibility:  visibility,
+		Affiliation: affiliation,
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
 	for {

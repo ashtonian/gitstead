@@ -1,7 +1,15 @@
 package discovery
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
+
+	"github.com/ashtonian/git-mgr/internal/config"
 
 	"github.com/google/go-github/v88/github"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
@@ -80,5 +88,34 @@ func TestGitLabToRepo(t *testing.T) {
 	}
 	if len(r.Topics) != 1 || r.Topics[0] != "a" {
 		t.Errorf("topics = %v", r.Topics)
+	}
+}
+
+// A rule with no selector lists the token's own repos, narrowed by
+// affiliation, through the authenticated-user endpoint -- the one that
+// returns private repos.
+func TestGitHubSelfScopeSendsAffiliation(t *testing.T) {
+	var query url.Values
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, query = r.URL.Path, r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `[{"id": 7, "name": "secret", "private": true, "owner": {"login": "me"}}]`)
+	}))
+	defer srv.Close()
+
+	p, err := NewGitHubProvider(config.Provider{Name: "gh", Type: "github", URL: srv.URL + "/api/v3/", Token: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := p.Discover(context.Background(), config.DiscoveryRule{Name: "me", Affiliation: []string{"owner"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(path, "/user/repos") || query.Get("affiliation") != "owner" {
+		t.Errorf("requested %s?%s, want /user/repos with affiliation=owner", path, query.Encode())
+	}
+	if len(res.Repos) != 1 || res.Repos[0].Visibility != "private" {
+		t.Errorf("repos = %+v", res.Repos)
 	}
 }

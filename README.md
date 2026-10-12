@@ -170,13 +170,15 @@ account's API. A provider that sets none uses `GITHUB_TOKEN` / `GITLAB_TOKEN` /
 ### Discovery rules
 
 Each rule selects repos from one provider. Use `org`/`user` for GitHub and
-Gitea, `group`/`user` for GitLab. Repos matching **any** rule are included.
+Gitea, `group`/`user` for GitLab. A rule with none of them lists the token's own
+repos, private ones included; a named `user` lists only that user's public
+repos. Repos matching **any** rule are included.
 
 ```yaml
 discovery:
   - name: "personal"
-    provider: "github.com"
-    user: "your-login"
+    provider: "github.com"            # no user/org: the token's own repos
+    affiliation: [owner]              # GitHub: owner | collaborator | organization_member
     tags: ["personal"]
 
   - name: "work-services"

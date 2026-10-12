@@ -110,3 +110,20 @@ func TestValidate_RequiredSSHSigningNeedsAKey(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestValidate_AffiliationOnlyForGitHubSelfRules(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Providers = []config.Provider{{Name: "gh", Type: "github"}, {Name: "gl", Type: "gitlab"}}
+	cfg.Discovery = []config.DiscoveryRule{{Name: "mine", Provider: "gh", Affiliation: []string{"owner"}}}
+	if err := config.Validate(cfg); err != nil {
+		t.Fatalf("self rule with affiliation: %v", err)
+	}
+	cfg.Discovery[0].Org = "acme"
+	if err := config.Validate(cfg); err == nil {
+		t.Error("affiliation with an org selector must be rejected")
+	}
+	cfg.Discovery[0] = config.DiscoveryRule{Name: "lab", Provider: "gl", Affiliation: []string{"owner"}}
+	if err := config.Validate(cfg); err == nil {
+		t.Error("affiliation on a gitlab rule must be rejected")
+	}
+}

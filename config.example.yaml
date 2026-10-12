@@ -130,6 +130,8 @@ discovery:
   #   provider: "ghes.company.com"
   #   org: "platform"
   #   name_pattern: "^svc-"                # Only repos starting with "svc-"
+  #   affiliation: [owner]                 # GitHub rule without user/org: only repos the token's
+  #                                        # account owns (also: collaborator, organization_member)
   #   tags: ["work", "services"]
 
   # Filter by topic
