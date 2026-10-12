@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -12,9 +13,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// checkKeys fails on a key in the config file that is not a setting. The
-// loader ignores unknown keys, so a misspelt or renamed one would otherwise
-// silently fall back to its default.
+// checkKeys fails on the keys in the config file that are not settings,
+// naming every one. The loader ignores unknown keys, so a misspelt or renamed
+// one would otherwise silently fall back to its default.
 func checkKeys(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -24,50 +25,48 @@ func checkKeys(path string) error {
 	if yaml.Unmarshal(data, &doc) != nil || doc == nil {
 		return nil // the loader reports parse errors
 	}
-	if err := walkKeys(doc, reflect.TypeFor[Config](), ""); err != nil {
-		return fmt.Errorf("config %s: %w", path, err)
+	var unknown []error
+	walkKeys(doc, reflect.TypeFor[Config](), "", &unknown)
+	if len(unknown) > 0 {
+		return fmt.Errorf("config %s: %w", path, errors.Join(unknown...))
 	}
 	return nil
 }
 
 var durationType = reflect.TypeFor[time.Duration]()
 
-func walkKeys(v any, t reflect.Type, at string) error {
+func walkKeys(v any, t reflect.Type, at string, unknown *[]error) {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	switch t.Kind() {
 	case reflect.Struct:
 		if t == durationType {
-			return nil
+			return
 		}
 		m, ok := v.(map[string]any)
 		if !ok {
-			return nil // a type mismatch is the loader's to report
+			return // a type mismatch is the loader's to report
 		}
 		fields := settings(t)
 		for _, key := range slices.Sorted(maps.Keys(m)) {
 			f, ok := fields[key]
 			if !ok {
-				return unknownKey(join(at, key), key, fields)
+				*unknown = append(*unknown, unknownKey(join(at, key), key, fields))
+				continue
 			}
-			if err := walkKeys(m[key], f.Type, join(at, key)); err != nil {
-				return err
-			}
+			walkKeys(m[key], f.Type, join(at, key), unknown)
 		}
 	case reflect.Slice:
 		items, ok := v.([]any)
 		if !ok {
-			return nil
+			return
 		}
 		for i, item := range items {
-			if err := walkKeys(item, t.Elem(), fmt.Sprintf("%s[%d]", at, i)); err != nil {
-				return err
-			}
+			walkKeys(item, t.Elem(), fmt.Sprintf("%s[%d]", at, i), unknown)
 		}
 	}
 	// Maps (agents) take any key; scalars have none.
-	return nil
 }
 
 // settings maps a struct's koanf keys to its fields, embedded structs
@@ -91,7 +90,9 @@ func settings(t reflect.Type) map[string]reflect.StructField {
 }
 
 func unknownKey(path, key string, fields map[string]reflect.StructField) error {
-	best, bestDist := "", 3 // suggest only close matches
+	// Suggest only close matches: within a third of the key's length, so a
+	// renamed max_per_repo finds max_per_copy but remote_name finds nothing.
+	best, bestDist := "", max(2, len(key)/3)+1
 	for name := range fields {
 		if d := editDistance(key, name); d < bestDist || d == bestDist && name < best {
 			best, bestDist = name, d
