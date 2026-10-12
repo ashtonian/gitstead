@@ -185,17 +185,22 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 		}
 	}
 
-	// Prune old backups
-	if cfg.MaxPerRepo > 0 {
-		pruneRefs(ctx, repoPath, cfg.MaxPerRepo)
-		prunePatchDirs(repoPath, cfg)
-	}
-
 	// A dirty repo for which no strategy produced a backup is a silent
 	// data-loss risk: the caller would otherwise record it as backed up. A
 	// pushed WIP branch also counts as the work being saved.
 	if result.IsDirty && result.RefName == "" && !result.HasPatch && result.PushedBranch == "" {
 		return result, fmt.Errorf("backup failed: no backup strategy succeeded for dirty repo %s", repoPath)
+	}
+
+	// Prune only the kinds this run just added to, so a failed run can never
+	// push out the last good backup.
+	if cfg.MaxPerRepo > 0 {
+		if result.RefName != "" {
+			pruneRefs(ctx, repoPath, cfg.MaxPerRepo)
+		}
+		if result.HasPatch {
+			prunePatchDirs(repoPath, cfg)
+		}
 	}
 
 	return result, nil
@@ -238,34 +243,43 @@ func detectWorkingTreeState(ctx context.Context, repoPath string) workingTreeSta
 	}
 }
 
+// partialSuffix marks a patch backup still being written. Only complete
+// backups carry a bare timestamp name, so retention never counts a partial one.
+const partialSuffix = ".partial"
+
+// createPatchBackup writes the staged and unstaged diffs, the untracked files
+// and metadata into a new timestamped directory. It builds the directory under
+// a partial name and publishes it with one rename, so a failure leaves nothing
+// that looks like a backup.
 func createPatchBackup(ctx context.Context, repoPath string, cfg BackupConfig, timestamp string, wt *workingTreeState) error {
 	repoName := filepath.Base(repoPath)
 	parentName := filepath.Base(filepath.Dir(repoPath))
 	patchDir := filepath.Join(cfg.PatchDir, parentName, repoName, timestamp)
+	partial := patchDir + partialSuffix
 
-	if err := os.MkdirAll(patchDir, 0700); err != nil {
+	if err := os.MkdirAll(partial, 0700); err != nil {
 		return fmt.Errorf("creating patch dir: %w", err)
 	}
+	if err := writePatchFiles(ctx, repoPath, partial, cfg, timestamp, wt); err != nil {
+		os.RemoveAll(partial)
+		return err
+	}
+	if err := os.Rename(partial, patchDir); err != nil {
+		os.RemoveAll(partial)
+		return fmt.Errorf("publishing patch backup: %w", err)
+	}
+	return nil
+}
 
+func writePatchFiles(ctx context.Context, repoPath, patchDir string, cfg BackupConfig, timestamp string, wt *workingTreeState) error {
 	if wt.HasStaged {
-		patch, err := Git(ctx, repoPath, "diff", "--cached", "--binary", "--no-color")
-		if err != nil {
-			slog.Warn("failed to get staged diff", "repo", repoPath, "error", err)
-		} else if patch != "" {
-			if err := os.WriteFile(filepath.Join(patchDir, "staged.patch"), []byte(patch), 0600); err != nil {
-				return fmt.Errorf("writing staged patch: %w", err)
-			}
+		if err := writeDiff(ctx, repoPath, filepath.Join(patchDir, "staged.patch"), "--cached"); err != nil {
+			return fmt.Errorf("staged diff: %w", err)
 		}
 	}
-
 	if wt.HasUnstaged {
-		patch, err := Git(ctx, repoPath, "diff", "--binary", "--no-color")
-		if err != nil {
-			slog.Warn("failed to get unstaged diff", "repo", repoPath, "error", err)
-		} else if patch != "" {
-			if err := os.WriteFile(filepath.Join(patchDir, "unstaged.patch"), []byte(patch), 0600); err != nil {
-				return fmt.Errorf("writing unstaged patch: %w", err)
-			}
+		if err := writeDiff(ctx, repoPath, filepath.Join(patchDir, "unstaged.patch")); err != nil {
+			return fmt.Errorf("unstaged diff: %w", err)
 		}
 	}
 
@@ -277,9 +291,8 @@ func createPatchBackup(ctx context.Context, repoPath string, cfg BackupConfig, t
 			if err := os.WriteFile(filepath.Join(patchDir, "untracked.list"), []byte(strings.Join(filtered, "\n")), 0600); err != nil {
 				return fmt.Errorf("writing untracked list: %w", err)
 			}
-			tarPath := filepath.Join(patchDir, "untracked.tar.gz")
-			if err := createTar(ctx, repoPath, tarPath, filtered); err != nil {
-				slog.Debug("tar failed, file list saved", "repo", repoPath, "error", err)
+			if err := createTar(ctx, repoPath, filepath.Join(patchDir, "untracked.tar.gz"), filtered); err != nil {
+				return fmt.Errorf("archiving untracked files: %w", err)
 			}
 		}
 	}
@@ -314,6 +327,19 @@ func createPatchBackup(ctx context.Context, repoPath string, cfg BackupConfig, t
 	}
 
 	return nil
+}
+
+// writeDiff writes `git diff --binary` output, with any extra args, to path
+// byte for byte.
+func writeDiff(ctx context.Context, repoPath, path string, args ...string) error {
+	patch, err := GitOutput(ctx, repoPath, append([]string{"diff", "--binary", "--no-color"}, args...)...)
+	if err != nil {
+		return err
+	}
+	if len(patch) == 0 {
+		return nil
+	}
+	return os.WriteFile(path, patch, 0600)
 }
 
 // filterUntrackedFiles splits ls-files output and filters out large files (>50MB).
@@ -374,7 +400,7 @@ func prunePatchDirs(repoPath string, cfg BackupConfig) {
 
 	var dirs []string
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() && !strings.HasSuffix(e.Name(), partialSuffix) {
 			dirs = append(dirs, e.Name())
 		}
 	}

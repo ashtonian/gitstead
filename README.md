@@ -296,8 +296,11 @@ branches, or stash list. Two complementary strategies:
 
 Guarantees: never modifies the working tree/index/branches/stash; skips locked
 repos (`.git/index.lock`); excludes oversized untracked files; auto-prunes old
-backups (`max_per_repo`). A dirty repo whose backup fails is reported as an
-error, never silently recorded as backed up.
+backups (`max_per_repo`). Patches are saved byte for byte, so `git apply`
+reproduces the index and working tree exactly. A patch backup is written to a
+temporary folder and published only when every part succeeded, and old backups
+are pruned only after a new one succeeds. A dirty repo whose backup fails is
+reported as an error, never silently recorded as backed up.
 
 ```bash
 git-mgr backup --list --repos "*/my-repo"
