@@ -85,7 +85,41 @@ func Validate(cfg *Config) error {
 	if err := validateWorkspaces(cfg); err != nil {
 		return err
 	}
+	if err := validateClone(cfg); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+// filterRE matches the partial clone filters git-mgr accepts.
+var filterRE = regexp.MustCompile(`^(blob:none|blob:limit=[0-9]+[kmg]?|tree:[0-9]+)$`)
+
+// validateClone checks clone filters wherever they are set.
+func validateClone(cfg *Config) error {
+	check := func(where, filter string) error {
+		if filter != "" && !filterRE.MatchString(filter) {
+			return fmt.Errorf("%s: clone.filter %q: use blob:none, blob:limit=<size> or tree:<depth>", where, filter)
+		}
+		return nil
+	}
+	if err := check("config", cfg.Clone.Filter); err != nil {
+		return err
+	}
+	for _, a := range cfg.Accounts {
+		if a.Clone != nil && a.Clone.Filter != nil {
+			if err := check(fmt.Sprintf("account %q", a.Name), *a.Clone.Filter); err != nil {
+				return err
+			}
+		}
+	}
+	for _, o := range cfg.Overrides {
+		if o.Clone != nil && o.Clone.Filter != nil {
+			if err := check(fmt.Sprintf("override %v", o.Repos), *o.Clone.Filter); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 

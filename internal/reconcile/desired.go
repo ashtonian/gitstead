@@ -72,8 +72,9 @@ type Repo struct {
 	Account    string   // the account covering it; "" for none
 	Tags       []string // sorted
 	UserTags   []string
-	Rule       string            // discovering rule; "_manual" for repos: entries
-	Config     map[string]string // managed repo-local git config, by lower-case key
+	Rule       string             // discovering rule; "_manual" for repos: entries
+	Config     map[string]string  // managed repo-local git config, by lower-case key
+	Clone      config.CloneConfig // how a new clone is made
 
 	// Pinned repos were added by hand: their path and URL are the recorded
 	// ones, never derived from config.
@@ -119,6 +120,7 @@ func (r *Repo) access(cfg *config.Config) {
 	}
 	r.accountConfig = AccountConfig(a)
 	r.Config = managedConfig(r.URL, r.SSHKey, r.accountConfig)
+	r.Clone = cfg.CloneFor(r.Key, r.Rule)
 }
 
 // Repos returns what config wants for every repo this run can judge: those

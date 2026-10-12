@@ -347,6 +347,22 @@ commit as the right account; worktrees share their repo's config. If you set one
 reports the difference (see [Config changes](#config-changes-plan-and-apply)).
 Changing an account updates every repo it covers on the next `sync` or `apply`.
 
+### Partial and shallow clones
+
+Big repos can be cloned without every file's history: `clone.filter` makes a
+partial clone (git fetches file contents as they are checked out) and
+`clone.depth` keeps only recent commits, on every branch. Set them at the top,
+per account (`accounts[].clone`) or per repo (`overrides[].clone`). They apply
+to new clones; an existing clone keeps how it was made.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `clone.filter` | `""` | `blob:none`, `blob:limit=<size>` or `tree:<depth>`; empty clones every object. |
+| `clone.depth` | `0` | Commits of history per branch; 0 keeps all. |
+
+Workspace worktrees share their repo's clone, filter and depth included.
+Workspace clones can't be made from a partial clone, so `plan` blocks them.
+
 ### Manual repos, excludes, overrides, tags
 
 ```yaml
@@ -646,10 +662,11 @@ clone, its *source*, so nothing is downloaded twice:
 | `shared` | none: every agent works in one folder | — | The workspace's `path`, or its one repo's clone. |
 
 A clone's `origin` is the repo's upstream, and a `git-mgr` remote points at the
-source (its branches show as `git-mgr/<branch>`). `ws fetch` fetches each source
-once and brings the clones' view of origin up to date from it. A source made
-with a partial clone filter can only have worktrees: a clone can't fetch the
-objects it lacks through it.
+source (its branches show as `git-mgr/<branch>`). `git-mgr sync` fetches each
+repo once and then brings its clones' view of origin up to date from the
+source, without the network; `ws fetch` does the same for one workspace. A
+source made with a partial clone filter (`clone.filter`) can only have
+worktrees: a clone can't fetch the objects it lacks through it.
 
 Each new copy gets the branch `agents/<workspace>/<agent>` (`branch:`), made at
 the upstream's default branch (`base_ref:` to change it). A branch the remote
@@ -690,7 +707,7 @@ that act on copies take `--agent` to pick one agent's.
 
 `git-mgr sync` backs up every copy (and, with `remote_sync`, takes it
 offsite) under the policy of the repo it is a copy of, then the workspace's
-own `remote_sync`.
+own `remote_sync`, after its repos are fetched.
 
 | Key | Default | Meaning |
 | --- | --- | --- |

@@ -426,3 +426,28 @@ func TestApply_ClonesARepoNamedByURL(t *testing.T) {
 		t.Fatalf("repos = %v", w.st.Repos)
 	}
 }
+
+// A repo cloned with a partial filter only gets worktrees: a clone made from
+// it couldn't fetch what it lacks.
+func TestPlan_ClonesOfAPartialRepoAreBlocked(t *testing.T) {
+	root := t.TempDir()
+	w := newWorld(t, root)
+	w.cfg.Repos = []config.ManualRepo{{URL: bareRemote(t, root, "app")}}
+	w.converge()
+	w.cfg.Workspaces = []config.Workspace{{Name: "app", Repos: []string{"local/remotes/app"}, Isolation: "clone"}}
+
+	filter := "blob:none"
+	w.cfg.Overrides = []config.Override{{Repos: []string{"local/remotes/app"}, Clone: &config.CloneOverride{Filter: &filter}}}
+	p := workspace.Compute(context.Background(), w.cfg, w.st, w.scope())
+	if len(p.Blocked) != 1 || !strings.Contains(p.Blocked[0].Reason, "clone.filter") {
+		t.Fatalf("blocked = %+v", p.Blocked)
+	}
+
+	// A clone made partial by hand is caught on disk.
+	w.cfg.Overrides = nil
+	mustGit(t, w.st.Repos["local/remotes/app"].LocalPath, "config", "remote.origin.promisor", "true")
+	p = workspace.Compute(context.Background(), w.cfg, w.st, w.scope())
+	if len(p.Blocked) != 1 || !strings.Contains(p.Blocked[0].Reason, "is partial") {
+		t.Fatalf("blocked = %+v", p.Blocked)
+	}
+}

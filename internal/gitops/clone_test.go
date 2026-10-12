@@ -34,7 +34,7 @@ func TestClone(t *testing.T) {
 	}
 
 	dest := filepath.Join(parent, "app")
-	if err := gitops.Clone(ctx, remote, dest, ""); err != nil {
+	if err := gitops.Clone(ctx, remote, dest, gitops.CloneOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if !gitops.HasGitDir(dest) {
@@ -54,7 +54,7 @@ func TestClone(t *testing.T) {
 func TestClone_Failure_LeavesNothing(t *testing.T) {
 	parent := t.TempDir()
 	dest := filepath.Join(parent, "app")
-	err := gitops.Clone(context.Background(), filepath.Join(parent, "no-such-remote.git"), dest, "")
+	err := gitops.Clone(context.Background(), filepath.Join(parent, "no-such-remote.git"), dest, gitops.CloneOptions{})
 	if err == nil {
 		t.Fatal("cloning a missing remote succeeded")
 	}
@@ -74,7 +74,7 @@ func TestClone_KeepsWhatIsThere(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(dest, "notes.txt"), []byte("mine\n"))
 
-	err := gitops.Clone(context.Background(), remote, dest, "")
+	err := gitops.Clone(context.Background(), remote, dest, gitops.CloneOptions{})
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("Clone onto a non-empty dir = %v", err)
 	}
@@ -87,7 +87,7 @@ func TestClone_KeepsWhatIsThere(t *testing.T) {
 	if err := os.Mkdir(empty, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := gitops.Clone(context.Background(), remote, empty, ""); err != nil {
+	if err := gitops.Clone(context.Background(), remote, empty, gitops.CloneOptions{}); err != nil {
 		t.Fatalf("Clone into an empty dir: %v", err)
 	}
 }
@@ -105,4 +105,26 @@ func stagingDirs(t *testing.T, dir string) []string {
 		}
 	}
 	return out
+}
+
+// A partial, shallow clone keeps every branch: agents' copies need them.
+func TestClone_FilterAndDepth(t *testing.T) {
+	ctx := context.Background()
+	upstream, _ := sourceFixture(t)
+	mustGit(t, upstream, "config", "uploadpack.allowFilter", "true")
+	pushUpstream(t, upstream, "second")
+	dest := filepath.Join(t.TempDir(), "app")
+
+	if err := gitops.Clone(ctx, "file://"+upstream, dest, gitops.CloneOptions{Filter: "blob:none", Depth: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if !gitops.IsPartial(ctx, dest) {
+		t.Error("the clone isn't partial")
+	}
+	if got := mustGit(t, dest, "rev-list", "--count", "HEAD"); got != "1" {
+		t.Errorf("history depth = %s, want 1", got)
+	}
+	if !strings.Contains(mustGit(t, dest, "for-each-ref", "--format=%(refname)"), "refs/remotes/origin/feature") {
+		t.Error("a shallow clone should keep every branch")
+	}
 }

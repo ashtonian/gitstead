@@ -23,6 +23,7 @@ type Config struct {
 	Exclude     []ExcludeRule    `koanf:"exclude"       yaml:"exclude"        validate:"dive"`
 	Sets        []RepoSet        `koanf:"sets"          yaml:"sets,omitempty" validate:"dive"`
 	Overrides   []Override       `koanf:"overrides"     yaml:"overrides"      validate:"dive"`
+	Clone       CloneConfig      `koanf:"clone"         yaml:"clone,omitempty"`
 	Sync        SyncConfig       `koanf:"sync"          yaml:"sync"`
 	Cleanup     CleanupConfig    `koanf:"cleanup"       yaml:"cleanup"`
 	Backup      BackupCfg        `koanf:"backup"        yaml:"backup"`
@@ -52,6 +53,8 @@ type Account struct {
 	// RemoteSync sets remote_sync for the account's repos, under any
 	// override's.
 	RemoteSync *RemoteSyncOverride `koanf:"remote_sync" yaml:"remote_sync,omitempty"`
+	// Clone shapes new clones of the account's repos, under any override's.
+	Clone *CloneOverride `koanf:"clone" yaml:"clone,omitempty"`
 }
 
 // Signing is how commits and tags in an account's repos are signed.
@@ -192,6 +195,7 @@ type Override struct {
 	Sync          *SyncOverride       `koanf:"sync"          yaml:"sync,omitempty"`
 	Backup        *BackupOverride     `koanf:"backup"        yaml:"backup,omitempty"`
 	RemoteSync    *RemoteSyncOverride `koanf:"remote_sync"   yaml:"remote_sync,omitempty"`
+	Clone         *CloneOverride      `koanf:"clone"         yaml:"clone,omitempty"`
 }
 
 // SyncOverride overrides SyncConfig fields per repo. A nil pointer means "not set".
@@ -250,6 +254,35 @@ func (o *RemoteSyncOverride) apply(r *RemoteSyncConfig) {
 	}
 	if o.Keep != nil {
 		r.Keep = *o.Keep
+	}
+}
+
+// CloneConfig shapes new clones of tracked repos. Workspace worktrees share
+// their repo's clone, and so its filter and depth.
+type CloneConfig struct {
+	// Filter is a partial clone filter: blob:none, blob:limit=<n>[kmg] or
+	// tree:<depth>. Empty clones every object.
+	Filter string `koanf:"filter" yaml:"filter,omitempty"`
+	// Depth limits history to that many commits on every branch; 0 is all.
+	Depth int `koanf:"depth" yaml:"depth,omitempty" validate:"min=0"`
+}
+
+// CloneOverride sets CloneConfig fields for an account or repos. A nil
+// pointer means "not set".
+type CloneOverride struct {
+	Filter *string `koanf:"filter" yaml:"filter,omitempty"`
+	Depth  *int    `koanf:"depth"  yaml:"depth,omitempty"  validate:"omitempty,min=0"`
+}
+
+func (o *CloneOverride) apply(c *CloneConfig) {
+	if o == nil {
+		return
+	}
+	if o.Filter != nil {
+		c.Filter = *o.Filter
+	}
+	if o.Depth != nil {
+		c.Depth = *o.Depth
 	}
 }
 
