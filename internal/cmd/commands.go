@@ -171,6 +171,9 @@ func (c *StatusCmd) runTable(st *state.State, pass func(string, *state.RepoState
 		if !repo.LastBackup.IsZero() {
 			backupAge = timeAgo(repo.LastBackup)
 		}
+		if repo.LastBackupError != "" {
+			backupAge = "failed"
+		}
 
 		tags := strings.Join(repo.Tags, ",")
 

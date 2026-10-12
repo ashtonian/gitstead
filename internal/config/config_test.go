@@ -225,8 +225,8 @@ overrides:
 	if !r.Backup.IncludeUntracked {
 		t.Error("include_untracked must stay true (default) when not overridden")
 	}
-	if r.Backup.MaxPerRepo != 10 {
-		t.Errorf("max_per_repo: got %d, want default 10", r.Backup.MaxPerRepo)
+	if r.Backup.MaxPerCopy != 100 {
+		t.Errorf("max_per_copy: got %d, want default 100", r.Backup.MaxPerCopy)
 	}
 	if r.Sync.TimeoutPerRepo != 30*time.Second {
 		t.Errorf("timeout_per_repo: got %v, want 30s", r.Sync.TimeoutPerRepo)

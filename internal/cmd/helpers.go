@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,6 +14,11 @@ import (
 	"github.com/ashtonian/git-mgr/internal/oplog"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
 
 // isHTTPURL reports whether u is an http(s) clone URL (vs ssh/scp).
 func isHTTPURL(u string) bool {

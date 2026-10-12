@@ -122,13 +122,17 @@ type SyncOverride struct {
 
 // BackupOverride overrides BackupCfg fields per repo. A nil pointer means "not set".
 type BackupOverride struct {
-	Enabled          *bool   `koanf:"enabled"           yaml:"enabled,omitempty"`
-	Strategy         *string `koanf:"strategy"          yaml:"strategy,omitempty"          validate:"omitempty,oneof=stash-ref patch both"`
-	IncludeUntracked *bool   `koanf:"include_untracked" yaml:"include_untracked,omitempty"`
-	MaxPerRepo       *int    `koanf:"max_per_repo"      yaml:"max_per_repo,omitempty"      validate:"omitempty,min=0"`
-	PatchDir         *string `koanf:"patch_dir"         yaml:"patch_dir,omitempty"`
-	PushBranch       *bool   `koanf:"push_branch"       yaml:"push_branch,omitempty"`
-	PushRemote       *string `koanf:"push_remote"       yaml:"push_remote,omitempty"`
+	Enabled             *bool          `koanf:"enabled"           yaml:"enabled,omitempty"`
+	Strategy            *string        `koanf:"strategy"          yaml:"strategy,omitempty"          validate:"omitempty,oneof=stash-ref patch both"`
+	IncludeUntracked    *bool          `koanf:"include_untracked" yaml:"include_untracked,omitempty"`
+	PatchDir            *string        `koanf:"patch_dir"         yaml:"patch_dir,omitempty"`
+	KeepAll             *time.Duration `koanf:"keep_all"               yaml:"keep_all,omitempty"               validate:"omitempty,min=0"`
+	KeepDaily           *time.Duration `koanf:"keep_daily"             yaml:"keep_daily,omitempty"             validate:"omitempty,min=0"`
+	MaxPerCopy          *int           `koanf:"max_per_copy"           yaml:"max_per_copy,omitempty"           validate:"omitempty,min=0"`
+	MaxUntrackedFileMB  *int           `koanf:"max_untracked_file_mb"  yaml:"max_untracked_file_mb,omitempty"  validate:"omitempty,min=0"`
+	MaxUntrackedTotalMB *int           `koanf:"max_untracked_total_mb" yaml:"max_untracked_total_mb,omitempty" validate:"omitempty,min=0"`
+	PushBranch          *bool          `koanf:"push_branch"       yaml:"push_branch,omitempty"`
+	PushRemote          *string        `koanf:"push_remote"       yaml:"push_remote,omitempty"`
 }
 
 // RemoteSyncOverride overrides RemoteSyncConfig fields per repo. A nil pointer means "not set".
@@ -187,8 +191,15 @@ type BackupCfg struct {
 	Enabled          bool   `koanf:"enabled"           yaml:"enabled"           default:"true"`
 	Strategy         string `koanf:"strategy"          yaml:"strategy"          default:"both"  validate:"required,oneof=stash-ref patch both"`
 	IncludeUntracked bool   `koanf:"include_untracked" yaml:"include_untracked" default:"true"`
-	MaxPerRepo       int    `koanf:"max_per_repo"      yaml:"max_per_repo"      default:"10"    validate:"min=0"`
 	PatchDir         string `koanf:"patch_dir"         yaml:"patch_dir"`
+	// Retention per working copy: every backup younger than KeepAll, then the
+	// newest of each day younger than KeepDaily, then at most MaxPerCopy.
+	KeepAll    time.Duration `koanf:"keep_all"     yaml:"keep_all"     default:"24h"  validate:"min=0"`
+	KeepDaily  time.Duration `koanf:"keep_daily"   yaml:"keep_daily"   default:"336h" validate:"min=0"`
+	MaxPerCopy int           `koanf:"max_per_copy" yaml:"max_per_copy" default:"100"  validate:"min=0"`
+	// Untracked files over these limits are left out of a backup and reported.
+	MaxUntrackedFileMB  int `koanf:"max_untracked_file_mb"  yaml:"max_untracked_file_mb"  default:"50"  validate:"min=0"`
+	MaxUntrackedTotalMB int `koanf:"max_untracked_total_mb" yaml:"max_untracked_total_mb" default:"500" validate:"min=0"`
 	// ArchiveDir receives a git bundle of any unique work (uncommitted changes,
 	// untracked files, stashes, unpushed commits) before git-mgr deletes a
 	// clone or worktree, so no deletion loses work.

@@ -1,33 +1,38 @@
 package gitops
 
 import (
+	"archive/tar"
+	"bufio"
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // BackupConfig holds backup-related settings.
 type BackupConfig struct {
-	Strategy         string
-	IncludeUntracked bool
-	MaxPerRepo       int
-	PatchDir         string
+	Strategy  string // "stash-ref", "patch" or "both"
+	Limits    SnapshotLimits
+	Retention Retention
+	PatchDir  string
 
-	// PushBranch, when set, also force-pushes a snapshot of tracked changes to
-	// a recoverable branch (refs/heads/git-mgr/wip/<branch>) on PushRemote,
-	// using SSHKey for auth. Unlike the stash-ref backup (which lives in the
-	// hidden refs/git-mgr namespace), the WIP branch is a normal branch visible
-	// in the remote's UI, so dirty work is saved offsite and easy to recover.
+	// PushBranch, when set, also force-pushes the tracked changes to a
+	// recoverable branch (refs/heads/git-mgr/wip/<branch>) on PushRemote,
+	// using SSHKey for auth. Unlike the snapshot ref, which lives in the hidden
+	// refs/git-mgr namespace, the WIP branch is visible in the remote's UI.
 	PushBranch bool
 	PushRemote string
 	SSHKey     string
+
+	Now func() time.Time
 }
 
 // BackupOption is a functional option for BackupConfig.
@@ -36,9 +41,10 @@ type BackupOption func(*BackupConfig)
 // NewBackupConfig creates a BackupConfig with defaults and optional overrides.
 func NewBackupConfig(opts ...BackupOption) BackupConfig {
 	cfg := BackupConfig{
-		Strategy:         "both",
-		IncludeUntracked: true,
-		MaxPerRepo:       10,
+		Strategy:  "both",
+		Limits:    SnapshotLimits{Untracked: true, MaxFileBytes: 50 << 20, MaxTotalBytes: 500 << 20},
+		Retention: Retention{KeepAll: 24 * time.Hour, KeepDaily: 14 * 24 * time.Hour, Max: 100},
+		Now:       time.Now,
 	}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -52,17 +58,29 @@ func WithStrategy(s string) BackupOption { return func(c *BackupConfig) { c.Stra
 // WithPatchDir sets the directory where patch-strategy backups are written.
 func WithPatchDir(d string) BackupOption { return func(c *BackupConfig) { c.PatchDir = d } }
 
-// WithMaxPerRepo caps how many backups are retained per repo (0 = unlimited).
-func WithMaxPerRepo(n int) BackupOption { return func(c *BackupConfig) { c.MaxPerRepo = n } }
+// WithRetention sets which backups of a working copy are kept.
+func WithRetention(r Retention) BackupOption { return func(c *BackupConfig) { c.Retention = r } }
 
-// WithIncludeUntracked controls whether untracked files are included in patch backups.
+// WithIncludeUntracked controls whether untracked files are backed up.
 func WithIncludeUntracked(b bool) BackupOption {
-	return func(c *BackupConfig) { c.IncludeUntracked = b }
+	return func(c *BackupConfig) { c.Limits.Untracked = b }
 }
 
-// WithPushBranch enables pushing a snapshot of tracked changes to a recoverable
-// branch (refs/heads/git-mgr/wip/<branch>) on the given remote, using sshKey for
-// auth. An empty remote defaults to "origin".
+// WithUntrackedLimits caps the size of one untracked file and of all of them
+// together; 0 means no limit.
+func WithUntrackedLimits(maxFile, maxTotal int64) BackupOption {
+	return func(c *BackupConfig) {
+		c.Limits.MaxFileBytes = maxFile
+		c.Limits.MaxTotalBytes = maxTotal
+	}
+}
+
+// WithClock sets the clock that names and ages backups.
+func WithClock(now func() time.Time) BackupOption { return func(c *BackupConfig) { c.Now = now } }
+
+// WithPushBranch enables pushing the tracked changes to a recoverable branch
+// (refs/heads/git-mgr/wip/<branch>) on the given remote, using sshKey for auth.
+// An empty remote defaults to "origin".
 func WithPushBranch(remote, sshKey string) BackupOption {
 	return func(c *BackupConfig) {
 		c.PushBranch = true
@@ -74,350 +92,390 @@ func WithPushBranch(remote, sshKey string) BackupOption {
 	}
 }
 
-// backupRefPrefix is the ref namespace for transparent stash-ref backups. It is
-// deliberately outside refs/heads and refs/stash so it stays invisible to
-// git branch, git stash list, git log, and IDEs.
+// backupRefPrefix holds snapshot refs as <prefix><copy ID>/<backup ID>. It is
+// outside refs/heads and refs/stash, so it stays invisible to git branch, git
+// stash list, git log and IDEs. Linked worktrees share refs, which is why each
+// copy gets its own namespace.
 const backupRefPrefix = "refs/git-mgr/backups/"
 
-// BackupMetadata stores context about a backup for restoration.
-type BackupMetadata struct {
-	HeadCommit     string `json:"head_commit"`
-	CurrentBranch  string `json:"current_branch"`
-	Timestamp      string `json:"timestamp"`
-	InRebase       bool   `json:"in_rebase"`
-	InMerge        bool   `json:"in_merge"`
-	InCherryPick   bool   `json:"in_cherry_pick"`
-	HasStaged      bool   `json:"has_staged"`
-	HasUnstaged    bool   `json:"has_unstaged"`
-	UntrackedCount int    `json:"untracked_count"`
+// BackupOutcome is what a backup run did.
+type BackupOutcome int
+
+const (
+	BackupClean     BackupOutcome = iota // nothing uncommitted, nothing saved
+	BackupUnchanged                      // identical to the latest backup, which still stands
+	BackupSaved                          // a new backup was written
+)
+
+func (o BackupOutcome) String() string {
+	switch o {
+	case BackupUnchanged:
+		return "unchanged"
+	case BackupSaved:
+		return "saved"
+	default:
+		return "clean"
+	}
 }
 
-// BackupResult contains information about what was backed up.
+// BackupResult reports a backup run.
 type BackupResult struct {
-	IsDirty      bool
-	RefName      string
-	HasPatch     bool
-	PushedBranch string // WIP ref pushed to the remote, empty if none
-	Timestamp    string
+	Outcome       BackupOutcome
+	ID            string // backup holding the current state; "" when clean
+	CopyID        string
+	Ref           string // snapshot ref; "" if the strategy keeps none or it failed
+	PatchDir      string // patch backup directory; "" if the strategy keeps none or it failed
+	PushedBranch  string // WIP branch pushed to the remote; "" if none
+	Skipped       []SkippedFile
+	IndexUnmerged bool
 }
 
-// workingTreeState captures the state of a repo's working tree for backup.
-type workingTreeState struct {
-	HasStaged    bool
-	HasUnstaged  bool
-	HasUntracked bool
-	UntrackedOut string
-	InRebase     bool
-	InMerge      bool
-	InCherryPick bool
-}
+// Dirty reports whether the working copy had anything to back up.
+func (r *BackupResult) Dirty() bool { return r.Outcome != BackupClean }
 
-// Backup performs a transparent backup of uncommitted changes.
+// Backup saves the uncommitted state of the working copy at repoPath: staged
+// and unstaged changes and untracked files within cfg.Limits. It never touches
+// the working tree, the index, index.lock, branches or the stash.
+//
+// An unchanged state is not saved again. Old backups are pruned by
+// cfg.Retention, and only after a new one is complete. Every requested part
+// that fails is reported in the error; the result still describes what was
+// saved.
 func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResult, error) {
-	result := &BackupResult{}
-
-	// Pre-flight checks
-	if !HasGitDir(repoPath) {
-		return result, nil
+	res := &BackupResult{}
+	untracked := "--untracked-files=no"
+	if cfg.Limits.Untracked {
+		untracked = "--untracked-files=all"
 	}
-	if locked, lf := IsLocked(ctx, repoPath); locked {
-		slog.Warn("repo locked, skipping backup", "repo", repoPath, "lock", lf)
-		return result, nil
+	status, err := GitOutput(ctx, repoPath, "status", "--porcelain=v1", "-z", untracked)
+	if err != nil {
+		return res, fmt.Errorf("reading status of %s: %w", repoPath, err)
 	}
-
-	// Detect working tree state (all read-only operations)
-	wt := detectWorkingTreeState(ctx, repoPath)
-	if !wt.HasStaged && !wt.HasUnstaged && !wt.HasUntracked {
-		return result, nil
+	if len(status) == 0 {
+		return res, nil
 	}
 
-	result.IsDirty = true
-	timestamp := time.Now().UTC().Format("20060102T150405Z")
-	result.Timestamp = timestamp
-
-	// git stash create captures tracked (staged + unstaged) changes
-	// only, never untracked files. Under stash-ref-only that means
-	// untracked work is silently not backed up -- warn so it is not a
-	// surprise (strategy "both"/"patch" tars untracked files).
-	if cfg.Strategy == "stash-ref" && wt.HasUntracked {
-		slog.Warn("stash-ref backup does not capture untracked files; use strategy 'both' or 'patch' to back them up", "repo", repoPath)
+	snap, err := TakeSnapshot(ctx, repoPath, cfg.Limits)
+	if err != nil {
+		return res, fmt.Errorf("snapshotting %s: %w", repoPath, err)
+	}
+	res.Skipped, res.IndexUnmerged = snap.Skipped, snap.IndexUnmerged
+	if res.CopyID, err = CopyID(ctx, repoPath); err != nil {
+		return res, err
 	}
 
-	// Capture a snapshot commit of tracked (staged + unstaged) changes once.
-	// Both the stash-ref strategy and push-branch reuse this single snapshot;
-	// git stash create produces a real commit without touching the working tree.
-	var snapshotOID string
-	if cfg.Strategy == "stash-ref" || cfg.Strategy == "both" || cfg.PushBranch {
-		if oid, err := Git(ctx, repoPath, "stash", "create"); err != nil {
-			slog.Warn("failed to create stash snapshot", "repo", repoPath, "error", err)
-		} else {
-			snapshotOID = oid
+	wantRef := cfg.Strategy == "stash-ref" || cfg.Strategy == "both"
+	wantPatch := cfg.Strategy == "patch" || cfg.Strategy == "both"
+	backups, err := listCopyBackups(ctx, repoPath, cfg.PatchDir, res.CopyID)
+	if err != nil {
+		return res, err
+	}
+
+	var errs []error
+	if latest := lastBackup(backups); latest != nil && latest.snapshot() == snap.Commit &&
+		(!wantRef || latest.Ref != "") && (!wantPatch || latest.PatchDir != "") {
+		res.Outcome, res.ID, res.Ref, res.PatchDir = BackupUnchanged, latest.ID, latest.Ref, latest.PatchDir
+	} else {
+		id := newBackupID(cfg.Now(), latest)
+		if wantRef {
+			ref := backupRefPrefix + res.CopyID + "/" + id
+			if _, err := Git(ctx, repoPath, "update-ref", ref, snap.Commit, ""); err != nil {
+				errs = append(errs, fmt.Errorf("saving snapshot ref: %w", err))
+			} else {
+				res.Ref = ref
+			}
+		}
+		if wantPatch {
+			if dir, err := writePatchBackup(ctx, repoPath, cfg.PatchDir, res.CopyID, id, snap, cfg.Now()); err != nil {
+				errs = append(errs, fmt.Errorf("saving patch backup: %w", err))
+			} else {
+				res.PatchDir = dir
+			}
+		}
+		if res.Ref != "" || res.PatchDir != "" {
+			res.Outcome, res.ID = BackupSaved, id
+		}
+		// Prune only the kinds this run added to, so a failed run never
+		// pushes out the last good backup.
+		if res.Ref != "" {
+			pruneBackupRefs(ctx, repoPath, res.CopyID, cfg.Retention, cfg.Now())
+		}
+		if res.PatchDir != "" {
+			prunePatchBackups(cfg.PatchDir, res.CopyID, cfg.Retention, cfg.Now())
 		}
 	}
 
-	// Strategy: stash-ref
-	if (cfg.Strategy == "stash-ref" || cfg.Strategy == "both") && snapshotOID != "" {
-		refName := backupRefPrefix + timestamp
-		if _, err := Git(ctx, repoPath, "update-ref", refName, snapshotOID); err != nil {
-			slog.Warn("failed to create backup ref", "repo", repoPath, "error", err)
-		} else {
-			result.RefName = refName
-		}
-	}
-
-	// Strategy: patch
-	if cfg.Strategy == "patch" || cfg.Strategy == "both" {
-		if err := createPatchBackup(ctx, repoPath, cfg, timestamp, &wt); err != nil {
-			slog.Warn("patch backup failed", "repo", repoPath, "error", err)
-		} else {
-			result.HasPatch = true
-		}
-	}
-
-	// Push WIP to a recoverable remote branch, independent of strategy.
 	if cfg.PushBranch {
-		if snapshotOID == "" {
-			slog.Warn("push-branch: no tracked changes to push; untracked-only changes are not captured", "repo", repoPath)
-		} else if ref, err := pushWIPBranch(ctx, repoPath, cfg.PushRemote, cfg.SSHKey, snapshotOID); err != nil {
-			slog.Warn("push-branch failed", "repo", repoPath, "remote", cfg.PushRemote, "error", err)
+		if ref, err := pushWIPBranch(ctx, repoPath, cfg.PushRemote, cfg.SSHKey, snap); err != nil {
+			errs = append(errs, fmt.Errorf("pushing WIP branch to %s: %w", cfg.PushRemote, err))
 		} else {
-			result.PushedBranch = ref
+			res.PushedBranch = ref
 		}
 	}
-
-	// A dirty repo for which no strategy produced a backup is a silent
-	// data-loss risk: the caller would otherwise record it as backed up. A
-	// pushed WIP branch also counts as the work being saved.
-	if result.IsDirty && result.RefName == "" && !result.HasPatch && result.PushedBranch == "" {
-		return result, fmt.Errorf("backup failed: no backup strategy succeeded for dirty repo %s", repoPath)
+	if len(errs) > 0 {
+		return res, fmt.Errorf("backing up %s: %w", repoPath, errors.Join(errs...))
 	}
-
-	// Prune only the kinds this run just added to, so a failed run can never
-	// push out the last good backup.
-	if cfg.MaxPerRepo > 0 {
-		if result.RefName != "" {
-			pruneRefs(ctx, repoPath, cfg.MaxPerRepo)
-		}
-		if result.HasPatch {
-			prunePatchDirs(repoPath, cfg)
-		}
-	}
-
-	return result, nil
+	return res, nil
 }
 
-// pushWIPBranch force-pushes a snapshot commit to a recoverable branch on a
-// remote so dirty/WIP changes are saved offsite in addition to local backups.
-// The branch is namespaced under refs/heads/git-mgr/wip/<branch> and
-// force-updated each run so it always reflects the latest snapshot. It returns
-// the ref that was pushed.
-func pushWIPBranch(ctx context.Context, repoPath, remote, sshKey, snapshotOID string) (string, error) {
-	branch, err := Git(ctx, repoPath, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil || branch == "" || branch == "HEAD" {
-		branch = "detached" // detached HEAD: no branch name to mirror
+// newBackupID names a backup taken at now, later than latest so IDs stay
+// unique and ordered even within one millisecond.
+func newBackupID(now time.Time, latest *BackupInfo) string {
+	at := now.UTC().Truncate(time.Millisecond)
+	if latest != nil {
+		if prev, err := time.Parse(backupIDLayout, latest.ID); err == nil && !at.After(prev) {
+			at = prev.Add(time.Millisecond)
+		}
+	}
+	return at.Format(backupIDLayout)
+}
+
+// pushWIPBranch force-pushes the snapshot's tracked changes, on top of their
+// base commit, to refs/heads/git-mgr/wip/<branch> on remote. Untracked files
+// and the index are not pushed. It returns the ref that was pushed.
+func pushWIPBranch(ctx context.Context, repoPath, remote, sshKey string, snap Snapshot) (string, error) {
+	wip, err := wipCommit(ctx, repoPath, snap)
+	if err != nil {
+		return "", err
+	}
+	branch, err := Git(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
+	if err != nil || branch == "" {
+		branch = "detached"
 	}
 	wipRef := "refs/heads/git-mgr/wip/" + branch
-	refspec := snapshotOID + ":" + wipRef
-	if _, err := GitWithSSHKey(ctx, repoPath, sshKey, "push", "--force", remote, refspec); err != nil {
+	if _, err := GitWithSSHKey(ctx, repoPath, sshKey, "push", "--force", remote, wip+":"+wipRef); err != nil {
 		return "", err
 	}
 	return wipRef, nil
 }
 
-func detectWorkingTreeState(ctx context.Context, repoPath string) workingTreeState {
-	untrackedOut, err := Git(ctx, repoPath, "ls-files", "--others", "--exclude-standard")
-	if err != nil {
-		slog.Debug("failed to list untracked files", "repo", repoPath, "error", err)
-	}
-
-	gitDir := ResolveGitDirs(ctx, repoPath).GitDir
-	return workingTreeState{
-		HasStaged:    GitExitCode(ctx, repoPath, "diff", "--cached", "--quiet") != 0,
-		HasUnstaged:  GitExitCode(ctx, repoPath, "diff", "--quiet") != 0,
-		HasUntracked: untrackedOut != "",
-		UntrackedOut: untrackedOut,
-		InRebase: fileExists(filepath.Join(gitDir, "rebase-merge")) ||
-			fileExists(filepath.Join(gitDir, "rebase-apply")),
-		InMerge:      fileExists(filepath.Join(gitDir, "MERGE_HEAD")),
-		InCherryPick: fileExists(filepath.Join(gitDir, "CHERRY_PICK_HEAD")),
-	}
-}
-
 // partialSuffix marks a patch backup still being written. Only complete
-// backups carry a bare timestamp name, so retention never counts a partial one.
+// backups carry a bare ID, so listing and retention never see a partial one.
 const partialSuffix = ".partial"
 
-// createPatchBackup writes the staged and unstaged diffs, the untracked files
-// and metadata into a new timestamped directory. It builds the directory under
-// a partial name and publishes it with one rename, so a failure leaves nothing
-// that looks like a backup.
-func createPatchBackup(ctx context.Context, repoPath string, cfg BackupConfig, timestamp string, wt *workingTreeState) error {
-	repoName := filepath.Base(repoPath)
-	parentName := filepath.Base(filepath.Dir(repoPath))
-	patchDir := filepath.Join(cfg.PatchDir, parentName, repoName, timestamp)
-	partial := patchDir + partialSuffix
-
-	if err := os.MkdirAll(partial, 0700); err != nil {
-		return fmt.Errorf("creating patch dir: %w", err)
+// writePatchBackup exports snap as files under <patchRoot>/<copyID>/<id>: the
+// staged and unstaged changes as patches, the untracked files as a tarball,
+// and metadata.json. They outlive the repository. The directory is built under
+// a partial name and published with one rename.
+func writePatchBackup(ctx context.Context, repoPath, patchRoot, copyID, id string, snap Snapshot, now time.Time) (string, error) {
+	dir := filepath.Join(patchRoot, copyID, id)
+	partial := dir + partialSuffix
+	if err := os.MkdirAll(partial, 0o700); err != nil {
+		return "", fmt.Errorf("creating patch dir: %w", err)
 	}
-	if err := writePatchFiles(ctx, repoPath, partial, cfg, timestamp, wt); err != nil {
+	if err := writePatchFiles(ctx, repoPath, partial, copyID, id, snap, now); err != nil {
 		os.RemoveAll(partial)
+		return "", err
+	}
+	if err := os.Rename(partial, dir); err != nil {
+		os.RemoveAll(partial)
+		return "", fmt.Errorf("publishing patch backup: %w", err)
+	}
+	if err := writeCopyRecord(ctx, repoPath, patchRoot, copyID); err != nil {
+		slog.Warn("recording copy for patch backups", "repo", repoPath, "error", err)
+	}
+	return dir, nil
+}
+
+func writePatchFiles(ctx context.Context, repoPath, dir, copyID, id string, snap Snapshot, now time.Time) error {
+	baseTree, err := treeOf(ctx, repoPath, snap.Base)
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(partial, patchDir); err != nil {
-		os.RemoveAll(partial)
-		return fmt.Errorf("publishing patch backup: %w", err)
+	if err := writeTreeDiff(ctx, repoPath, filepath.Join(dir, stagedPatch), baseTree, snap.Index+"^{tree}"); err != nil {
+		return fmt.Errorf("staged changes: %w", err)
 	}
-	return nil
+	if err := writeTreeDiff(ctx, repoPath, filepath.Join(dir, unstagedPatch), snap.Index+"^{tree}", snap.Commit+"^{tree}"); err != nil {
+		return fmt.Errorf("unstaged changes: %w", err)
+	}
+	if snap.Untracked != "" {
+		if err := writeTreeTarball(ctx, repoPath, snap.Untracked+"^{tree}", filepath.Join(dir, untrackedTarball)); err != nil {
+			return fmt.Errorf("untracked files: %w", err)
+		}
+	}
+	meta := BackupMeta{
+		ID: id, CopyID: copyID, Path: repoPath, Created: now.UTC(),
+		Snapshot: snap.Commit, Base: snap.Base, Branch: currentBranchLabel(ctx, repoPath),
+		IndexUnmerged: snap.IndexUnmerged, Skipped: snap.Skipped,
+	}
+	return writeJSON(filepath.Join(dir, metadataFile), meta)
 }
 
-func writePatchFiles(ctx context.Context, repoPath, patchDir string, cfg BackupConfig, timestamp string, wt *workingTreeState) error {
-	if wt.HasStaged {
-		if err := writeDiff(ctx, repoPath, filepath.Join(patchDir, "staged.patch"), "--cached"); err != nil {
-			return fmt.Errorf("staged diff: %w", err)
-		}
-	}
-	if wt.HasUnstaged {
-		if err := writeDiff(ctx, repoPath, filepath.Join(patchDir, "unstaged.patch")); err != nil {
-			return fmt.Errorf("unstaged diff: %w", err)
-		}
-	}
-
-	untrackedCount := 0
-	if wt.HasUntracked && cfg.IncludeUntracked {
-		filtered := filterUntrackedFiles(repoPath, wt.UntrackedOut)
-		untrackedCount = len(filtered)
-		if len(filtered) > 0 {
-			if err := os.WriteFile(filepath.Join(patchDir, "untracked.list"), []byte(strings.Join(filtered, "\n")), 0600); err != nil {
-				return fmt.Errorf("writing untracked list: %w", err)
-			}
-			if err := createTar(ctx, repoPath, filepath.Join(patchDir, "untracked.tar.gz"), filtered); err != nil {
-				return fmt.Errorf("archiving untracked files: %w", err)
-			}
-		}
-	}
-
-	// Metadata
-	head, err := Git(ctx, repoPath, "rev-parse", "HEAD")
-	if err != nil {
-		slog.Debug("failed to get HEAD", "repo", repoPath, "error", err)
-	}
-	branch, err := Git(ctx, repoPath, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil {
-		slog.Debug("failed to get branch", "repo", repoPath, "error", err)
-	}
-
-	meta := BackupMetadata{
-		HeadCommit:     head,
-		CurrentBranch:  branch,
-		Timestamp:      timestamp,
-		InRebase:       wt.InRebase,
-		InMerge:        wt.InMerge,
-		InCherryPick:   wt.InCherryPick,
-		HasStaged:      wt.HasStaged,
-		HasUnstaged:    wt.HasUnstaged,
-		UntrackedCount: untrackedCount,
-	}
-	metaJSON, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling metadata: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(patchDir, "metadata.json"), metaJSON, 0600); err != nil {
-		return fmt.Errorf("writing metadata: %w", err)
-	}
-
-	return nil
-}
-
-// writeDiff writes `git diff --binary` output, with any extra args, to path
-// byte for byte.
-func writeDiff(ctx context.Context, repoPath, path string, args ...string) error {
-	patch, err := GitOutput(ctx, repoPath, append([]string{"diff", "--binary", "--no-color"}, args...)...)
+// writeTreeDiff writes the binary diff between two trees to path, or nothing
+// when they are equal. Fixed options keep user diff settings out of the patch.
+func writeTreeDiff(ctx context.Context, repoPath, path, from, to string) error {
+	patch, err := GitOutput(ctx, repoPath, "diff", "--binary", "--no-color", "--no-ext-diff", "--no-textconv",
+		"--no-renames", "--no-relative", "--src-prefix=a/", "--dst-prefix=b/", from, to)
 	if err != nil {
 		return err
 	}
 	if len(patch) == 0 {
 		return nil
 	}
-	return os.WriteFile(path, patch, 0600)
+	return os.WriteFile(path, patch, 0o600)
 }
 
-// filterUntrackedFiles splits ls-files output and filters out large files (>50MB).
-func filterUntrackedFiles(repoPath, untrackedOut string) []string {
-	var filtered []string
-	for _, f := range strings.Split(untrackedOut, "\n") {
-		f = strings.TrimSpace(f)
-		if f == "" {
-			continue
-		}
-		info, err := os.Stat(filepath.Join(repoPath, f))
-		if err != nil || info.Size() > 50*1024*1024 {
-			continue
-		}
-		filtered = append(filtered, f)
+// writeTreeTarball writes every file of tree to a gzipped tar at path,
+// symlinks as symlinks and executables as executable. It reads blobs straight
+// from the object store, so paths need no quoting and attributes such as
+// export-ignore don't apply.
+func writeTreeTarball(ctx context.Context, repoPath, tree, path string) error {
+	listing, err := GitOutput(ctx, repoPath, "ls-tree", "-r", "-z", "--full-tree", tree)
+	if err != nil {
+		return err
 	}
-	return filtered
+	type entry struct{ mode, oid, path string }
+	var entries []entry
+	var oids strings.Builder
+	for _, rec := range strings.Split(strings.TrimSuffix(string(listing), "\x00"), "\x00") {
+		if rec == "" {
+			continue
+		}
+		meta, name, ok := strings.Cut(rec, "\t")
+		fields := strings.Fields(meta)
+		if !ok || len(fields) != 3 || fields[1] != "blob" {
+			return fmt.Errorf("unexpected ls-tree entry %q", rec)
+		}
+		entries = append(entries, entry{fields[0], fields[2], name})
+		oids.WriteString(fields[2] + "\n")
+	}
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+
+	// Cancelling on a write error stops cat-file, which would otherwise block
+	// on a full pipe and hang Wait.
+	catCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := gitCommand(catCtx, repoPath, nil, "cat-file", "--batch")
+	cmd.Stdin = strings.NewReader(oids.String())
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	batch := bufio.NewReader(stdout)
+	writeErr := func() error {
+		for _, e := range entries {
+			header, err := batch.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("reading %s: %w", e.path, err)
+			}
+			fields := strings.Fields(header)
+			if len(fields) != 3 || fields[0] != e.oid {
+				return fmt.Errorf("reading %s: unexpected cat-file header %q", e.path, strings.TrimSpace(header))
+			}
+			size, err := strconv.ParseInt(fields[2], 10, 64)
+			if err != nil {
+				return fmt.Errorf("reading %s: %w", e.path, err)
+			}
+			hdr := &tar.Header{Name: e.path, Mode: 0o644, Size: size, Typeflag: tar.TypeReg, ModTime: time.Unix(0, 0)}
+			switch e.mode {
+			case "100755":
+				hdr.Mode = 0o755
+			case "120000":
+				target := make([]byte, size)
+				if _, err := io.ReadFull(batch, target); err != nil {
+					return fmt.Errorf("reading %s: %w", e.path, err)
+				}
+				hdr.Typeflag, hdr.Linkname, hdr.Size, hdr.Mode = tar.TypeSymlink, string(target), 0, 0o777
+			}
+			if err := tw.WriteHeader(hdr); err != nil {
+				return err
+			}
+			if hdr.Typeflag == tar.TypeReg {
+				if _, err := io.CopyN(tw, batch, size); err != nil {
+					return fmt.Errorf("archiving %s: %w", e.path, err)
+				}
+			}
+			if _, err := batch.Discard(1); err != nil { // newline after each object
+				return fmt.Errorf("reading %s: %w", e.path, err)
+			}
+		}
+		return nil
+	}()
+	if writeErr != nil {
+		cancel()
+		cmd.Wait()
+		return writeErr
+	}
+	waitErr := cmd.Wait()
+	if waitErr != nil {
+		return fmt.Errorf("git cat-file: %w: %s", waitErr, strings.TrimSpace(stderr.String()))
+	}
+	if err := tw.Close(); err != nil {
+		return err
+	}
+	if err := gz.Close(); err != nil {
+		return err
+	}
+	return f.Close()
 }
 
-// createTar creates a gzipped tar of the given files relative to repoPath.
-func createTar(ctx context.Context, repoPath, tarPath string, files []string) error {
-	args := append([]string{"-czf", tarPath, "-C", repoPath}, files...)
-	cmd := exec.CommandContext(ctx, "tar", args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("tar: %w: %s", err, string(out))
+// writeCopyRecord notes in copy.json which working copy a patch backup
+// directory belongs to, so backups can be found after the copy is re-cloned.
+func writeCopyRecord(ctx context.Context, repoPath, patchRoot, copyID string) error {
+	return writeJSON(filepath.Join(patchRoot, copyID, copyRecordFile), copyRecord{
+		CopyID: copyID, Path: repoPath, Remotes: remoteURLs(ctx, repoPath),
+	})
+}
+
+// writeJSON writes v to path atomically.
+func writeJSON(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
 	}
 	return nil
 }
 
-// pruneRefs removes old backup refs, keeping only the most recent N.
-func pruneRefs(ctx context.Context, repoPath string, keep int) {
-	out, err := Git(ctx, repoPath, "for-each-ref", "--format=%(refname)", backupRefPrefix)
+func pruneBackupRefs(ctx context.Context, repoPath, copyID string, r Retention, now time.Time) {
+	prefix := backupRefPrefix + copyID + "/"
+	out, err := Git(ctx, repoPath, "for-each-ref", "--format=%(refname)", prefix)
 	if err != nil || out == "" {
 		return
 	}
-	refs := strings.Split(out, "\n")
-	if len(refs) <= keep {
-		return
+	var ids []string
+	for _, ref := range strings.Split(out, "\n") {
+		ids = append(ids, strings.TrimPrefix(ref, prefix))
 	}
-	sort.Strings(refs)
-	for _, ref := range refs[:len(refs)-keep] {
-		if _, err := Git(ctx, repoPath, "update-ref", "-d", ref); err != nil {
-			slog.Debug("failed to prune ref", "ref", ref, "error", err)
+	for _, id := range r.expired(ids, now) {
+		if _, err := Git(ctx, repoPath, "update-ref", "-d", prefix+id); err != nil {
+			slog.Warn("pruning backup ref", "repo", repoPath, "ref", prefix+id, "error", err)
 		}
 	}
 }
 
-// prunePatchDirs removes old patch directories, keeping only the most recent N.
-func prunePatchDirs(repoPath string, cfg BackupConfig) {
-	repoName := filepath.Base(repoPath)
-	parentName := filepath.Base(filepath.Dir(repoPath))
-	patchBase := filepath.Join(cfg.PatchDir, parentName, repoName)
-
-	entries, err := os.ReadDir(patchBase)
-	if err != nil {
-		return
-	}
-
-	var dirs []string
-	for _, e := range entries {
-		if e.IsDir() && !strings.HasSuffix(e.Name(), partialSuffix) {
-			dirs = append(dirs, e.Name())
+func prunePatchBackups(patchRoot, copyID string, r Retention, now time.Time) {
+	dir := filepath.Join(patchRoot, copyID)
+	for _, id := range r.expired(patchBackupIDs(dir), now) {
+		if err := os.RemoveAll(filepath.Join(dir, id)); err != nil {
+			slog.Warn("pruning patch backup", "dir", filepath.Join(dir, id), "error", err)
 		}
-	}
-	if len(dirs) <= cfg.MaxPerRepo {
-		return
-	}
-	sort.Strings(dirs)
-	for _, d := range dirs[:len(dirs)-cfg.MaxPerRepo] {
-		os.RemoveAll(filepath.Join(patchBase, d))
 	}
 }
 
-// ListBackupRefs lists all backup refs for a repo.
-func ListBackupRefs(ctx context.Context, repoPath string) ([]string, error) {
-	out, err := Git(ctx, repoPath, "for-each-ref", "--format=%(refname) %(objectname:short)", backupRefPrefix)
-	if err != nil || out == "" {
-		return nil, err
+// deleteCopyBackupRefs drops every snapshot ref of a copy, for a linked
+// worktree that is gone; its refs would otherwise live on in the shared repo.
+func deleteCopyBackupRefs(ctx context.Context, repoPath, copyID string) {
+	if copyID != "" {
+		deleteRefs(ctx, repoPath, backupRefPrefix+copyID+"/")
 	}
-	return strings.Split(out, "\n"), nil
 }

@@ -20,8 +20,9 @@ agents — keeping their WIP safe.
 - **Structured layout** — repos land at `{{.Host}}/{{.Owner}}/{{.Name}}` (fully
   templatable). Operate them in bulk with named **sets** (`--set`) and
   `run -- <cmd>`.
-- **Transparent backups** of uncommitted work via stash-refs and patch files —
-  never modifies your working tree, index, branches, or stash list; `restore`
+- **Transparent backups** of uncommitted work, per working copy and restorable
+  exactly — never touches your working tree, index, `index.lock`, branches or
+  stash list; `restore`
   recovers them (into a scratch dir or in place).
 - **Workgroups / agent fleets** — spin up N isolated worktrees or clones and run
   an agent in each pane (`wg create … --open --agent claude`); per-member backup,
@@ -285,34 +286,60 @@ git-mgr run    --set active-backend -- go test ./...
 
 ## Transparent backups
 
-The backup system saves uncommitted work without modifying your working tree,
-branches, or stash list. Two complementary strategies:
+Each backup is a snapshot of one working copy: the index, the tracked files in
+the working tree, and the untracked files (ignored files never). It is built in
+temporary index files, so it never touches your working tree, index, branches or
+stash, and never takes `index.lock`: a backup taken while an agent's
+`git commit` is running neither fails nor gets in its way.
 
-- **Stash refs** — `git stash create` produces a commit hash with no side
-  effects, stored under `refs/git-mgr/backups/<timestamp>`. Invisible to
-  `git branch`, `git stash list`, `git log`, and IDEs.
-- **Patch files** — `git diff` output plus a tar of untracked files, stored
-  outside the repo at `~/.local/share/git-mgr/patches/`.
+`backup.strategy` picks where snapshots are kept:
 
-Guarantees: never modifies the working tree/index/branches/stash; skips locked
-repos (`.git/index.lock`); excludes oversized untracked files; auto-prunes old
-backups (`max_per_repo`). Patches are saved byte for byte, so `git apply`
-reproduces the index and working tree exactly. A patch backup is written to a
-temporary folder and published only when every part succeeded, and old backups
-are pruned only after a new one succeeds. A dirty repo whose backup fails is
-reported as an error, never silently recorded as backed up.
+- **Snapshot refs** (`stash-ref`) — a commit in `git stash`'s own layout at
+  `refs/git-mgr/backups/<copy-id>/<backup-id>`, invisible to `git branch`,
+  `git stash list`, `git log` and IDEs. Restores with
+  `git stash apply --index <ref>`.
+- **Patch backups** (`patch`) — the same snapshot as `staged.patch`,
+  `unstaged.patch` and `untracked.tar.gz` under
+  `~/.local/share/git-mgr/patches/<copy-id>/<backup-id>/`. They outlive the repo:
+  a fresh clone at the same path finds the old copy's patch backups.
+- **`both`** (default).
+
+Guarantees:
+
+- **Exact restore.** Staged and unstaged changes stay separate; deletions,
+  binary files, files without a final newline, symlinks, executable bits and
+  non-ASCII names come back as they were.
+- **Per copy.** Every clone and every worktree has its own copy ID (kept in its
+  git directory), so agents in worktrees of one repo never overwrite or prune
+  each other's backups.
+- **No duplicates.** A state identical to the latest backup isn't saved again;
+  the run reports `unchanged since <id>`.
+- **Nothing silently skipped.** Untracked files over `max_untracked_file_mb`
+  (50) or past `max_untracked_total_mb` (500), unreadable files and nested git
+  repositories are left out *and reported* with the reason, in the command's
+  output and in the backup's metadata.
+- **Failures are loud.** A backup that fails, in whole or in part, makes
+  `backup`, `sync` and `wg backup` exit non-zero, is stored as
+  `last_backup_error`, and shows as `failed` in `status`. A patch backup is
+  written to a temporary folder and published only when complete, and pruning
+  runs only after a backup succeeds.
+- **Retention by age.** Per copy: every backup from the last 24 hours
+  (`keep_all`), then the newest of each day for 14 days (`keep_daily`), capped at
+  100 (`max_per_copy`). The newest backup is always kept.
 
 ```bash
 git-mgr backup --list --repos "*/my-repo"
-git-mgr backup --restore 20260417T103000Z --repos "*/my-repo"   # prints how to restore
+git-mgr restore github.com/me/my-repo                    # prints the restore commands
+git-mgr restore github.com/me/my-repo --into /tmp/look   # clone + restore into a scratch dir
+git-mgr restore github.com/me/my-repo --apply            # onto the clean working tree
 ```
 
 **Save WIP offsite** — `--push-branch` (or `backup.push_branch: true`) also
-force-pushes a snapshot of your uncommitted tracked changes to a recoverable
-branch `git-mgr/wip/<branch>` on the remote. Unlike the hidden stash-ref, it's a
-normal branch visible in the host's UI, so dirty work survives a lost laptop and
-is one `git fetch` away. The branch is force-updated each run; the working tree
-is never touched.
+force-pushes your uncommitted tracked changes, as one commit on top of HEAD, to
+a branch `git-mgr/wip/<branch>` on the remote. It's a normal branch visible in
+the host's UI, so dirty work survives a lost laptop. Untracked files and the
+staged/unstaged split are not pushed. Recover with
+`git fetch origin git-mgr/wip/<branch> && git cherry-pick --no-commit FETCH_HEAD`.
 
 ```bash
 git-mgr backup --push-branch --repos "*/my-repo"   # local backup + push WIP to git-mgr/wip/<branch>

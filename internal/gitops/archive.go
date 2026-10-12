@@ -40,9 +40,9 @@ const (
 // ArchiveUniqueWork saves the unique work of the clone at repoPath into one
 // verified git bundle in dir and returns its path, or "" when there is nothing
 // to save. The bundle holds local branches and HEAD minus what any remote
-// already has, every stash entry, and a snapshot commit of the working tree
-// with untracked files. A JSON file beside it records the remotes and the
-// restore command.
+// already has, every stash entry, and a snapshot of the index, working tree and
+// untracked files that `git stash apply --index` restores. A JSON file beside
+// it records the remotes and the restore command.
 func ArchiveUniqueWork(ctx context.Context, repoPath, dir, name string) (string, error) {
 	return archive(ctx, repoPath, dir, name, scopeClone)
 }
@@ -73,11 +73,15 @@ func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope
 		return err
 	}
 	if work.inWorkingTree() {
-		oid, err := SnapshotCommit(ctx, repoPath, "git-mgr archive: working tree")
+		// No limits: whatever the snapshot leaves out would be deleted.
+		snap, err := TakeSnapshot(ctx, repoPath, SnapshotLimits{Untracked: true})
 		if err != nil {
 			return "", fmt.Errorf("snapshotting working tree: %w", err)
 		}
-		if err := setRef("worktree", oid); err != nil {
+		if len(snap.Skipped) > 0 {
+			return "", fmt.Errorf("cannot archive %s (%s); move it out first", snap.Skipped[0].Path, snap.Skipped[0].Reason)
+		}
+		if err := setRef("worktree", snap.Commit); err != nil {
 			return "", err
 		}
 	}
@@ -120,7 +124,8 @@ func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope
 		Remotes: remoteURLs(ctx, repoPath),
 		Work:    work.String(),
 		Created: time.Now().UTC(),
-		Restore: fmt.Sprintf("git clone <remote> restored && cd restored && git fetch %s '+refs/*:refs/restored/*'", bundle),
+		Restore: fmt.Sprintf("git clone <remote> restored && cd restored && git fetch %s '+refs/*:refs/restored/*'"+
+			" && git stash apply --index refs/restored/%sworktree", bundle, strings.TrimPrefix(refs, "refs/")),
 	}
 	meta.Branch, _ = Git(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
 	var data bytes.Buffer
@@ -164,8 +169,10 @@ func RemoveClone(ctx context.Context, repoPath, archiveDir, name string, discard
 // RemoveWorktree removes the linked worktree at path from source. Unless
 // discard is set it first archives what removal would lose (the working tree,
 // index and detached-HEAD commits); branches stay in source. On an inspection
-// or archive failure the worktree is left in place.
+// or archive failure the worktree is left in place. The worktree's backup refs
+// go with it.
 func RemoveWorktree(ctx context.Context, source, path, archiveDir, name string, discard bool) (string, error) {
+	copyID := existingCopyID(ctx, path)
 	var archived string
 	if !discard {
 		var err error
@@ -176,6 +183,7 @@ func RemoveWorktree(ctx context.Context, source, path, archiveDir, name string, 
 	if err := WorktreeRemove(ctx, source, path, true); err != nil {
 		return archived, err
 	}
+	deleteCopyBackupRefs(ctx, source, copyID)
 	return archived, nil
 }
 

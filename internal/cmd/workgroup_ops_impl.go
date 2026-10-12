@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -58,40 +59,35 @@ func (c *WGRecoverCmd) Run(ctx *Context) error {
 		return fmt.Errorf("--into requires a single member (use --member)")
 	}
 
-	found := 0
+	found, failed := 0, 0
 	for _, m := range members {
 		label := c.Name + "/" + m.Name
 		if !gitops.HasGitDir(m.Path) {
 			fmt.Printf("  %s: not present (run 'wg ensure %s' to recreate, then recover)\n", m.Name, c.Name)
 			continue
 		}
-		id := latestBackupID(ctx, m.Path, patchDir)
-		if id == "" {
+		b, err := gitops.FindBackup(ctx.GoCtx(), m.Path, patchDir, "latest")
+		if errors.Is(err, gitops.ErrNoBackup) {
 			fmt.Printf("  %s: no local backup found\n", m.Name)
 			continue
 		}
-		a := locateBackup(ctx, m.Path, patchDir, id)
-		if !a.any() {
-			fmt.Printf("  %s: no backup\n", m.Name)
+		if err != nil {
+			failed++
+			fmt.Fprintf(os.Stderr, "  %s: %v\n", m.Name, err)
 			continue
 		}
 		found++
-		switch {
-		case c.Into != "":
-			if err := restoreBackupInto(ctx, m.Path, config.ExpandHome(c.Into), label, a); err != nil {
-				return err
-			}
-		case c.Apply:
-			if err := applyBackupToTree(ctx, m.Path, label, c.Force, a); err != nil {
-				fmt.Printf("  %s: %v\n", m.Name, err)
-			}
-		default:
-			printRestoreSteps(m.Path, label, a)
+		if err := restoreBackup(ctx, m.Path, label, b, c.Into, c.Apply, c.Force); err != nil {
+			failed++
+			fmt.Fprintf(os.Stderr, "  %s: %v\n", m.Name, err)
 		}
 	}
 	if found == 0 {
 		fmt.Println("No local backups found. WIP pushed via --push-branch is on the remote:")
-		fmt.Println("  git -C <member> fetch <remote> git-mgr/wip/<branch> && git -C <member> stash apply FETCH_HEAD")
+		fmt.Println("  git -C <member> fetch <remote> git-mgr/wip/<branch> && git -C <member> cherry-pick --no-commit FETCH_HEAD")
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d member(s) could not be recovered", failed)
 	}
 	return nil
 }
@@ -267,34 +263,42 @@ func (c *WGPullCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	var unsaved map[string]error
 	if c.BackupFirst {
-		backupDirtyMembers(ctx, cfg, spec)
+		unsaved = backupDirtyMembers(ctx, cfg, spec)
 	}
 	keyFor := wgSSHKeyFor(cfg, st)
 	results := workgroup.ForEach(ctx.GoCtx(), spec, cfg.Concurrency,
 		func(ctx context.Context, m workgroup.Member) (string, bool, error) {
+			if err := unsaved[m.Name]; err != nil {
+				return "", false, fmt.Errorf("not pulled, safety backup failed: %w", err)
+			}
 			out, err := gitops.Pull(ctx, m.Path, keyFor(m), !c.Rebase, c.Rebase)
 			return lastLine(out), false, err
 		})
 	return reportOps(c.Name, "pulled", results, ctx.Quiet)
 }
 
-// backupDirtyMembers backs up every dirty/untracked member before a mutating
-// group op, so a bad pull never loses WIP. Best-effort per member.
-func backupDirtyMembers(ctx *Context, cfg *config.Config, spec *workgroup.Spec) {
+// backupDirtyMembers backs up every member with uncommitted work before a
+// mutating group op, so a bad pull never loses it. It returns the members
+// whose backup failed, which the op must leave alone.
+func backupDirtyMembers(ctx *Context, cfg *config.Config, spec *workgroup.Spec) map[string]error {
 	bcfg := backupConfigFor(cfg, cfg.ResolveForRepo(""), "", "", false, "")
+	failed := map[string]error{}
 	for _, m := range spec.Members {
 		if !gitops.HasGitDir(m.Path) {
 			continue
 		}
-		rs, err := gitops.GetStatus(ctx.GoCtx(), m.Path)
-		if err != nil || rs.StatusString() == "clean" {
+		br, err := gitops.Backup(ctx.GoCtx(), m.Path, bcfg)
+		if err != nil {
+			failed[m.Name] = err
 			continue
 		}
-		if br, _ := gitops.Backup(ctx.GoCtx(), m.Path, bcfg); br != nil && br.IsDirty && !ctx.Quiet {
-			fmt.Printf("  safety backup: %s (%s)\n", m.Name, br.RefName)
+		if br.Dirty() && !ctx.Quiet {
+			fmt.Printf("  safety backup: %s (%s)\n", m.Name, describeBackup(br))
 		}
 	}
+	return failed
 }
 
 func (c *WGPushCmd) Run(ctx *Context) error {

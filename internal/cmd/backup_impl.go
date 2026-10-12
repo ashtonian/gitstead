@@ -2,7 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
@@ -14,20 +17,71 @@ import (
 // layering in push-branch (with its resolved SSH key) when enabled by config or
 // the CLI flag. pushRemoteFlag overrides the configured remote when non-empty.
 func backupConfigFor(cfg, repoCfg *config.Config, key, discoveredBy string, pushBranchFlag bool, pushRemoteFlag string) gitops.BackupConfig {
+	b := repoCfg.Backup
 	opts := []gitops.BackupOption{
-		gitops.WithStrategy(repoCfg.Backup.Strategy),
-		gitops.WithIncludeUntracked(repoCfg.Backup.IncludeUntracked),
-		gitops.WithMaxPerRepo(repoCfg.Backup.MaxPerRepo),
-		gitops.WithPatchDir(repoCfg.Backup.PatchDir),
+		gitops.WithStrategy(b.Strategy),
+		gitops.WithIncludeUntracked(b.IncludeUntracked),
+		gitops.WithUntrackedLimits(int64(b.MaxUntrackedFileMB)<<20, int64(b.MaxUntrackedTotalMB)<<20),
+		gitops.WithRetention(gitops.Retention{KeepAll: b.KeepAll, KeepDaily: b.KeepDaily, Max: b.MaxPerCopy}),
+		gitops.WithPatchDir(b.PatchDir),
 	}
-	if pushBranchFlag || repoCfg.Backup.PushBranch {
+	if pushBranchFlag || b.PushBranch {
 		remote := pushRemoteFlag
 		if remote == "" {
-			remote = repoCfg.Backup.PushRemote
+			remote = b.PushRemote
 		}
 		opts = append(opts, gitops.WithPushBranch(remote, cfg.ResolveSSHKey(key, discoveredBy)))
 	}
 	return gitops.NewBackupConfig(opts...)
+}
+
+// recordBackup stores a backup run's outcome on repo. LastBackup moves only
+// when a backup holds the current state.
+func recordBackup(repo *state.RepoState, br *gitops.BackupResult, err error, now time.Time) {
+	repo.LastBackupError = ""
+	if err != nil {
+		repo.LastBackupError = err.Error()
+	}
+	if br != nil && br.ID != "" {
+		repo.LastBackup = now
+		repo.LastBackupID = br.ID
+	}
+}
+
+// describeBackup summarises a backup run for one line of output.
+func describeBackup(br *gitops.BackupResult) string {
+	var parts []string
+	switch br.Outcome {
+	case gitops.BackupSaved:
+		parts = append(parts, "backed up "+br.ID)
+	case gitops.BackupUnchanged:
+		parts = append(parts, "unchanged since "+br.ID)
+	default:
+		parts = append(parts, "clean")
+	}
+	if br.PushedBranch != "" {
+		parts = append(parts, "pushed "+br.PushedBranch)
+	}
+	if br.IndexUnmerged {
+		parts = append(parts, "index had conflicts, kept as unstaged")
+	}
+	if n := len(br.Skipped); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d untracked path(s) left out: %s", n, skippedSummary(br.Skipped)))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func skippedSummary(skipped []gitops.SkippedFile) string {
+	const show = 3
+	var names []string
+	for i, s := range skipped {
+		if i == show {
+			names = append(names, fmt.Sprintf("and %d more", len(skipped)-show))
+			break
+		}
+		names = append(names, s.Path+" ("+s.Reason+")")
+	}
+	return strings.Join(names, ", ")
 }
 
 func (c *BackupCmd) Run(ctx *Context) error {
@@ -44,7 +98,7 @@ func (c *BackupCmd) Run(ctx *Context) error {
 			return err
 		}
 		if c.List {
-			return c.runList(ctx, st)
+			return c.runList(ctx, cfg, st)
 		}
 		return c.runRestore(ctx, cfg, st)
 	}
@@ -61,8 +115,7 @@ func (c *BackupCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	// Run backup on matching repos
-	backed := 0
+	saved, failed := 0, 0
 	for key, repo := range st.Repos {
 		if !pass(key, repo) || !repo.Cloned {
 			continue
@@ -72,62 +125,75 @@ func (c *BackupCmd) Run(ctx *Context) error {
 		backupCfg := backupConfigFor(cfg, repoCfg, key, repo.DiscoveredBy, c.PushBranch, c.PushRemote)
 
 		br, err := gitops.Backup(ctx.GoCtx(), repo.LocalPath, backupCfg)
+		recordBackup(repo, br, err, time.Now())
 		if err != nil {
-			fmt.Printf("  %s: error: %v\n", key, err)
+			failed++
+			fmt.Fprintf(os.Stderr, "  %s: %v\n", key, err)
+		}
+		if !br.Dirty() {
 			continue
 		}
-		if br.IsDirty {
-			backed++
-			repo.LastBackup = time.Now()
-			repo.LastBackupRef = br.RefName
-			repo.LastBackupHasPatch = br.HasPatch
-			repo.Status = "dirty"
-			logEvent(ctx, "backup", key, br.RefName)
-			if !ctx.Quiet {
-				if br.PushedBranch != "" {
-					fmt.Printf("  %s: backed up (pushed %s)\n", key, br.PushedBranch)
-				} else {
-					fmt.Printf("  %s: backed up\n", key)
-				}
-			}
+		repo.Status = "dirty"
+		if br.Outcome == gitops.BackupSaved {
+			saved++
+			logEvent(ctx, "backup", key, br.ID)
+		}
+		if !ctx.Quiet || len(br.Skipped) > 0 {
+			fmt.Printf("  %s: %s\n", key, describeBackup(br))
 		}
 	}
 
 	if err := st.Save(); err != nil {
 		return fmt.Errorf("saving state: %w", err)
 	}
-
 	if !ctx.Quiet {
-		fmt.Printf("Backed up %d dirty repos\n", backed)
+		fmt.Printf("Saved %d new backup(s)\n", saved)
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d repo(s) failed to back up", failed)
 	}
 	return nil
 }
 
-func (c *BackupCmd) runList(ctx *Context, st *state.State) error {
-	cfg, err := ctx.LoadConfig()
-	if err != nil {
-		return err
-	}
+func (c *BackupCmd) runList(ctx *Context, cfg *config.Config, st *state.State) error {
 	pass, err := selection{c.Repos, c.Tag, c.Set}.predicate(cfg)
 	if err != nil {
 		return err
 	}
-	for key, repo := range st.Repos {
+	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
+		repo := st.Repos[key]
 		if !pass(key, repo) || !repo.Cloned {
 			continue
 		}
-
-		refs, err := gitops.ListBackupRefs(ctx.GoCtx(), repo.LocalPath)
-		if err != nil || len(refs) == 0 {
+		backups, err := gitops.ListBackups(ctx.GoCtx(), repo.LocalPath, cfg.ResolveForRepo(key).Backup.PatchDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  %s: %v\n", key, err)
 			continue
 		}
-
+		if len(backups) == 0 {
+			continue
+		}
 		fmt.Printf("%s:\n", key)
-		for _, ref := range refs {
-			fmt.Printf("  %s\n", ref)
+		for _, b := range backups {
+			fmt.Printf("  %s  %s\n", b.ID, backupKinds(b))
 		}
 	}
 	return nil
+}
+
+// backupKinds says what a backup consists of.
+func backupKinds(b gitops.BackupInfo) string {
+	var kinds []string
+	if b.Ref != "" {
+		kinds = append(kinds, "snapshot")
+	}
+	if b.PatchDir != "" {
+		kinds = append(kinds, "patch")
+	}
+	if b.Meta != nil && len(b.Meta.Skipped) > 0 {
+		kinds = append(kinds, fmt.Sprintf("%d untracked path(s) left out", len(b.Meta.Skipped)))
+	}
+	return strings.Join(kinds, ", ")
 }
 
 func (c *BackupCmd) runRestore(ctx *Context, cfg *config.Config, st *state.State) error {
@@ -135,28 +201,23 @@ func (c *BackupCmd) runRestore(ctx *Context, cfg *config.Config, st *state.State
 	if err != nil {
 		return err
 	}
-	id := c.Restore
 	printed := 0
-	for key, repo := range st.Repos {
+	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
+		repo := st.Repos[key]
 		if !pass(key, repo) || !repo.Cloned {
 			continue
 		}
-		a := locateBackup(ctx, repo.LocalPath, cfg.ResolveForRepo(key).Backup.PatchDir, id)
-		if !a.any() {
+		b, err := gitops.FindBackup(ctx.GoCtx(), repo.LocalPath, cfg.ResolveForRepo(key).Backup.PatchDir, c.Restore)
+		if err != nil {
 			continue
 		}
 		printed++
-		printRestoreSteps(repo.LocalPath, key, a)
+		printRestoreSteps(repo.LocalPath, key, b)
 	}
 	if printed == 0 {
-		fmt.Printf("No backup %q found for the selected repos.\n", id)
+		fmt.Printf("No backup %q found for the selected repos.\n", c.Restore)
 	} else {
 		fmt.Println("Tip: `git-mgr restore <repo> [id]` can apply a backup, or --into a scratch dir.")
 	}
 	return nil
-}
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }

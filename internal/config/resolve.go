@@ -72,8 +72,20 @@ func (c *Config) ResolveForRepo(repoKey string) *Config {
 			if o.Backup.IncludeUntracked != nil {
 				resolved.Backup.IncludeUntracked = *o.Backup.IncludeUntracked
 			}
-			if o.Backup.MaxPerRepo != nil {
-				resolved.Backup.MaxPerRepo = *o.Backup.MaxPerRepo
+			if o.Backup.KeepAll != nil {
+				resolved.Backup.KeepAll = *o.Backup.KeepAll
+			}
+			if o.Backup.KeepDaily != nil {
+				resolved.Backup.KeepDaily = *o.Backup.KeepDaily
+			}
+			if o.Backup.MaxPerCopy != nil {
+				resolved.Backup.MaxPerCopy = *o.Backup.MaxPerCopy
+			}
+			if o.Backup.MaxUntrackedFileMB != nil {
+				resolved.Backup.MaxUntrackedFileMB = *o.Backup.MaxUntrackedFileMB
+			}
+			if o.Backup.MaxUntrackedTotalMB != nil {
+				resolved.Backup.MaxUntrackedTotalMB = *o.Backup.MaxUntrackedTotalMB
 			}
 			if o.Backup.PatchDir != nil {
 				resolved.Backup.PatchDir = *o.Backup.PatchDir
