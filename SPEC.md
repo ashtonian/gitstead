@@ -977,15 +977,20 @@ func FilterRepos(repos []Repo, rule config.DiscoveryRule, excludes []config.Excl
 
 ### Stale Repo Detection
 
-During discovery, compare newly-discovered repo set against state:
+During discovery, compare newly-discovered repo set against state. Stale
+detection runs only when every rule in the pass succeeded, and only judges repos
+the pass could have found: an unfiltered pass covers every tracked repo, a pass
+filtered by `--tag` or `--rule` covers only repos whose `discovered_by` rule ran.
 
 ```
-func DetectStale(state, discovered):
+func DetectStale(state, discovered, scope):
     for key, repo := range state.Repos:
         if repo.ManuallyAdded: continue              // never stale
         if key in discovered:
             repo.StaleSince = ""                      // clear stale flag
             repo.LastDiscovered = time.Now()
+        else if !scope.Covers(repo):
+            continue                                  // another rule's repo
         else:
             if repo.StaleSince == "":
                 repo.StaleSince = time.Now()          // newly stale

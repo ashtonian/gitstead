@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,13 +32,61 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
-func TestLoad_NonExistent(t *testing.T) {
-	cfg, err := config.Load("/tmp/nonexistent-git-mgr-config.yaml")
+// A config file the caller named must exist: a typo in --config or
+// GIT_MGR_CONFIG must not silently run with zero discovery rules.
+func TestLoad_MissingRequiredFile(t *testing.T) {
+	_, err := config.Load(filepath.Join(t.TempDir(), "confg.yaml"))
+	if !errors.Is(err, config.ErrNotFound) {
+		t.Fatalf("want ErrNotFound for a missing required file, got %v", err)
+	}
+}
+
+// The default location is optional: a zero-config run uses defaults and env.
+func TestLoad_MissingOptionalFile(t *testing.T) {
+	cfg, err := config.Load(filepath.Join(t.TempDir(), "config.yaml"), config.WithOptionalFile())
 	if err != nil {
-		t.Fatalf("Load nonexistent should return defaults: %v", err)
+		t.Fatalf("missing optional file should load defaults: %v", err)
 	}
 	if cfg.BaseDir == "" {
 		t.Error("expected defaults to be populated")
+	}
+}
+
+func TestLoad_DirectoryIsAnError(t *testing.T) {
+	if _, err := config.Load(t.TempDir(), config.WithOptionalFile()); err == nil {
+		t.Fatal("a directory as config path must be an error")
+	}
+}
+
+func TestLoad_UnreadableFileIsAnError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read any file")
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("base_dir: /x\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(path, config.WithOptionalFile()); err == nil {
+		t.Fatal("an unreadable config must be an error, not defaults")
+	}
+}
+
+func TestLoad_MalformedFileIsAnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("discovery: [\n  - name: x\n    provider: [unclosed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(path, config.WithOptionalFile()); err == nil {
+		t.Fatal("malformed YAML must be an error, not defaults")
+	}
+}
+
+func TestIsDefaultPath(t *testing.T) {
+	if !config.IsDefaultPath(config.DefaultPath) || !config.IsDefaultPath(config.ExpandHome(config.DefaultPath)) {
+		t.Fatal("the default path, with or without ~, must be recognised")
+	}
+	if config.IsDefaultPath("/etc/git-mgr.yaml") {
+		t.Fatal("another path is not the default")
 	}
 }
 
@@ -236,7 +285,7 @@ func containsStr(s, sub string) bool {
 // loader's struct-aware env mapping resolves it correctly.
 func TestLoad_EnvUnderscoreKey(t *testing.T) {
 	t.Setenv("GIT_MGR_BASE_DIR", "/custom/env/repos")
-	cfg, err := config.Load("/tmp/nonexistent-git-mgr-config.yaml")
+	cfg, err := config.Load(filepath.Join(t.TempDir(), "config.yaml"), config.WithOptionalFile())
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}

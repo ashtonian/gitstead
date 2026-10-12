@@ -78,7 +78,11 @@ func (c *Context) LoadConfig() (*config.Config, error) {
 	if c.cfg != nil {
 		return c.cfg, nil
 	}
-	cfg, err := config.Load(c.Config)
+	var opts []config.Option
+	if config.IsDefaultPath(c.Config) {
+		opts = append(opts, config.WithOptionalFile())
+	}
+	cfg, err := config.Load(c.Config, opts...)
 	if err != nil {
 		return nil, err
 	}

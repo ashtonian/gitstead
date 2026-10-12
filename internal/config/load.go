@@ -2,12 +2,26 @@ package config
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
 	pkgconfig "github.com/ashtonian/pkg/config"
 )
+
+// DefaultPath is where git-mgr looks for its config when none is given.
+const DefaultPath = "~/.config/git-mgr/config.yaml"
+
+// ErrNotFound reports that a config file the caller required does not exist.
+var ErrNotFound = errors.New("config file not found")
+
+// IsDefaultPath reports whether path names the default config location.
+func IsDefaultPath(path string) bool {
+	return filepath.Clean(ExpandHome(path)) == filepath.Clean(ExpandHome(DefaultPath))
+}
 
 // --- Options pattern ---
 
@@ -16,6 +30,7 @@ type Option func(*loadOptions)
 
 type loadOptions struct {
 	configPath     string
+	optionalFile   bool
 	envPrefix      string
 	skipValidation bool
 	extraDefaults  map[string]any
@@ -24,6 +39,13 @@ type loadOptions struct {
 // WithConfigFile sets the config file path.
 func WithConfigFile(path string) Option {
 	return func(o *loadOptions) { o.configPath = path }
+}
+
+// WithOptionalFile treats a missing config file as "use defaults and env".
+// Without it, a missing file is ErrNotFound: a mistyped --config must not
+// silently run with zero discovery rules, which would mark every repo stale.
+func WithOptionalFile() Option {
+	return func(o *loadOptions) { o.optionalFile = true }
 }
 
 // WithEnvPrefix sets the env var prefix (default: "GIT_MGR_").
@@ -43,7 +65,7 @@ func WithDefaults(defaults map[string]any) Option {
 
 // Defaults returns a Config populated from struct tag defaults.
 func Defaults() *Config {
-	cfg, _ := Load("/dev/null/nonexistent", WithSkipValidation())
+	cfg, _ := Load("", WithSkipValidation())
 	return cfg
 }
 
@@ -67,7 +89,9 @@ func (configValidator) Struct(v any) error {
 
 // --- Loading ---
 
-// Load reads configuration with options. If no options are given, uses defaults.
+// Load reads configuration from path, layered over defaults and env. An empty
+// path loads defaults and env only. A path that does not exist is ErrNotFound
+// unless WithOptionalFile is given; any other problem reading it is an error.
 //
 // Loading is delegated to github.com/ashtonian/pkg/config, which
 // supplies struct-tag + programmatic defaults, struct-aware env mapping (so
@@ -89,8 +113,22 @@ func Load(path string, opts ...Option) (*Config, error) {
 		// pkgconfig trims a trailing "_" itself; pass the bare prefix.
 		pkgconfig.WithEnvPrefix(strings.TrimSuffix(o.envPrefix, "_")),
 	}
-	if _, err := os.Stat(o.configPath); err == nil {
-		kopts = append(kopts, pkgconfig.WithConfigFile(o.configPath))
+	if o.configPath != "" {
+		info, err := os.Stat(o.configPath)
+		switch {
+		case err == nil && info.IsDir():
+			return nil, fmt.Errorf("config path %s is a directory", o.configPath)
+		case err == nil:
+			// Must: pkgconfig skips an optional file it cannot read or parse,
+			// which would turn a YAML typo into a defaults-only run.
+			kopts = append(kopts, pkgconfig.WithMustConfigFile(o.configPath))
+		case errors.Is(err, fs.ErrNotExist) && o.optionalFile:
+			// Zero-config run: defaults and env only.
+		case errors.Is(err, fs.ErrNotExist):
+			return nil, fmt.Errorf("%w: %s", ErrNotFound, o.configPath)
+		default:
+			return nil, fmt.Errorf("reading config %s: %w", o.configPath, err)
+		}
 	}
 	if len(o.extraDefaults) > 0 {
 		kopts = append(kopts, pkgconfig.WithDefaults(o.extraDefaults))

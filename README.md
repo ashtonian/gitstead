@@ -124,6 +124,12 @@ subcommands during completion.
 Config lives at `~/.config/git-mgr/config.yaml`. See
 [`config.example.yaml`](config.example.yaml) for a fully annotated reference.
 
+If that default file doesn't exist, git-mgr runs on defaults and `GIT_MGR_*`
+environment variables. A path you choose with `--config` or `GIT_MGR_CONFIG`
+must exist and parse: a missing, unreadable or malformed file is an error rather
+than a silent fall back to defaults, which would otherwise run with no discovery
+rules and mark every discovered repo stale.
+
 ### Providers
 
 Any number of GitHub, GitLab, and Gitea/Forgejo instances:
@@ -394,8 +400,10 @@ GitHub and Gitea requests retry automatically on rate-limit (429 / secondary
 limit) and 5xx responses, honoring `Retry-After` with capped back-off (the GitLab
 client has equivalent retry built in). If one discovery rule fails, the others
 still run, and stale detection is skipped for that run so a transient outage
-can't mark healthy repos stale. SIGINT/SIGTERM cancels in-flight git and API
-operations cleanly.
+can't mark healthy repos stale. A run filtered with `--tag` or `--rule` only
+judges repos first found by the rules it ran, so `sync --tag personal` never
+marks work repos stale. SIGINT/SIGTERM cancels in-flight git and API operations
+cleanly.
 
 ## Environment variables
 

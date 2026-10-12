@@ -37,9 +37,13 @@ func completionState() *state.State {
 func completionConfig() *config.Config {
 	path := os.Getenv("GIT_MGR_CONFIG")
 	if path == "" {
-		path = config.ExpandHome("~/.config/git-mgr/config.yaml")
+		path = config.DefaultPath
 	}
-	cfg, err := config.Load(path)
+	var opts []config.Option
+	if config.IsDefaultPath(path) {
+		opts = append(opts, config.WithOptionalFile())
+	}
+	cfg, err := config.Load(path, opts...)
 	if err != nil {
 		return nil
 	}
