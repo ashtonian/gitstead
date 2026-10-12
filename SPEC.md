@@ -1810,12 +1810,39 @@ Agent states, from the lease and the record: `running`, `stopping`, `missing`
 terminal's: an agent's TUI output isn't a useful log, and tmux, iTerm and Muxy
 keep scrollback.
 
-### Terminal integration
+### Fleets and launchers
 
-`ws open` builds a tmux session `ws-<name>`, one pane per agent, each running
-`git-mgr ws run <workspace> <agent>` as the pane's command, with
-`GIT_MGR_LAUNCHER=tmux`. Under iTerm it attaches with control mode
-(`tmux -CC`).
+A fleet (`fleets:`) is workspaces opened side by side with one launcher;
+`ws open` is a fleet of one. `fleet open`:
+
+1. Without `host:`, makes what is missing of the declared workspaces, as
+   `ws ensure` does (`--no-ensure` skips it).
+2. Makes a test signature (`gitops.TestSign`, no terminal, 20 s) for each
+   account with `signing.mode: required` covering a repo the workspaces have
+   copies of, and refuses to open if one fails.
+3. Builds the launch plan (`launch.Build`): per workspace its directory, and
+   per agent its replica, title (`launchers.title`), profile, state, and
+   command: `<git-mgr> --config <c> --state <s> ws run <ws> <agent>
+   [--profile p | --command c] [--fresh] [--no-check] [--no-shell]`, quoted
+   only where a shell needs it. With `host:`, the plan comes from git-mgr on
+   the host instead: `ssh -o BatchMode=yes <host> <remote_command> fleet plan
+   <name> --json [...]`, over a shared ssh connection (ControlMaster) that the
+   launcher's later commands reuse.
+4. Opens it with the launcher (`launch.New`): `auto` picks tmux inside tmux
+   (`$TMUX`), Muxy inside Muxy (`$MUXY_SESSION_ID`), iTerm inside iTerm, else
+   tmux on PATH.
+5. Records the fleet's last open (launcher, time, Muxy projects) under
+   `fleets:` in state.
+
+The plan is the plugin protocol: `git-mgr-launch-<name>` on PATH gets it as
+JSON on stdin, with `options` from `launchers.plugins.<name>`.
+
+| Launcher | Opens | How |
+| --- | --- | --- |
+| tmux | A session per fleet, a window per workspace (or agent), a pane per agent, spilling past `max_panes` into `<ws>-2`… | `new-session`/`new-window`/`split-window -e GIT_MGR_LAUNCHER=tmux -c <replica> <command>`; each pane gets the option `@git-mgr-agent=<ws>/<agent>`, its title (`select-pane -T`, `allow-set-title off`) and `remain-on-exit`. An existing session is attached, filled with the agents it lacks (found by that option), or rebuilt (`on_exists`). Attach replaces git-mgr (`tmux attach`, `-CC` in iTerm under `control_mode: auto`), or switches the client inside tmux; with `host:`, both run through `ssh -t`. |
+| iTerm | A window, a tab per workspace (or agent), a split per agent | One AppleScript through `osascript`: create the window (or a tab in the current one), split each tab in √n columns read left to right (or `columns`/`rows`), name each session, wait `type_delay`, write the badge escape (`OSC 1337 SetBadgeFormat`) and the command, through `ssh -t <host>` for a remote fleet. |
+| Muxy | A project per workspace, a tab per agent | `muxy [--host h] project add <dir> --name <n> --reuse --json`, `project set-color`, then by `open`: `layout` writes `.muxy/layouts/<name>.json` (`{"tabs": [{"name", "command"}]}`) through `muxy exec`; `sessions` runs `session create <project> --directory <replica> -- <command>` for each agent not running; `state` waits for the app to list the projects, quits it (asking under `restart: ask`), adds tabs to projects with none in `~/Library/Application Support/Muxy 2/desktop-state.json` (format 3 only; each pane's command in `startup_commands`), saves the old file beside it, relaunches the app and waits for the sessions. `prune_projects` deletes the projects recorded for workspaces no longer in the fleet. |
+| plugin | Whatever it does | The plan on stdin; its exit status is the launch's. |
 
 ### WIP safety
 

@@ -12,7 +12,7 @@ import (
 // is a hidden ref prefix: under refs/, outside branches, tags and
 // remote-tracking refs.
 func OffsiteNamespace(tmpl, machine, copyID string) (string, error) {
-	ns, err := render("namespace", tmpl, struct{ Machine, Copy string }{machine, copyID})
+	ns, err := render("remote_sync.namespace", tmpl, struct{ Machine, Copy string }{machine, copyID})
 	if err != nil {
 		return "", err
 	}
@@ -34,7 +34,7 @@ func OffsiteRemote(tmpl string, id repourl.Identity) (string, error) {
 	if !IsRemoteURL(tmpl) {
 		return tmpl, nil
 	}
-	return render("remote", tmpl, id)
+	return render("remote_sync.remote", tmpl, id)
 }
 
 // IsRemoteURL reports whether remote_sync.remote is a URL rather than the
@@ -46,11 +46,11 @@ func IsRemoteURL(remote string) bool {
 func render(what, tmpl string, data any) (string, error) {
 	t, err := template.New(what).Option("missingkey=error").Parse(tmpl)
 	if err != nil {
-		return "", fmt.Errorf("remote_sync.%s %q: %w", what, tmpl, err)
+		return "", fmt.Errorf("%s %q: %w", what, tmpl, err)
 	}
 	var b strings.Builder
 	if err := t.Execute(&b, data); err != nil {
-		return "", fmt.Errorf("remote_sync.%s %q: %w", what, tmpl, err)
+		return "", fmt.Errorf("%s %q: %w", what, tmpl, err)
 	}
 	return b.String(), nil
 }

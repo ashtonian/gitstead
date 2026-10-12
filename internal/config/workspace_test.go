@@ -99,3 +99,43 @@ func TestCloneFor_AccountThenOverride(t *testing.T) {
 		t.Errorf("me/x = %+v", got)
 	}
 }
+
+func TestValidateFleets(t *testing.T) {
+	base := func() Config {
+		return Config{
+			Workspaces: []Workspace{{Name: "app", Repos: []string{"x"}}},
+			Launchers: LaunchersConfig{Default: "auto", Title: "{{.Agent}}", Tmux: TmuxConfig{Session: "s"},
+				ITerm: ITermConfig{Badge: ""}, Muxy: MuxyConfig{ProjectName: "{{.Workspace}}", Color: "auto"}},
+		}
+	}
+	tests := []struct {
+		name   string
+		change func(*Config)
+		err    string
+	}{
+		{"fine", func(c *Config) { c.Fleets = []Fleet{{Name: "daily", Workspaces: []string{"app"}, Launcher: "tmux"}} }, ""},
+		{"a plugin launcher", func(c *Config) { c.Fleets = []Fleet{{Name: "d", Workspaces: []string{"app"}, Launcher: "wezterm"}} }, ""},
+		{"twice", func(c *Config) { c.Fleets = []Fleet{{Name: "d", Workspaces: []string{"app", "app"}}} }, "twice"},
+		{"duplicate", func(c *Config) {
+			c.Fleets = []Fleet{{Name: "d", Workspaces: []string{"app"}}, {Name: "d", Workspaces: []string{"app"}}}
+		}, "duplicate fleet"},
+		{"bad name", func(c *Config) { c.Fleets = []Fleet{{Name: "a.b", Workspaces: []string{"app"}}} }, "a name is"},
+		{"bad color", func(c *Config) { c.Launchers.Muxy.Color = "blue" }, "#RRGGBB"},
+		{"bad template", func(c *Config) { c.Launchers.Title = "{{.Nope}}" }, "launchers.title"},
+		{"plugin named like a builtin", func(c *Config) { c.Launchers.Plugins = map[string]map[string]any{"tmux": {}} }, "built-in"},
+		{"unknown agent", func(c *Config) {
+			c.Agents = []AgentProfile{{Name: "claude", Command: "claude"}}
+			c.Fleets = []Fleet{{Name: "d", Workspaces: []string{"app"}, Agent: "codex"}}
+		}, "unknown agent"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := base()
+			tt.change(&cfg)
+			err := validateFleets(&cfg)
+			if tt.err == "" && err != nil || tt.err != "" && (err == nil || !strings.Contains(err.Error(), tt.err)) {
+				t.Errorf("validateFleets = %v, want %q", err, tt.err)
+			}
+		})
+	}
+}

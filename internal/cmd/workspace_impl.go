@@ -32,7 +32,7 @@ type WorkspaceCmd struct {
 	Pull     WSPullCmd     `cmd:"" help:"Pull every copy (--ff-only by default)."`
 	Push     WSPushCmd     `cmd:"" help:"Push every copy."`
 	Exec     WSExecCmd     `cmd:"" help:"Run a command in each copy (after --)."`
-	Open     WSOpenCmd     `cmd:"" help:"Open a tmux session with one pane per agent."`
+	Open     WSOpenCmd     `cmd:"" help:"Open the workspace's agents with a launcher: tmux, iTerm, Muxy or a plugin."`
 	Run      WSRunCmd      `cmd:"" help:"Run an agent in its replica, in this terminal: what each pane of 'ws open' runs."`
 	Stop     WSStopCmd     `cmd:"" help:"End agents' runs, as closing their terminals would."`
 	Backup   WSBackupCmd   `cmd:"" help:"Back up every copy's uncommitted work."`
@@ -56,10 +56,10 @@ type WSCreateCmd struct {
 	Root      string   `help:"Directory holding the workspace (default workspace_defaults.root)."`
 	Save      bool     `help:"Write the workspace to the config file, which then declares it."`
 	Force     bool     `help:"With --save, replace a workspace of the same name in config."`
-	Open      bool     `help:"After creating, open a tmux session with one pane per agent."`
-	Agent     string   `help:"With --open, the agent profile each pane runs."`
-	Cmd       string   `help:"With --open, a command each pane runs instead of an agent profile."`
-	NoCheck   bool     `name:"no-check" help:"With --open, skip each pane's check of its copies."`
+	Open      bool     `help:"After creating, open its agents with a launcher (see ws open)."`
+	Agent     string   `help:"With --open, the agent profile each agent runs."`
+	Cmd       string   `help:"With --open, a command each agent's terminal runs instead of an agent profile."`
+	Launcher  string   `help:"With --open, the launcher: tmux, iterm, muxy, auto or a plugin."`
 }
 
 func (c *WSCreateCmd) flags() bool {
@@ -80,7 +80,7 @@ func (c *WSCreateCmd) Run(ctx *Context) error {
 		return err
 	}
 	if c.Open {
-		return (&WSOpenCmd{Name: c.Name, Agent: c.Agent, Cmd: c.Cmd, NoCheck: c.NoCheck}).Run(ctx)
+		return (&WSOpenCmd{Name: c.Name, NoEnsure: true, launchFlags: launchFlags{Launcher: c.Launcher, Agent: c.Agent, Cmd: c.Cmd}}).Run(ctx)
 	}
 	return nil
 }

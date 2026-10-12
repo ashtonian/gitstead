@@ -10,7 +10,7 @@ import (
 )
 
 // CompletionPredictors returns kongplete options that complete dynamic values --
-// repo keys, tags, named sets, and workspace names -- for any arg/flag tagged
+// repo keys, tags, named sets, workspace and fleet names -- for any arg/flag tagged
 // with the matching `predictor:"..."`. They run at completion time, resolving the
 // state/config path from the env or default, best-effort (no candidates on error).
 func CompletionPredictors() []kongplete.Option {
@@ -19,6 +19,7 @@ func CompletionPredictors() []kongplete.Option {
 		kongplete.WithPredictor("tag", complete.PredictFunc(func(complete.Args) []string { return completionTags() })),
 		kongplete.WithPredictor("set", complete.PredictFunc(func(complete.Args) []string { return completionSetNames() })),
 		kongplete.WithPredictor("workspace", complete.PredictFunc(func(complete.Args) []string { return completionWorkspaces() })),
+		kongplete.WithPredictor("fleet", complete.PredictFunc(func(complete.Args) []string { return completionFleets() })),
 	}
 }
 
@@ -110,6 +111,18 @@ func completionWorkspaces() []string {
 		for _, w := range cfg.Workspaces {
 			add(w.Name)
 		}
+	}
+	return out
+}
+
+func completionFleets() []string {
+	cfg := completionConfig()
+	if cfg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Fleets))
+	for _, f := range cfg.Fleets {
+		out = append(out, f.Name)
 	}
 	return out
 }

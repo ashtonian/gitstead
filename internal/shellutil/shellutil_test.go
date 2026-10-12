@@ -18,3 +18,14 @@ func TestQuote(t *testing.T) {
 		}
 	}
 }
+
+func TestWord(t *testing.T) {
+	for in, want := range map[string]string{
+		"git-mgr": "git-mgr", "/a/b.yaml": "/a/b.yaml", "--profile": "--profile", "me@host": "me@host",
+		"": "''", "=session": "'=session'", "a b": "'a b'", "it's": `'it'\''s'`, "$HOME": "'$HOME'", "a;b": "'a;b'", "~/x": "'~/x'",
+	} {
+		if got := shellutil.Word(in); got != want {
+			t.Errorf("Word(%q) = %s, want %s", in, got, want)
+		}
+	}
+}

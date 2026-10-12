@@ -31,6 +31,7 @@ type State struct {
 	Machine    string                     `yaml:"machine,omitempty"`
 	Repos      map[string]*RepoState      `yaml:"repos"`
 	Workspaces map[string]*WorkspaceState `yaml:"workspaces,omitempty"`
+	Fleets     map[string]*FleetState     `yaml:"fleets,omitempty"`
 	Schedules  map[string]*ScheduleState  `yaml:"schedules,omitempty"`
 
 	// Internal: path to the state file for Save()
@@ -153,6 +154,7 @@ func Load(path string) (*State, error) {
 		Version:    CurrentVersion,
 		Repos:      make(map[string]*RepoState),
 		Workspaces: make(map[string]*WorkspaceState),
+		Fleets:     make(map[string]*FleetState),
 		Schedules:  make(map[string]*ScheduleState),
 		path:       path,
 	}
@@ -179,6 +181,9 @@ func Load(path string) (*State, error) {
 	}
 	if s.Workspaces == nil {
 		s.Workspaces = make(map[string]*WorkspaceState)
+	}
+	if s.Fleets == nil {
+		s.Fleets = make(map[string]*FleetState)
 	}
 	if s.Schedules == nil {
 		s.Schedules = make(map[string]*ScheduleState)
