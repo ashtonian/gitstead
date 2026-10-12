@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -125,5 +127,26 @@ func TestValidate_AffiliationOnlyForGitHubSelfRules(t *testing.T) {
 	cfg.Discovery[0] = config.DiscoveryRule{Name: "lab", Provider: "gl", Affiliation: []string{"owner"}}
 	if err := config.Validate(cfg); err == nil {
 		t.Error("affiliation on a gitlab rule must be rejected")
+	}
+}
+
+func TestLayoutPresets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("layout: owner/name\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PathTemplate != "{{.Owner}}/{{.Name}}" {
+		t.Errorf("path_template = %q", cfg.PathTemplate)
+	}
+
+	if err := os.WriteFile(path, []byte("layout: name\npath_template: \"{{.Owner}}-{{.Name}}\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(path); err == nil || !strings.Contains(err.Error(), "not both") {
+		t.Fatalf("layout with a different path_template: %v", err)
 	}
 }

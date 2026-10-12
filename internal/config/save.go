@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,52 +17,29 @@ var ErrWorkgroupExists = errors.New("workgroup already declared in config")
 // a workgroup with the same name already exists it returns ErrWorkgroupExists
 // unless overwrite is true, in which case the existing entry is replaced.
 //
-// When the config file does not exist it is created from defaults first (the
-// same shape `git-mgr init` writes). The written file is re-loaded and validated
-// before returning, so a successful call never leaves an invalid config.
+// When the config file does not exist it is created holding just the
+// workgroup. The written file is re-loaded and validated before returning, so
+// a successful call never leaves an invalid config.
 func SaveWorkgroup(path string, wg Workgroup, overwrite bool) error {
-	path = ExpandHome(path)
-
-	root, err := loadOrInitDocument(path)
+	doc, err := OpenDocument(path)
 	if err != nil {
 		return err
 	}
-	// root is a DocumentNode; its first content node is the top-level mapping.
-	if len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
-		return fmt.Errorf("config %s is not a YAML mapping", path)
+	if doc.Has("workgroups", Named(wg.Name)) && !overwrite {
+		return fmt.Errorf("%w: %q (use --force to overwrite)", ErrWorkgroupExists, wg.Name)
 	}
-	doc := root.Content[0]
-
-	seq := findOrCreateSeq(doc, "workgroups")
-
-	// Marshal the workgroup to a node so its yaml tags drive the output.
-	var wgNode yaml.Node
-	if err := wgNode.Encode(wg); err != nil {
-		return fmt.Errorf("encoding workgroup: %w", err)
-	}
-
-	if idx := indexOfNamedWorkgroup(seq, wg.Name); idx >= 0 {
-		if !overwrite {
-			return fmt.Errorf("%w: %q (use --force to overwrite)", ErrWorkgroupExists, wg.Name)
-		}
-		seq.Content[idx] = &wgNode
-	} else {
-		seq.Content = append(seq.Content, &wgNode)
-	}
-
-	if err := writeDocumentAtomic(path, root); err != nil {
+	if err := doc.Upsert("workgroups", Named(wg.Name), wg); err != nil {
 		return err
 	}
-
-	// Re-load + validate so --save never persists something Load would reject.
-	if _, err := Load(path); err != nil {
-		return fmt.Errorf("config invalid after saving workgroup: %w", err)
+	if err := doc.Save(); err != nil {
+		return fmt.Errorf("saving workgroup: %w", err)
 	}
 	return nil
 }
 
-// loadOrInitDocument reads path into a YAML document node, or builds one from
-// defaults when the file is absent.
+// loadOrInitDocument reads path into a YAML document node, or starts an
+// empty one when the file is absent: defaults apply on load, so a new config
+// holds only what was chosen.
 func loadOrInitDocument(path string) (*yaml.Node, error) {
 	data, err := os.ReadFile(path)
 	switch {
@@ -77,15 +53,7 @@ func loadOrInitDocument(path string) (*yaml.Node, error) {
 		}
 		return &root, nil
 	case os.IsNotExist(err):
-		out, mErr := yaml.Marshal(Defaults())
-		if mErr != nil {
-			return nil, mErr
-		}
-		var root yaml.Node
-		if uErr := yaml.Unmarshal(out, &root); uErr != nil {
-			return nil, uErr
-		}
-		return &root, nil
+		return newEmptyDocument(), nil
 	default:
 		return nil, fmt.Errorf("reading config %s: %w", path, err)
 	}
@@ -116,53 +84,4 @@ func findOrCreateSeq(mapping *yaml.Node, key string) *yaml.Node {
 	seqNode := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 	mapping.Content = append(mapping.Content, keyNode, seqNode)
 	return seqNode
-}
-
-// indexOfNamedWorkgroup returns the index in seq of the workgroup mapping whose
-// "name" scalar equals name, or -1.
-func indexOfNamedWorkgroup(seq *yaml.Node, name string) int {
-	for i, item := range seq.Content {
-		if item.Kind != yaml.MappingNode {
-			continue
-		}
-		for j := 0; j+1 < len(item.Content); j += 2 {
-			if item.Content[j].Value == "name" && item.Content[j+1].Value == name {
-				return i
-			}
-		}
-	}
-	return -1
-}
-
-// writeDocumentAtomic marshals root and writes it to path via a temp file +
-// rename, with 0600 permissions.
-func writeDocumentAtomic(path string, root *yaml.Node) error {
-	out, err := yaml.Marshal(root)
-	if err != nil {
-		return fmt.Errorf("marshaling config: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("creating config dir: %w", err)
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".git-mgr-config-*.tmp")
-	if err != nil {
-		return fmt.Errorf("creating temp config: %w", err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once renamed
-	if _, err := tmp.Write(out); err != nil {
-		tmp.Close()
-		return fmt.Errorf("writing temp config: %w", err)
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("replacing config: %w", err)
-	}
-	return nil
 }

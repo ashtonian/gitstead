@@ -1,0 +1,107 @@
+package setup
+
+import (
+	"fmt"
+	"slices"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/ashtonian/git-mgr/internal/config"
+)
+
+// Render writes answers into a config document in place. Everything setup
+// doesn't manage is left as it is, comments included; each account's own
+// account, provider, rules and base-dir override are replaced, and rules of
+// its provider for owners no longer tracked are removed.
+func Render(doc *config.Document, a Answers) error {
+	if err := a.Validate(); err != nil {
+		return err
+	}
+	set := func(key string, value any) error { return doc.Set(key, value) }
+	if err := set("base_dir", a.BaseDir); err != nil {
+		return err
+	}
+	if a.Layout != "custom" {
+		if err := set("layout", a.Layout); err != nil {
+			return err
+		}
+		doc.Delete("path_template")
+	}
+	for _, acct := range a.Accounts {
+		if err := renderAccount(doc, acct); err != nil {
+			return fmt.Errorf("account %q: %w", acct.Name, err)
+		}
+	}
+	for _, kv := range []struct {
+		key   string
+		value any
+	}{
+		{"backup.enabled", a.Backups},
+		{"remote_sync.enabled", a.RemoteSync},
+		{"reconcile.auto", a.ReconcileAuto},
+		{"cleanup.policy", a.Cleanup},
+	} {
+		if err := set(kv.key, kv.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func renderAccount(doc *config.Document, acct Account) error {
+	account := config.Account{
+		Name: acct.Name, Hosts: []string{acct.Host}, Owners: acct.Owners(),
+		SSHKey: acct.SSHKey, Git: acct.Git, Signing: acct.Signing,
+	}
+	if err := doc.Upsert("accounts", config.Named(acct.Name), account); err != nil {
+		return err
+	}
+	provider := config.Provider{
+		Name: acct.Name, Type: acct.Type, URL: acct.URL, Account: acct.Name,
+		TokenCommand: acct.TokenCommand, TokenEnv: acct.TokenEnv, CloneProtocol: acct.Protocol,
+	}
+	if err := doc.Upsert("providers", config.Named(acct.Name), provider); err != nil {
+		return err
+	}
+
+	var rules []string
+	for _, t := range acct.Track {
+		rule := config.DiscoveryRule{Name: ruleName(acct, t), Provider: acct.Name, Tags: []string{acct.Name}}
+		switch {
+		case t.Kind == "org":
+			rule.Org = t.Owner
+		case t.Kind == "group":
+			rule.Group = t.Owner
+		case acct.Type == "github":
+			rule.Affiliation = []string{"owner"} // the token's own repos, private ones included
+		case acct.Type == "gitlab":
+			rule.User = t.Owner
+		}
+		rules = append(rules, rule.Name)
+		if err := doc.Upsert("discovery", config.Named(rule.Name), rule); err != nil {
+			return err
+		}
+	}
+	doc.Remove("discovery", func(n *yaml.Node) bool {
+		return config.Field("provider", acct.Name)(n) && !slices.ContainsFunc(rules, func(r string) bool { return config.Named(r)(n) })
+	})
+
+	if acct.BaseDir == "" {
+		return nil
+	}
+	var globs []string
+	for _, owner := range acct.Owners() {
+		globs = append(globs, acct.Host+"/"+owner+"/*", acct.Host+"/"+owner+"/*/*")
+	}
+	override := config.Override{Repos: globs, BaseDir: acct.BaseDir, Account: acct.Name}
+	return doc.Upsert("overrides", config.Field("account", acct.Name), override)
+}
+
+// ruleName names an account's rule for an owner: the account's own repos are
+// the account's name, an organization's are account/org.
+func ruleName(acct Account, t Track) string {
+	if t.Kind == "self" {
+		return acct.Name
+	}
+	return acct.Name + "/" + t.Owner
+}
