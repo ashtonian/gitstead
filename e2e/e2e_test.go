@@ -651,6 +651,58 @@ func TestE2E_SyncRefreshesClones(t *testing.T) {
 	}
 }
 
+// TestE2E_PublishAndRetire: publish pushes an agent's branch to its remote;
+// retire archives the copy's uncommitted work, removes it, and catalogs the
+// archive.
+func TestE2E_PublishAndRetire(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+	remote := filepath.Join(tmp, "remotes", "app.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	src := filepath.Join(tmp, "src", "app")
+	gitCmd(t, tmp, "clone", "-q", remote, src)
+	gitCmd(t, src, "-c", "user.email=e2e@test.local", "-c", "user.name=e2e", "commit", "-q", "--allow-empty", "-m", "init")
+	gitCmd(t, src, "push", "-q", "origin", "HEAD:main")
+	root := filepath.Join(tmp, "workspaces")
+	cfg := fmt.Sprintf("base_dir: %s\nworkspace_defaults:\n  root: %s\n", env.baseDir, root)
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := env.run(t, "ws", "create", "app", "--repo", src, "--agents", "2"); code != 0 {
+		t.Fatalf("ws create exit %d:\n%s", code, out)
+	}
+	a1 := filepath.Join(root, "app", "agent-1")
+	gitCmd(t, a1, "-c", "user.email=e2e@test.local", "-c", "user.name=e2e", "commit", "-q", "--allow-empty", "-m", "agent work")
+
+	if out, code := env.run(t, "ws", "publish", "app", "agent-1"); code != 0 {
+		t.Fatalf("ws publish exit %d:\n%s", code, out)
+	}
+	if got := gitCmd(t, remote, "rev-parse", "refs/heads/agents/app/agent-1"); got != gitCmd(t, a1, "rev-parse", "HEAD") {
+		t.Errorf("the remote's agents/app/agent-1 = %s", got)
+	}
+	if got := gitCmd(t, a1, "rev-parse", "--abbrev-ref", "@{u}"); got != "origin/agents/app/agent-1" {
+		t.Errorf("upstream = %s", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(a1, "notes.txt"), []byte("unsaved"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, code := env.run(t, "ws", "retire", "app", "agent-1", "--yes")
+	if code != 0 || !strings.Contains(out, "archived to") {
+		t.Fatalf("ws retire exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(a1); !os.IsNotExist(err) {
+		t.Error("agent-1's copy is still there")
+	}
+	out, code = env.run(t, "archives", "ls", "--workspace", "app")
+	if code != 0 || !strings.Contains(out, "app/agent-1") || !strings.Contains(out, "untracked") {
+		t.Errorf("archives ls exit %d:\n%s", code, out)
+	}
+	if out, _ := env.run(t, "ws", "status", "app"); !strings.Contains(out, "retired app/agent-1") {
+		t.Errorf("ws status doesn't show the retirement:\n%s", out)
+	}
+}
+
 // TestE2E_RemoteSync adopts a repo whose origin is a local bare remote, gives
 // it uncommitted work and an unpushed commit, and runs `sync` with
 // remote_sync on: both land on the remote under the copy's hidden namespace,

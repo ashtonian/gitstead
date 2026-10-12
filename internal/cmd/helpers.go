@@ -68,15 +68,17 @@ func discoveredKeys[V any](discovered map[string]V) map[string]bool {
 // is bundled into archiveDir first, and a clone that can't be inspected or
 // archived is kept.
 func archivingRemover(ctx context.Context, log *slog.Logger, archiveDir string) discovery.RemoveFunc {
-	return func(key string, repo *state.RepoState) error {
+	return func(key string, repo *state.RepoState) (*state.ArchiveEntry, error) {
 		archived, err := gitops.RemoveClone(ctx, repo.LocalPath, archiveDir, key, false)
 		if err != nil {
 			log.Warn("stale repo kept", "repo", key, "path", repo.LocalPath, "error", err)
-			return err
+			return nil, err
 		}
-		if archived != "" {
-			log.Info("archived stale repo's unique work before deleting it", "repo", key, "archive", archived)
+		if archived == "" {
+			return nil, nil
 		}
-		return nil
+		log.Info("archived stale repo's unique work before deleting it", "repo", key, "archive", archived)
+		entry := archiveEntry(archived, key, repo.LocalPath)
+		return &entry, nil
 	}
 }

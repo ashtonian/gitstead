@@ -21,7 +21,9 @@ type CleanupResult struct {
 
 // RemoveFunc deletes a stale repo's files. When it cannot do so without
 // losing work it must leave them in place and return an error.
-type RemoveFunc func(key string, repo *state.RepoState) error
+// It returns the catalog entry of the archive it saved the repo's unique
+// work to, nil when there was none.
+type RemoveFunc func(key string, repo *state.RepoState) (*state.ArchiveEntry, error)
 
 // StaleScope is the set of tracked repos a discovery pass is entitled to judge. A
 // repo absent from a pass's results only means something if the pass ran the
@@ -112,10 +114,15 @@ func (c Cleanup) Run(st *state.State, discovered map[string]bool, scope StaleSco
 	}
 
 	removed := map[string]bool{}
+	var archives []state.ArchiveEntry
 	for _, d := range due {
-		if err := c.Remove(d.key, &d.repo); err != nil {
+		archive, err := c.Remove(d.key, &d.repo)
+		if err != nil {
 			res.keep(d.key, err)
 			continue
+		}
+		if archive != nil {
+			archives = append(archives, *archive)
 		}
 		removed[d.key] = true
 	}
@@ -123,6 +130,7 @@ func (c Cleanup) Run(st *state.State, discovered map[string]bool, scope StaleSco
 		return res, nil
 	}
 	err = c.Update(func(st *state.State) error {
+		st.Archives = append(st.Archives, archives...)
 		for _, d := range due {
 			repo := st.Repos[d.key]
 			if !removed[d.key] || repo == nil || repo.LocalPath != d.repo.LocalPath || repo.Status != "stale" || st.CheckRemovable(d.key) != nil {

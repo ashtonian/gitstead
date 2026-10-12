@@ -130,6 +130,7 @@ writes a config without asking anything.
 | `git-mgr report` / `log` | Summarize / list recent activity (clones, backups, syncs…) from the operation log. `--since`, `-n`. |
 | `git-mgr workspace` (`ws`, `wg`) | Manage workspaces: repos × agents, each agent in a copy of its own. See [Workspaces](#workspaces). |
 | `git-mgr fleet` | Open several workspaces' agents side by side with tmux, iTerm, Muxy or a plugin; `open`, `plan`, `ls`, `status`, `stop`. See [Fleets](#fleets-and-launchers). |
+| `git-mgr archives ls\|show` | The catalog of unique work saved before copies and repos were deleted, and how to restore each. |
 | `git-mgr install-agent` | Install, list (`--list`) or remove (`--uninstall`) background syncs (launchd/systemd/cron); `--name` and `--repos`/`--tag`/`--set` for several. |
 | `git-mgr install-completions` | Print a shell completion script (bash/zsh/fish). See [Shell completions](#shell-completions). |
 | `git-mgr version` | Print version, commit, build date. |
@@ -602,6 +603,9 @@ rebase or merge. If there is any, it is written to one git bundle in
 `backup.archive_dir` (default `~/.local/share/git-mgr/archive/`) and verified with
 `git bundle verify` before anything is deleted. For a worktree, its branches stay
 in the source repo, so only the working tree and detached commits are archived.
+Each checked-out submodule is inspected the same way, and gets its own bundle;
+a clone's Git LFS objects are kept beside its bundle (hardlinked). Every archive
+is recorded in the catalog, `git-mgr archives ls`.
 If git-mgr can't inspect the repo or write the bundle, nothing is deleted and the
 repo stays tracked. A repo that workspace copies are made from, or that has
 linked worktrees, is never untracked or deleted until they are gone. Stale cleanup lists each repo it kept and why: `discover
@@ -705,8 +709,42 @@ ends runs the way closing their terminal would -- SIGHUP to the agent and its
 shell -- waiting up to `--timeout` (30s); `--kill` then kills what is left.
 
 `ws status` shows each agent's state: `ready` (copies made, never run),
-`running`, `stopping`, `stopped` (with its last exit status) or `missing` (a
-copy gone from disk).
+`running`, `stopping`, `stopped` (with its last exit status), `missing` (a
+copy gone from disk) or `retiring` (a retire that didn't finish), then the
+pull requests its copies opened and the agents recently retired.
+
+### Publishing and retiring
+
+When an agent's work is ready, `git-mgr ws publish <workspace> [agent...]`
+pushes each of its copies' branches to origin, tracking them, and with `--pr`
+opens a pull request per repo -- one per copy, against the repo's default
+branch (`--base`), titled after the branch's last commit and listing its
+commits (`--title`, `--body`, `--draft`). It runs `gh` for GitHub and `glab`
+for GitLab with the token of the provider the repo was discovered through
+(`GH_TOKEN`/`GH_HOST`, `GITLAB_TOKEN`/`GITLAB_HOST`), so the request is opened
+by the right account; a request that is already open is found instead. For
+other hosts it prints the compare URL. The request's URL is recorded and shown
+by `ws status`.
+
+When an agent is done, `git-mgr ws retire <workspace> <agent...>` (or
+`--all`) removes its copies without losing anything:
+
+1. It takes the agent's lease, so no run starts meanwhile; a running agent is
+   kept unless `--stop` ends its run first.
+2. Each copy is inspected afresh -- changed and untracked files, stashes,
+   commits no remote has, a detached HEAD, an unfinished rebase or merge, and
+   the same inside each submodule -- and what would be lost is written to a
+   verified bundle in `backup.archive_dir`, each submodule's to its own; a
+   clone's Git LFS objects, which a bundle only points to, are kept beside it.
+3. The copy is removed, and a tombstone (where it was, its branch, its pull
+   request, its archive) and the archive's catalog entry are kept in state.
+
+`--force` discards the unique work instead. A copy that can't be inspected or
+archived is kept, and its agent shows as `retiring` until a retire finishes.
+`ws rm --delete`, `ws prune` and removals on `git-mgr apply` retire copies the
+same way. `git-mgr archives ls` lists what was saved, from copies and from
+repos `remove --delete` or stale cleanup deleted; `git-mgr archives show <id>`
+prints the restore steps.
 
 A workspace created from flags or adopted is kept as recorded: `ws ensure`
 makes its missing copies again, and only `ws rm` removes it. Declared
@@ -722,6 +760,8 @@ that act on copies take `--agent` to pick one agent's.
 | `open <name>` | Open the agents with a launcher, as a fleet of one (see [Fleets](#fleets-and-launchers)), after making missing copies. `--launcher`, `--agent`, `--cmd`, `--fresh`, `--no-attach`, `--print`, `--no-ensure`. |
 | `run <name> <agent>` | Run the agent in its replica in this terminal, under its lease, then leave a shell there. `--profile`, `--command`, `--fresh`, `--no-check`, `--no-shell`. |
 | `stop <name> [agent]` | End running agents as closing their terminals would. `--timeout`, `--kill`. |
+| `publish <name> [agent...]` | Push agents' branches; `--pr` opens a pull request per repo (`--draft`, `--base`, `--title`, `--body`). |
+| `retire <name> <agent...>` | Archive the agents' copies' unique work, remove the copies, keep tombstones. `--all`, `--stop`, `--timeout`, `--force`, `--yes`. |
 | `check <name>` | Exit non-zero when a copy is missing, on the wrong branch, mid-rebase or merge, or behind. `--agent`. |
 | `status <name>` / `overview` | Agents' states and copies' status for one workspace / across all of them (`--json`). |
 | `fetch <name>` | Fetch each source once, then refresh the clones from it. |
@@ -729,7 +769,7 @@ that act on copies take `--agent` to pick one agent's.
 | `backup <name>` / `recover <name>` | Back up / restore each copy's WIP (`--offsite`; `recover --into`/`--apply`). |
 | `prune <name>` | Remove copies with no unique work: clean, no stash, nothing unpushed, verified by a full inspection. `--dry-run`, `--all`. |
 | `ls` | List workspaces, created and declared. |
-| `rm <name>` | Forget the workspace, leaving its files. `--delete` removes each copy after archiving its unique work; `--force` discards it instead; `--offsite` takes each copy offsite first and keeps any it can't. |
+| `rm <name>` | Forget the workspace, leaving its files. `--delete` retires every copy; `--force` discards unique work instead; `--offsite` takes each copy offsite first and keeps any it can't; `--stop` ends running agents first. |
 | `adopt <name> <dir>` | Record a directory of existing checkouts as a workspace, one agent per checkout. |
 
 `git-mgr sync` backs up every copy (and, with `remote_sync`, takes it

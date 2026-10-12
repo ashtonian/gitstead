@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -18,18 +20,23 @@ type UniqueWork struct {
 	UnpushedCommits int    // commits on local branches or HEAD that no remote-tracking ref reaches
 	DetachedCommits int    // commits reachable only from a detached HEAD
 	InProgress      string // "rebase", "merge", "cherry-pick" or "revert" when one is under way
+	// Submodules holds, by path, the unique work of each checked-out
+	// submodule that has some. A submodule's repository goes with the copy
+	// that checked it out, so all of it is lost.
+	Submodules map[string]UniqueWork
 }
 
 // LostWithClone reports whether deleting a whole clone would lose work.
 func (u UniqueWork) LostWithClone() bool {
-	return u.inWorkingTree() || u.Stashes > 0 || u.UnpushedCommits > 0
+	return u.inWorkingTree() || u.Stashes > 0 || u.UnpushedCommits > 0 || len(u.Submodules) > 0
 }
 
 // LostWithWorktree reports whether removing a linked worktree would lose work.
 // Its branches and stashes live in the shared repository and survive; its
-// working tree, index and commits reachable only from a detached HEAD don't.
+// working tree, index, submodules and commits reachable only from a detached
+// HEAD don't.
 func (u UniqueWork) LostWithWorktree() bool {
-	return u.inWorkingTree() || u.DetachedCommits > 0
+	return u.inWorkingTree() || u.DetachedCommits > 0 || len(u.Submodules) > 0
 }
 
 func (u UniqueWork) inWorkingTree() bool {
@@ -54,16 +61,67 @@ func (u UniqueWork) String() string {
 	if u.InProgress != "" {
 		parts = append(parts, u.InProgress+" in progress")
 	}
+	for _, path := range slices.Sorted(maps.Keys(u.Submodules)) {
+		parts = append(parts, "submodule "+path+": "+u.Submodules[path].String())
+	}
 	if len(parts) == 0 {
 		return "no unique work"
 	}
 	return strings.Join(parts, ", ")
 }
 
-// InspectUniqueWork reports the unique work in the repository at repoPath. Any
-// git failure is returned as an error: a caller deciding whether to delete must
-// treat "could not tell" as unsafe.
+// InspectUniqueWork reports the unique work in the repository at repoPath and
+// in its checked-out submodules. Any git failure is returned as an error: a
+// caller deciding whether to delete must treat "could not tell" as unsafe.
 func InspectUniqueWork(ctx context.Context, repoPath string) (UniqueWork, error) {
+	u, err := inspectRepo(ctx, repoPath)
+	if err != nil {
+		return u, err
+	}
+	subs, err := Submodules(ctx, repoPath)
+	if err != nil {
+		return u, err
+	}
+	for _, sub := range subs {
+		w, err := inspectRepo(ctx, filepath.Join(repoPath, sub))
+		if err != nil {
+			return u, fmt.Errorf("submodule %s: %w", sub, err)
+		}
+		if w.LostWithClone() {
+			if u.Submodules == nil {
+				u.Submodules = map[string]UniqueWork{}
+			}
+			u.Submodules[sub] = w
+		}
+	}
+	return u, nil
+}
+
+// Submodules lists the paths of the repository's checked-out submodules,
+// nested ones included, relative to it.
+func Submodules(ctx context.Context, repoPath string) ([]string, error) {
+	if !fileExists(filepath.Join(repoPath, ".gitmodules")) {
+		return nil, nil
+	}
+	out, err := Git(ctx, repoPath, "submodule", "status", "--recursive")
+	if err != nil {
+		return nil, fmt.Errorf("listing submodules of %s: %w", repoPath, err)
+	}
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		// "-<sha> path" is a submodule that isn't checked out.
+		if len(f) < 2 || strings.HasPrefix(line, "-") {
+			continue
+		}
+		paths = append(paths, f[1])
+	}
+	return paths, nil
+}
+
+// inspectRepo reports the unique work of one repository, not its
+// submodules.
+func inspectRepo(ctx context.Context, repoPath string) (UniqueWork, error) {
 	var u UniqueWork
 
 	status, err := GitOutput(ctx, repoPath, "status", "--porcelain=v1", "-z", "--untracked-files=all")

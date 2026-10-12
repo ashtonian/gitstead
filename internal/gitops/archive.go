@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -27,7 +30,15 @@ type ArchiveMeta struct {
 	Branch  string            `json:"branch,omitempty"`
 	Work    string            `json:"work"`
 	Created time.Time         `json:"created"`
-	Restore string            `json:"restore"`
+	// Bundle is the repository's own bundle; "" when only its submodules
+	// had work to save.
+	Bundle  string `json:"bundle,omitempty"`
+	Restore string `json:"restore,omitempty"`
+	// Submodules maps each submodule with work saved to its own archive.
+	Submodules map[string]string `json:"submodules,omitempty"`
+	// LFS holds the clone's Git LFS objects, which a bundle carries only
+	// pointers to; copy them into the restored repo's .git/lfs/objects.
+	LFS string `json:"lfs,omitempty"`
 }
 
 type archiveScope int
@@ -42,7 +53,10 @@ const (
 // to save. The bundle holds local branches and HEAD minus what any remote
 // already has, every stash entry, and a snapshot of the index, working tree and
 // untracked files that `git stash apply --index` restores. A JSON file beside
-// it records the remotes and the restore command.
+// it records the remotes and the restore command. Each submodule with work
+// of its own gets its own archive, and a clone's Git LFS objects are kept
+// beside the bundle. When only submodules had work, the JSON file's path is
+// returned.
 func ArchiveUniqueWork(ctx context.Context, repoPath, dir, name string) (string, error) {
 	return archive(ctx, repoPath, dir, name, scopeClone)
 }
@@ -65,6 +79,42 @@ func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope
 	}
 	id := safeName(name) + "-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 	bundle := filepath.Join(dir, id+".bundle")
+	metaPath := filepath.Join(dir, id+".json")
+	meta := ArchiveMeta{Source: repoPath, Remotes: remoteURLs(ctx, repoPath), Work: work.String(), Created: time.Now().UTC()}
+	meta.Branch, _ = Git(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
+
+	for _, sub := range slices.Sorted(maps.Keys(work.Submodules)) {
+		path, err := archive(ctx, filepath.Join(repoPath, sub), dir, name+"-"+safeName(sub), scopeClone)
+		if err != nil {
+			return "", fmt.Errorf("archiving submodule %s: %w", sub, err)
+		}
+		if meta.Submodules == nil {
+			meta.Submodules = map[string]string{}
+		}
+		meta.Submodules[sub] = path
+	}
+	own := work
+	own.Submodules = nil
+	ownLost := own.LostWithClone()
+	if scope == scopeWorktree {
+		ownLost = own.LostWithWorktree()
+	}
+	if scope == scopeClone {
+		lfs := filepath.Join(ResolveGitDirs(ctx, repoPath).CommonDir, "lfs", "objects")
+		if hasFiles(lfs) {
+			meta.LFS = filepath.Join(dir, id+".lfs")
+			if err := linkTree(lfs, meta.LFS); err != nil {
+				return "", fmt.Errorf("keeping LFS objects: %w", err)
+			}
+		}
+	}
+	if !ownLost {
+		if err := writeMeta(metaPath, meta); err != nil {
+			return "", err
+		}
+		return metaPath, nil
+	}
+
 	refs := archiveRefPrefix + id + "/"
 	defer deleteRefs(ctx, repoPath, refs)
 
@@ -119,26 +169,87 @@ func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope
 		return "", fmt.Errorf("verifying bundle: %w", err)
 	}
 
-	meta := ArchiveMeta{
-		Source:  repoPath,
-		Remotes: remoteURLs(ctx, repoPath),
-		Work:    work.String(),
-		Created: time.Now().UTC(),
-		Restore: fmt.Sprintf("git clone <remote> restored && cd restored && git fetch %s '+refs/*:refs/restored/*'"+
-			" && git stash apply --index refs/restored/%sworktree", bundle, strings.TrimPrefix(refs, "refs/")),
+	meta.Bundle = bundle
+	meta.Restore = fmt.Sprintf("git clone <remote> restored && cd restored && git fetch %s '+refs/*:refs/restored/*'"+
+		" && git stash apply --index refs/restored/%sworktree", bundle, strings.TrimPrefix(refs, "refs/"))
+	if err := writeMeta(metaPath, meta); err != nil {
+		return "", err
 	}
-	meta.Branch, _ = Git(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
+	return bundle, nil
+}
+
+// ReadArchive returns the description of the archive at path, a bundle or
+// its description, and the archive's ID: its file name without extension.
+func ReadArchive(path string) (ArchiveMeta, string, error) {
+	base := strings.TrimSuffix(strings.TrimSuffix(path, ".bundle"), ".json")
+	var meta ArchiveMeta
+	data, err := os.ReadFile(base + ".json")
+	if err != nil {
+		return meta, "", err
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return meta, "", fmt.Errorf("reading %s.json: %w", base, err)
+	}
+	return meta, filepath.Base(base), nil
+}
+
+func writeMeta(path string, meta ArchiveMeta) error {
 	var data bytes.Buffer
 	enc := json.NewEncoder(&data)
 	enc.SetEscapeHTML(false) // keep the restore command copy-pasteable
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(meta); err != nil {
-		return "", err
+		return err
 	}
-	if err := os.WriteFile(strings.TrimSuffix(bundle, ".bundle")+".json", data.Bytes(), 0o600); err != nil {
-		return "", fmt.Errorf("writing archive metadata: %w", err)
+	if err := os.WriteFile(path, data.Bytes(), 0o600); err != nil {
+		return fmt.Errorf("writing archive metadata: %w", err)
 	}
-	return bundle, nil
+	return nil
+}
+
+// hasFiles reports whether dir holds any file, at any depth.
+func hasFiles(dir string) bool {
+	found := false
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
+}
+
+// linkTree makes dst a copy of the files under src: hardlinks where it can,
+// which cost no space, copies across filesystems.
+func linkTree(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, path)
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o700)
+		}
+		if os.Link(path, target) == nil {
+			return nil
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, in); err != nil {
+			out.Close()
+			return err
+		}
+		return out.Close()
+	})
 }
 
 // ErrHasWorktrees reports a clone with linked worktrees: deleting it would

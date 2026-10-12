@@ -33,6 +33,11 @@ type State struct {
 	Workspaces map[string]*WorkspaceState `yaml:"workspaces,omitempty"`
 	Fleets     map[string]*FleetState     `yaml:"fleets,omitempty"`
 	Schedules  map[string]*ScheduleState  `yaml:"schedules,omitempty"`
+	// Archives catalogs the unique work saved before copies and repos were
+	// deleted: what outlives what it came from.
+	Archives []ArchiveEntry `yaml:"archives,omitempty"`
+	// Tombstones record the copies retired, newest last.
+	Tombstones []Tombstone `yaml:"tombstones,omitempty"`
 
 	// Internal: path to the state file for Save()
 	path string `yaml:"-"`

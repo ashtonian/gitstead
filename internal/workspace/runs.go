@@ -15,11 +15,15 @@ const (
 	AgentStopping = "stopping" // `ws stop` asked its run to end
 	AgentStopped  = "stopped"  // its last run ended
 	AgentMissing  = "missing"  // a copy of its is gone from disk
+	AgentRetiring = "retiring" // retiring it began and didn't finish
 )
 
 // AgentState is where an agent is in its lifecycle, from its lease and its
 // replica's record. stateDir is the state file's directory.
 func AgentState(stateDir, workspace string, r *state.ReplicaState) string {
+	if !r.Retiring.IsZero() {
+		return AgentRetiring
+	}
 	if _, held := agents.Read(agents.LeasePath(stateDir, workspace, r.Agent)); held {
 		if run := r.Run; run != nil && run.StopRequested.After(run.Started) {
 			return AgentStopping
@@ -48,12 +52,8 @@ func ForgetRuns(stateDir, workspace string, agentNames ...string) {
 	}
 }
 
-// CheckStopped fails when the agent's run holds its lease: its copies can't
-// be removed from under it. An empty stateDir checks nothing.
-func CheckStopped(stateDir, workspace, agent string) error {
-	if stateDir == "" {
-		return nil
-	}
+// CheckIdle fails when the agent's run holds its lease.
+func CheckIdle(stateDir, workspace, agent string) error {
 	if h, held := agents.Read(agents.LeasePath(stateDir, workspace, agent)); held {
 		return fmt.Errorf("%s/%s is running (pid %d); stop it first: git-mgr ws stop %s %s", workspace, agent, h.PID, workspace, agent)
 	}

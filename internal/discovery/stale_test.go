@@ -40,13 +40,15 @@ func removeAndDelete() config.CleanupConfig {
 
 // deleteFiles deletes unconditionally. Archiving unique work first is
 // gitops.RemoveClone's job and is tested there.
-func deleteFiles(_ string, repo *state.RepoState) error { return os.RemoveAll(repo.LocalPath) }
+func deleteFiles(_ string, repo *state.RepoState) (*state.ArchiveEntry, error) {
+	return nil, os.RemoveAll(repo.LocalPath)
+}
 
 // mustNotRemove fails the test if a pass tries to delete anything.
 func mustNotRemove(t *testing.T) RemoveFunc {
-	return func(key string, _ *state.RepoState) error {
+	return func(key string, _ *state.RepoState) (*state.ArchiveEntry, error) {
 		t.Errorf("unexpected removal of %s", key)
-		return errors.New("unexpected removal")
+		return nil, errors.New("unexpected removal")
 	}
 }
 
@@ -102,7 +104,7 @@ func TestCleanup_ApplyDeletes(t *testing.T) {
 // unsafe path) stays tracked and is reported with the reason.
 func TestCleanup_KeepsRepoWhenRemoveFails(t *testing.T) {
 	st, dir := stalePastGrace(t)
-	refuse := func(string, *state.RepoState) error { return errors.New("cannot archive") }
+	refuse := func(string, *state.RepoState) (*state.ArchiveEntry, error) { return nil, errors.New("cannot archive") }
 
 	res := run(t, st, map[string]bool{}, StaleScope{all: true}, removeAndDelete(), refuse)
 
@@ -120,9 +122,9 @@ func TestCleanup_KeepsRepoWhenRemoveFails(t *testing.T) {
 // A repo found again while its files were being deleted stays tracked.
 func TestCleanup_KeepsRepoChangedMeanwhile(t *testing.T) {
 	st, _ := stalePastGrace(t)
-	foundAgain := func(key string, _ *state.RepoState) error {
+	foundAgain := func(key string, _ *state.RepoState) (*state.ArchiveEntry, error) {
 		st.Repos[key].Status = "clean" // another run's discovery found it
-		return nil
+		return nil, nil
 	}
 
 	res := run(t, st, map[string]bool{}, StaleScope{all: true}, removeAndDelete(), foundAgain)
@@ -339,5 +341,17 @@ func TestCleanup_KeepsARepoWithWorkspaceCopies(t *testing.T) {
 		if _, err := os.Stat(dir); err != nil {
 			t.Errorf("%s: the repo's files were deleted", policy)
 		}
+	}
+}
+
+// The archive of a deleted stale repo's unique work goes in the catalog.
+func TestCleanup_CatalogsArchives(t *testing.T) {
+	st, dir := stalePastGrace(t)
+	archived := func(key string, repo *state.RepoState) (*state.ArchiveEntry, error) {
+		return &state.ArchiveEntry{ID: "a1", Repo: key, Source: repo.LocalPath}, os.RemoveAll(repo.LocalPath)
+	}
+	res := run(t, st, map[string]bool{}, StaleScope{all: true}, removeAndDelete(), archived)
+	if res.Reaped != 1 || len(st.Archives) != 1 || st.Archives[0].ID != "a1" || st.Archives[0].Source != dir {
+		t.Errorf("result %+v, archives %+v", res, st.Archives)
 	}
 }
