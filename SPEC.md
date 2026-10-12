@@ -362,6 +362,17 @@ entries.
 # git-mgr configuration
 # ============================================================================
 
+# Accounts: one identity on one or more hosts. Its ssh_key and git identity are
+# written into every repo it covers (core.sshCommand, user.name, user.email).
+# A repo's account is named by an override, its repos: entry, its rule or the
+# rule's provider (`account:`), else matched by hosts and owners.
+accounts:
+  - name: work
+    hosts: [github.com]
+    owners: [acme]                 # empty = every owner on these hosts no other account claims
+    ssh_key: "~/.ssh/id_work"
+    git: {name: "Ashton Kinslow", email: "you@acme.com"}
+
 # Base directory for all cloned repos. Supports ~ expansion.
 base_dir: "~/repos"
 
@@ -738,6 +749,7 @@ repos:
     # --- Applied git config ---
     managed_config:                # repo-local keys git-mgr set, and the values it set
       core.sshcommand: "ssh -i '/Users/me/.ssh/id_work' -o IdentitiesOnly=yes"
+      user.email: "you@acme.com"
 
 # Workgroups. declared: true means config declares it, so removing the
 # declaration removes the workgroup; workgroups created from flags or adopted
@@ -778,7 +790,7 @@ left unless `reconcile.drift: overwrite`.
 | `adopt` | no | Record a clone already at the desired path (an interrupted clone, or `adopt`). |
 | `rename` | no | A tracked repo with the same provider ID on the same host that discovery no longer finds under its key: rekey state and workgroup references. |
 | `url` | no | `git remote set-url origin`. |
-| `config` | no | Set or unset a managed key, or start/stop managing one already set to the wanted value. |
+| `config`, `member-config` | no | Set or unset a managed key (`core.sshcommand`, `user.name`, `user.email`) in a repo or clone member, or start/stop managing one already set to the wanted value. |
 | `tags` | no | Update tags and discovering rule in state. |
 | `move` | yes | Rename the directory (same filesystem only), `git worktree repair`, repoint workgroup sources, remove now-empty parents below `base_dir`. A move already done by hand or before an interruption is just recorded. |
 | `create-workgroup`, `create-member` | no | `workgroup.Ensure`; record members with copy IDs; `sync: true` tracks the repos. |
@@ -790,6 +802,12 @@ Repos added by hand are pinned: their path and URL are the recorded ones. A
 repo whose rule failed, or that a filtered run didn't cover, is not judged.
 Paths wanted by two repos, occupied destinations, kind or source changes of a
 workgroup and branch changes of an existing member are reported as blocked.
+
+`ApplyPlan` runs repo actions first, then plans workgroups again against the
+updated state, since workgroups are built from repos (a member cloned from a
+repo the same run clones). The first plan is made against the state as it will
+be once the run's clones are done; a disruptive workgroup action in the second
+plan runs only if the first showed it.
 
 `Plan.Apply` first records observations (copy IDs, provider IDs, discovery
 metadata), then runs the selected actions in order -- renames first -- saving

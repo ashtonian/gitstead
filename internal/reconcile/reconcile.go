@@ -47,6 +47,7 @@ const (
 	KindForgetMember    Kind = "forget-member"    // drop a member that is already gone from disk
 	KindRemoveWorkgroup Kind = "remove-workgroup" // archive and remove a workgroup no longer declared
 	KindMemberURL       Kind = "member-url"       // change a clone member's origin URL
+	KindMemberConfig    Kind = "member-config"    // set or unset a clone member's managed git config key
 )
 
 // Action is one change a plan makes.
@@ -71,7 +72,7 @@ type Action struct {
 func (a Action) Workgroup() bool {
 	switch a.Kind {
 	case KindCreateWorkgroup, KindWorkgroup, KindCreateMember, KindMoveMember,
-		KindRemoveMember, KindForgetMember, KindRemoveWorkgroup, KindMemberURL:
+		KindRemoveMember, KindForgetMember, KindRemoveWorkgroup, KindMemberURL, KindMemberConfig:
 		return true
 	}
 	return false

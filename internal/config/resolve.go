@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/repourl"
@@ -136,46 +137,122 @@ func (c *Config) CloneProtocolFor(repoKey, discoveredBy string) string {
 	return c.CloneProtocol
 }
 
-// ResolveSSHKey returns the SSH key path for a given repo, checking overrides,
-// then its `repos:` entry, then the discovering rule, then the rule's provider.
-// "" means none is configured.
-func (c *Config) ResolveSSHKey(repoKey, ruleName string) string {
-	var overrideKey string
-	for _, o := range c.Overrides {
-		if matchesOverride(repoKey, o.Repos) && o.SSHKey != "" {
-			overrideKey = o.SSHKey
+// binding is one place config can bind a repo to a key or an account.
+type binding struct {
+	sshKey, account string
+}
+
+// bindings lists the places that may bind repoKey, most specific first:
+// matching overrides (later entries first, as later entries win), the repo's
+// `repos:` entry, its discovering rule, then that rule's provider.
+func (c *Config) bindings(repoKey, ruleName string) []binding {
+	var out []binding
+	for i := len(c.Overrides) - 1; i >= 0; i-- {
+		if o := c.Overrides[i]; matchesOverride(repoKey, o.Repos) {
+			out = append(out, binding{o.SSHKey, o.Account})
 		}
 	}
-	if overrideKey != "" {
-		return ExpandHome(overrideKey)
-	}
-
 	for _, mr := range c.Repos {
-		if mr.SSHKey == "" {
+		if id, err := repourl.Parse(mr.URL); err == nil && id.Key() == repoKey {
+			out = append(out, binding{mr.SSHKey, mr.Account})
+		}
+	}
+	for _, r := range c.Discovery {
+		if r.Name != ruleName {
 			continue
 		}
-		if id, err := repourl.Parse(mr.URL); err == nil && id.Key() == repoKey {
-			return ExpandHome(mr.SSHKey)
-		}
-	}
-
-	for _, r := range c.Discovery {
-		if r.Name == ruleName && r.SSHKey != "" {
-			return ExpandHome(r.SSHKey)
-		}
-	}
-
-	for _, r := range c.Discovery {
-		if r.Name == ruleName {
-			for _, p := range c.Providers {
-				if p.Name == r.Provider && p.SSHKey != "" {
-					return ExpandHome(p.SSHKey)
-				}
+		out = append(out, binding{r.SSHKey, r.Account})
+		for _, p := range c.Providers {
+			if p.Name == r.Provider {
+				out = append(out, binding{p.SSHKey, p.Account})
 			}
 		}
 	}
+	return out
+}
 
+// AccountFor returns the account that covers a repo: the one the most
+// specific binding names, else the one whose hosts and owners match the
+// repo's key. nil means no account covers it.
+func (c *Config) AccountFor(repoKey, ruleName string) *Account {
+	for _, b := range c.bindings(repoKey, ruleName) {
+		if b.account != "" {
+			return c.FindAccount(b.account)
+		}
+	}
+	return c.accountByOwner(repoKey)
+}
+
+// ResolveSSHKey returns the SSH key for a repo: from the most specific binding
+// that sets an ssh_key or names an account, else from the account matching
+// its host and owner. "" means none is configured.
+func (c *Config) ResolveSSHKey(repoKey, ruleName string) string {
+	for _, b := range c.bindings(repoKey, ruleName) {
+		switch {
+		case b.sshKey != "":
+			return ExpandHome(b.sshKey)
+		case b.account != "":
+			if a := c.FindAccount(b.account); a != nil {
+				return ExpandHome(a.SSHKey)
+			}
+			return ""
+		}
+	}
+	if a := c.accountByOwner(repoKey); a != nil {
+		return ExpandHome(a.SSHKey)
+	}
 	return ""
+}
+
+// FindAccount returns the named account, or nil.
+func (c *Config) FindAccount(name string) *Account {
+	for i := range c.Accounts {
+		if c.Accounts[i].Name == name {
+			return &c.Accounts[i]
+		}
+	}
+	return nil
+}
+
+// accountByOwner matches a repo key against accounts' hosts and owners. An
+// account listing the repo's owner (or a parent group of it) wins over one
+// covering its whole host.
+func (c *Config) accountByOwner(repoKey string) *Account {
+	host, owner := splitKey(repoKey)
+	var hostWide *Account
+	for i := range c.Accounts {
+		a := &c.Accounts[i]
+		if !slices.Contains(a.Hosts, host) {
+			continue
+		}
+		if len(a.Owners) == 0 {
+			hostWide = a
+			continue
+		}
+		for _, o := range a.Owners {
+			if ownerCovers(o, owner) {
+				return a
+			}
+		}
+	}
+	return hostWide
+}
+
+// splitKey splits host/owner/name into its host and owner; GitLab owners can
+// span several segments.
+func splitKey(repoKey string) (host, owner string) {
+	host, rest, _ := strings.Cut(repoKey, "/")
+	if i := strings.LastIndex(rest, "/"); i >= 0 {
+		owner = rest[:i]
+	}
+	return host, owner
+}
+
+// ownerCovers reports whether an account owner covers a repo owner: the same
+// owner, or a group the repo's owner is a subgroup of.
+func ownerCovers(accountOwner, repoOwner string) bool {
+	return strings.EqualFold(accountOwner, repoOwner) ||
+		strings.HasPrefix(strings.ToLower(repoOwner), strings.ToLower(accountOwner)+"/")
 }
 
 func matchesOverride(repoKey string, patterns []string) bool {

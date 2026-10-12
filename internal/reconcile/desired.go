@@ -15,9 +15,12 @@ import (
 	"github.com/ashtonian/git-mgr/internal/workgroup"
 )
 
-// keySSHCommand is the managed git config key for a repo's SSH key, in the
-// lower-case form `git config --list` reports.
-const keySSHCommand = "core.sshcommand"
+// Managed git config keys, in the lower-case form `git config --list` reports.
+const (
+	keySSHCommand = "core.sshcommand"
+	keyUserName   = "user.name"
+	keyUserEmail  = "user.email"
+)
 
 // Repo is what config and discovery want for one tracked repo.
 type Repo struct {
@@ -26,7 +29,9 @@ type Repo struct {
 	ProviderID string
 	Path       string
 	URL        string
-	SSHKey     string   // the key git-mgr uses for this repo; "" for ssh's own choice
+	SSHKey     string // the key git-mgr uses for this repo; "" for ssh's own choice
+	Account    string // the account covering it; "" for none
+	Identity   config.GitIdentity
 	Tags       []string // sorted
 	UserTags   []string
 	Rule       string            // discovering rule; "_manual" for repos: entries
@@ -46,11 +51,34 @@ func SSHCommand(key string) string {
 	return "ssh -i " + shellutil.Quote(key) + " -o IdentitiesOnly=yes"
 }
 
-func managedConfig(url, sshKey string) map[string]string {
-	if sshKey == "" || repourl.IsHTTP(url) {
+// managedConfig is the repo-local git config git-mgr keeps for a copy: the
+// SSH key for SSH remotes, and the covering account's commit identity.
+func managedConfig(url, sshKey string, id config.GitIdentity) map[string]string {
+	cfg := map[string]string{}
+	if sshKey != "" && !repourl.IsHTTP(url) {
+		cfg[keySSHCommand] = SSHCommand(sshKey)
+	}
+	if id.Name != "" {
+		cfg[keyUserName] = id.Name
+	}
+	if id.Email != "" {
+		cfg[keyUserEmail] = id.Email
+	}
+	if len(cfg) == 0 {
 		return nil
 	}
-	return map[string]string{keySSHCommand: SSHCommand(sshKey)}
+	return cfg
+}
+
+// access fills in the SSH key, account, identity and managed config config
+// gives r, which must already have its key, rule and URL.
+func (r *Repo) access(cfg *config.Config) {
+	r.SSHKey = cfg.ResolveSSHKey(r.Key, r.Rule)
+	r.Account, r.Identity = "", config.GitIdentity{}
+	if a := cfg.AccountFor(r.Key, r.Rule); a != nil {
+		r.Account, r.Identity = a.Name, a.Git
+	}
+	r.Config = managedConfig(r.URL, r.SSHKey, r.Identity)
 }
 
 // Repos returns what config wants for every repo this run can judge: those
@@ -82,8 +110,7 @@ func Repos(cfg *config.Config, st *state.State, discovered map[string]discovery.
 			r.URL = cloneURL(found, cfg.CloneProtocolFor(key, found.DiscoveredBy))
 		}
 		r.Tags = tagUnion(found.Tags, r.UserTags)
-		r.SSHKey = cfg.ResolveSSHKey(key, r.Rule)
-		r.Config = managedConfig(r.URL, r.SSHKey)
+		r.access(cfg)
 		out[key] = r
 	}
 
@@ -104,8 +131,7 @@ func Repos(cfg *config.Config, st *state.State, discovered map[string]discovery.
 			// Its rule ran and didn't find it: only the hand-given tags remain.
 			r.Rule, r.Tags = "", tagUnion(applied.UserTags)
 		}
-		r.SSHKey = cfg.ResolveSSHKey(key, r.Rule)
-		r.Config = managedConfig(r.URL, r.SSHKey)
+		r.access(cfg)
 		out[key] = r
 	}
 
@@ -139,8 +165,7 @@ func HandAdded(cfg *config.Config, id *repourl.Identity, path string, tags []str
 		Key: key, Host: id.Host, Owner: id.Owner, Name: id.Name, FullName: id.FullName,
 		Path: path, URL: id.URL, UserTags: tags, Tags: tagUnion(tags), Pinned: true,
 	}
-	r.SSHKey = cfg.ResolveSSHKey(key, "")
-	r.Config = managedConfig(r.URL, r.SSHKey)
+	r.access(cfg)
 	return r
 }
 
@@ -188,6 +213,9 @@ type Workgroup struct {
 	Declared bool
 	Track    bool              // sync: true -- track the underlying repos
 	SSHKeys  map[string]string // clone member name -> SSH key
+	// Configs holds each clone member's managed git config. Worktree members
+	// share their source repo's config, which is managed as a repo.
+	Configs map[string]map[string]string
 }
 
 // Workgroups returns what is wanted for every workgroup: those declared in
@@ -204,43 +232,65 @@ func Workgroups(cfg *config.Config, st *state.State) (map[string]Workgroup, []Bl
 			blocked = append(blocked, Blocked{Target: decl.Name, Reason: err.Error()})
 			continue
 		}
-		out[decl.Name] = Workgroup{Spec: spec, Declared: true, Track: decl.Sync, SSHKeys: memberSSHKeys(cfg, st, spec)}
+		w := Workgroup{Spec: spec, Declared: true, Track: decl.Sync}
+		w.memberAccess(cfg, st)
+		out[decl.Name] = w
 	}
 	for name, ws := range st.Workgroups {
 		if _, ok := out[name]; ok || ws.Declared {
 			continue
 		}
-		spec := workgroup.FromState(ws)
-		out[name] = Workgroup{Spec: spec, SSHKeys: memberSSHKeys(cfg, st, spec)}
+		w := Workgroup{Spec: workgroup.FromState(ws)}
+		w.memberAccess(cfg, st)
+		out[name] = w
 	}
 	return out, blocked
 }
 
-func memberSSHKeys(cfg *config.Config, st *state.State, spec *workgroup.Spec) map[string]string {
-	keys := map[string]string{}
-	for _, m := range spec.Members {
-		if k := MemberSSHKey(cfg, st, m); k != "" {
-			keys[m.Name] = k
+// memberAccess resolves each clone member's SSH key and managed git config.
+func (w *Workgroup) memberAccess(cfg *config.Config, st *state.State) {
+	w.SSHKeys, w.Configs = map[string]string{}, map[string]map[string]string{}
+	if w.Spec.Kind != "clone" {
+		return
+	}
+	for _, m := range w.Spec.Members {
+		key, rule, ok := memberRepo(st, m)
+		if !ok {
+			continue
+		}
+		r := Repo{Key: key, Rule: rule, URL: m.RepoURL}
+		r.access(cfg)
+		if r.SSHKey != "" && !repourl.IsHTTP(m.RepoURL) {
+			w.SSHKeys[m.Name] = r.SSHKey
+		}
+		if r.Config != nil {
+			w.Configs[m.Name] = r.Config
 		}
 	}
-	return keys
+}
+
+// memberRepo returns the tracking key and discovering rule of the repo a
+// clone member is cloned from.
+func memberRepo(st *state.State, m workgroup.Member) (key, rule string, ok bool) {
+	if m.RepoKey != "" {
+		if r, tracked := st.Repos[m.RepoKey]; tracked {
+			rule = r.DiscoveredBy
+		}
+		return m.RepoKey, rule, true
+	}
+	id, err := repourl.Parse(m.RepoURL)
+	if err != nil {
+		return "", "", false
+	}
+	return id.Key(), "", true
 }
 
 // MemberSSHKey returns the SSH key for cloning a clone member: that of the
 // tracked repo it comes from, or that config gives its URL.
 func MemberSSHKey(cfg *config.Config, st *state.State, m workgroup.Member) string {
-	if m.RepoKey != "" {
-		rule := ""
-		if r, ok := st.Repos[m.RepoKey]; ok {
-			rule = r.DiscoveredBy
-		}
-		return cfg.ResolveSSHKey(m.RepoKey, rule)
-	}
-	if m.RepoURL == "" || repourl.IsHTTP(m.RepoURL) {
+	key, rule, ok := memberRepo(st, m)
+	if !ok || repourl.IsHTTP(m.RepoURL) {
 		return ""
 	}
-	if id, err := repourl.Parse(m.RepoURL); err == nil {
-		return cfg.ResolveSSHKey(id.Key(), "")
-	}
-	return ""
+	return cfg.ResolveSSHKey(key, rule)
 }

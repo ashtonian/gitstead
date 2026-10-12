@@ -57,6 +57,10 @@ func Validate(cfg *Config) error {
 		}
 	}
 
+	if err := validateAccounts(cfg); err != nil {
+		return err
+	}
+
 	// Workgroup cross-field validation
 	wgNames := make(map[string]bool)
 	for _, wg := range cfg.Workgroups {
@@ -150,6 +154,63 @@ func validateSelector(r DiscoveryRule, typ string) error {
 	case "github", "gitea":
 		if r.Group != "" {
 			return fmt.Errorf("discovery rule %q: 'group' is not valid for a %s provider (use 'org')", r.Name, typ)
+		}
+	}
+	return nil
+}
+
+// validateAccounts checks account names are unique, every `account:`
+// reference names one, and no two accounts claim the same owner on a host.
+func validateAccounts(cfg *Config) error {
+	names := map[string]bool{}
+	claims := map[string]string{} // host + "\x00" + lower-case owner ("" for the whole host) -> account
+	for _, a := range cfg.Accounts {
+		if names[a.Name] {
+			return fmt.Errorf("duplicate account name: %q", a.Name)
+		}
+		names[a.Name] = true
+		owners := a.Owners
+		if len(owners) == 0 {
+			owners = []string{""}
+		}
+		for _, h := range a.Hosts {
+			for _, o := range owners {
+				claim := h + "\x00" + strings.ToLower(o)
+				if other, ok := claims[claim]; ok {
+					what := "all of " + h
+					if o != "" {
+						what = h + "/" + o
+					}
+					return fmt.Errorf("accounts %q and %q both cover %s", other, a.Name, what)
+				}
+				claims[claim] = a.Name
+			}
+		}
+	}
+	check := func(where, name string) error {
+		if name != "" && !names[name] {
+			return fmt.Errorf("%s names unknown account %q", where, name)
+		}
+		return nil
+	}
+	for _, p := range cfg.Providers {
+		if err := check("provider "+p.Name, p.Account); err != nil {
+			return err
+		}
+	}
+	for _, r := range cfg.Discovery {
+		if err := check("discovery rule "+r.Name, r.Account); err != nil {
+			return err
+		}
+	}
+	for _, mr := range cfg.Repos {
+		if err := check("repos entry "+mr.URL, mr.Account); err != nil {
+			return err
+		}
+	}
+	for _, o := range cfg.Overrides {
+		if err := check(fmt.Sprintf("override %v", o.Repos), o.Account); err != nil {
+			return err
 		}
 	}
 	return nil

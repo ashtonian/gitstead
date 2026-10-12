@@ -35,7 +35,7 @@ func (c *PlanCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	plan, err := fullPlan(ctx, cfg, st)
+	plan, _, err := fullPlan(ctx, cfg, st)
 	if err != nil {
 		return err
 	}
@@ -59,7 +59,7 @@ func (c *ApplyCmd) Run(ctx *Context) error {
 	}
 	defer unlock()
 
-	plan, err := fullPlan(ctx, cfg, st)
+	plan, scope, err := fullPlan(ctx, cfg, st)
 	if err != nil {
 		return err
 	}
@@ -73,25 +73,26 @@ func (c *ApplyCmd) Run(ctx *Context) error {
 			return nil
 		}
 	}
-	results := plan.Apply(ctx.GoCtx(), reconcileEnv(cfg, st), reconcile.All)
+	results := reconcile.ApplyPlan(ctx.GoCtx(), cfg, reconcileEnv(cfg, st), plan, scope, reconcile.All)
 	logResults(ctx, results)
 	return errors.Join(printResults(results, resultsSummary), blockedErr(plan))
 }
 
 // fullPlan discovers and plans every repo and workgroup.
-func fullPlan(ctx *Context, cfg *config.Config, st *state.State) (*reconcile.Plan, error) {
+func fullPlan(ctx *Context, cfg *config.Config, st *state.State) (*reconcile.Plan, reconcile.Scope, error) {
 	results, discovered, err := discovery.RunDiscovery(ctx.GoCtx(), cfg, "", "")
 	if err != nil {
-		return nil, err
+		return nil, reconcile.Scope{}, err
 	}
 	for _, r := range results {
 		if r.Err != nil {
 			fmt.Fprintf(os.Stderr, "warning: rule %s failed, its repos are left as they are: %v\n", r.Rule, r.Err)
 		}
 	}
-	return reconcile.Compute(ctx.GoCtx(), cfg, st, reconcile.Scope{
+	scope := reconcile.Scope{
 		Discovered: discovered, Rules: discovery.StaleScopeOf(results, "", ""), Repos: true, Workgroups: true,
-	}), nil
+	}
+	return reconcile.Compute(ctx.GoCtx(), cfg, st, scope), scope, nil
 }
 
 // reconcileEnv is what plans apply to: st, saved after every change.

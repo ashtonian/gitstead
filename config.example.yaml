@@ -25,6 +25,31 @@ clone_protocol: "ssh"
 concurrency: 8
 
 # =============================================================================
+# Accounts
+# =============================================================================
+# An account is one identity on one or more hosts. Its SSH key and commit
+# identity are used for git-mgr's own git commands and written into each repo
+# it covers (core.sshCommand, user.name, user.email), including workgroup clone
+# members, so your and your agents' pushes and commits use the right account.
+#
+# A repo's account: the one named by the most specific of an override, its
+# repos: entry, its discovery rule, or that rule's provider (`account:`), else
+# the account whose hosts and owners match it. An account with no owners
+# covers every owner on its hosts that no other account claims.
+
+accounts: []
+  # - name: personal
+  #   hosts: [github.com]
+  #   ssh_key: "~/.ssh/id_personal"
+  #   git: {name: "Your Name", email: "you@example.com"}
+  #
+  # - name: work
+  #   hosts: [github.com]
+  #   owners: [acme, acme-labs]
+  #   ssh_key: "~/.ssh/id_work"
+  #   git: {name: "Your Name", email: "you@acme.com"}
+
+# =============================================================================
 # Provider Instances
 # =============================================================================
 # Named provider instances. Each discovery rule references one by name.
@@ -46,6 +71,7 @@ providers:
   #   token_env: "GHES_TOKEN"              # Custom env var name
   #   token_command: "gh auth token -h ghes.company.com"
   #   ssh_key: "~/.ssh/id_work"            # Default SSH key for all repos from this provider
+  #   account: work                        # Or: the account for all repos from this provider
   #   clone_protocol: "https"              # Transport for repos from THIS provider (overrides the top-level default)
 
   # Self-hosted GitLab example

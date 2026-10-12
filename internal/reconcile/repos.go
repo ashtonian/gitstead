@@ -41,7 +41,7 @@ func PlanRepos(desired map[string]Repo, st *state.State, seen Seen, overwrite bo
 			if applied.ManuallyAdded {
 				d.Pinned, d.Path, d.URL, d.UserTags = true, applied.LocalPath, applied.CloneURL, applied.UserTags
 				d.Tags = tagUnion(d.Tags, applied.UserTags)
-				d.Config = managedConfig(d.URL, d.SSHKey)
+				d.Config = managedConfig(d.URL, d.SSHKey, d.Identity)
 			}
 			first = append(first, Action{
 				Kind: KindRename, Target: key, From: old, To: key,
@@ -129,7 +129,10 @@ func planTrackedRepo(p *Plan, d Repo, a *state.RepoState, sameKey bool, seen See
 			From: describeTags(tags, a.DiscoveredBy), To: describeTags(d.Tags, d.Rule), run: retag(d)})
 	}
 	actions = append(actions, planURL(p, d, a, here, overwrite)...)
-	actions = append(actions, planConfig(p, d, a, here, overwrite)...)
+	actions = append(actions, planConfig(p, KindConfig, d.Key, d.Config, a.ManagedConfig, here.Config, overwrite,
+		func(k, v string, unset, recordOnly bool) func(context.Context, *Env) (string, error) {
+			return setConfig(d.Key, k, v, unset, recordOnly)
+		})...)
 	if !d.Pinned && d.Path != a.LocalPath {
 		if there := seen.at(d.Path); there.Exists {
 			p.Blocked = append(p.Blocked, Blocked{Target: d.Key, Reason: "cannot move from " + a.LocalPath + ": " + occupied(d.Path, there)})
@@ -161,38 +164,46 @@ func planURL(p *Plan, d Repo, a *state.RepoState, here Copy, overwrite bool) []A
 	}
 }
 
-func planConfig(p *Plan, d Repo, a *state.RepoState, here Copy, overwrite bool) []Action {
+// configSetter builds the action that applies one managed config change to a
+// copy and records it.
+type configSetter func(key, value string, unset, recordOnly bool) func(context.Context, *Env) (string, error)
+
+// planConfig plans one copy's managed git config: want is what config asks
+// for, recorded what git-mgr set, have what is set now. A key set by hand is
+// taken over when it already holds the wanted value, reported as drift when
+// it doesn't, and dropped from management when config stops wanting it.
+func planConfig(p *Plan, kind Kind, target string, want, recorded, have map[string]string, overwrite bool, set configSetter) []Action {
 	keys := map[string]bool{}
-	for k := range d.Config {
+	for k := range want {
 		keys[k] = true
 	}
-	for k := range a.ManagedConfig {
+	for k := range recorded {
 		keys[k] = true
 	}
 	var actions []Action
 	for _, k := range slices.Sorted(maps.Keys(keys)) {
-		want, wantOK := d.Config[k]
-		rec, recOK := a.ManagedConfig[k]
-		have, haveOK := here.Config[k]
+		w, wantOK := want[k]
+		rec, recOK := recorded[k]
+		h, haveOK := have[k]
 		act := func(from, to string, unset, recordOnly bool, note string) {
-			actions = append(actions, Action{Kind: KindConfig, Target: d.Key, Field: k, From: from, To: to, Note: note,
-				run: setConfig(d.Key, k, to, unset, recordOnly)})
+			actions = append(actions, Action{Kind: kind, Target: target, Field: k, From: from, To: to, Note: note,
+				run: set(k, to, unset, recordOnly)})
 		}
 		switch {
-		case wantOK && haveOK && have == want:
-			if !recOK || rec != want {
-				act(have, want, false, true, "already set; now managed")
+		case wantOK && haveOK && h == w:
+			if !recOK || rec != w {
+				act(h, w, false, true, "already set; now managed")
 			}
-		case wantOK && ((!recOK && !haveOK) || (recOK && haveOK && have == rec)):
-			act(orUnset(have), want, false, false, "")
+		case wantOK && ((!recOK && !haveOK) || (recOK && haveOK && h == rec)):
+			act(orUnset(h), w, false, false, "")
 		case wantOK && overwrite:
-			act(orUnset(have), want, false, false, "changed by hand; restoring")
+			act(orUnset(h), w, false, false, "changed by hand; restoring")
 		case wantOK:
-			p.Drift = append(p.Drift, Drift{Target: d.Key, What: k, Recorded: orUnset(rec), Found: orUnset(have), Wanted: want})
-		case haveOK && have == rec:
+			p.Drift = append(p.Drift, Drift{Target: target, What: k, Recorded: orUnset(rec), Found: orUnset(h), Wanted: w})
+		case haveOK && h == rec:
 			act(rec, "", true, false, "no longer configured")
 		default:
-			act(orUnset(have), "", true, true, "changed by hand; no longer managed")
+			act(orUnset(h), "", true, true, "changed by hand; no longer managed")
 		}
 	}
 	return actions
@@ -396,30 +407,36 @@ func setConfig(key, name, value string, unset, recordOnly bool) func(context.Con
 		if a == nil {
 			return "", fmt.Errorf("%s is no longer tracked", key)
 		}
-		if !recordOnly {
-			var err error
-			if unset {
-				err = gitops.UnsetLocalConfig(ctx, a.LocalPath, name)
-			} else {
-				err = gitops.SetLocalConfig(ctx, a.LocalPath, name, value)
-			}
-			if err != nil {
-				return "", err
-			}
-		}
-		if unset {
-			delete(a.ManagedConfig, name)
-			if len(a.ManagedConfig) == 0 {
-				a.ManagedConfig = nil
-			}
-			return "", nil
-		}
-		if a.ManagedConfig == nil {
-			a.ManagedConfig = map[string]string{}
-		}
-		a.ManagedConfig[name] = value
-		return "", nil
+		return "", applyConfig(ctx, a.LocalPath, &a.ManagedConfig, name, value, unset, recordOnly)
 	}
+}
+
+// applyConfig makes one managed config change in the copy at path, unless
+// recordOnly, and records it in managed.
+func applyConfig(ctx context.Context, path string, managed *map[string]string, name, value string, unset, recordOnly bool) error {
+	if !recordOnly {
+		var err error
+		if unset {
+			err = gitops.UnsetLocalConfig(ctx, path, name)
+		} else {
+			err = gitops.SetLocalConfig(ctx, path, name, value)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if unset {
+		delete(*managed, name)
+		if len(*managed) == 0 {
+			*managed = nil
+		}
+		return nil
+	}
+	if *managed == nil {
+		*managed = map[string]string{}
+	}
+	(*managed)[name] = value
+	return nil
 }
 
 // moveRepo renames the repo's directory to its desired path, reconnects its
