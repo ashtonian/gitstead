@@ -2,7 +2,7 @@ package discovery
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -12,33 +12,41 @@ import (
 
 // retryTransport is an http.RoundTripper that retries requests on transient
 // failures: HTTP 429 (rate limit), 403 with a rate-limit signal (GitHub's
-// secondary/abuse limit), and 5xx. It honors the Retry-After header when present
-// and otherwise uses capped exponential backoff. go-github and the Gitea SDK
-// both accept a custom *http.Client, so this gives them the retry behavior the
+// secondary or primary limit), 5xx, and an attempt that timed out. A wait the
+// server asks for -- Retry-After, or X-RateLimit-Reset once the limit is used
+// up -- is honoured in full; when it would outlast the request's deadline
+// (the rule's discovery_timeout) the request fails at once and says so.
+// Otherwise it backs off exponentially. go-github and the Gitea SDK both
+// accept a custom *http.Client, so this gives them the retry behavior the
 // GitLab SDK already has built in.
 type retryTransport struct {
 	base       http.RoundTripper
 	maxRetries int
 	baseDelay  time.Duration
-	maxDelay   time.Duration
-	// sleep is overridable in tests; defaults to a context-aware sleep.
+	maxDelay   time.Duration // caps our own backoff, not a wait the server asks for
+	// attemptTimeout bounds each attempt, body included; 0 means none.
+	attemptTimeout time.Duration
+	// maxWait caps a server-requested wait when the request has no deadline.
+	maxWait time.Duration
+	// sleep and now are overridable in tests.
 	sleep func(ctx context.Context, d time.Duration) error
+	now   func() time.Time
 }
 
-// newRetryClient returns an HTTP client that retries transient failures, and
-// gives up on a request, retries included, after timeout (0 means never).
-func newRetryClient(timeout time.Duration) *http.Client {
-	var rt http.RoundTripper = http.DefaultTransport
-	return &http.Client{
-		Transport: &retryTransport{
-			base:       rt,
-			maxRetries: 5,
-			baseDelay:  time.Second,
-			maxDelay:   30 * time.Second,
-			sleep:      sleepCtx,
-		},
-		Timeout: timeout,
-	}
+// newRetryClient returns an HTTP client that retries transient failures and
+// gives each attempt up to attemptTimeout (0 means no limit). Waits between
+// attempts are bounded by the request's context, not by attemptTimeout.
+func newRetryClient(attemptTimeout time.Duration) *http.Client {
+	return &http.Client{Transport: &retryTransport{
+		base:           http.DefaultTransport,
+		maxRetries:     5,
+		baseDelay:      time.Second,
+		maxDelay:       30 * time.Second,
+		attemptTimeout: attemptTimeout,
+		maxWait:        time.Hour,
+		sleep:          sleepCtx,
+		now:            time.Now,
+	}}
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {
@@ -52,6 +60,18 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// RateLimitError reports a rate limit that lifts only after the request's
+// deadline.
+type RateLimitError struct {
+	Host  string
+	Until time.Time
+}
+
+func (e *RateLimitError) Error() string {
+	return fmt.Sprintf("%s rate limit lifts at %s, after this rule's deadline (discovery_timeout); retry later",
+		e.Host, e.Until.Local().Format(time.Kitchen))
+}
+
 func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx := req.Context()
 	var lastResp *http.Response
@@ -59,7 +79,10 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	for attempt := 0; attempt <= t.maxRetries; attempt++ {
 		if attempt > 0 {
-			delay := t.backoff(attempt, lastResp)
+			delay, err := t.wait(ctx, req, attempt, lastResp)
+			if err != nil {
+				return nil, err
+			}
 			if err := t.sleep(ctx, delay); err != nil {
 				return nil, err
 			}
@@ -75,10 +98,11 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			req.Body = body
 		}
 
-		resp, err := t.base.RoundTrip(req)
+		resp, err := t.attempt(req)
 		if err != nil {
-			// Don't retry on context cancellation/deadline.
-			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// The request's own deadline or cancellation ends it; an attempt
+			// that timed out on its own is retried.
+			if ctx.Err() != nil {
 				return nil, err
 			}
 			lastErr, lastResp = err, nil
@@ -99,6 +123,33 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return lastResp, nil
 }
 
+// attempt sends req once under attemptTimeout. The timeout ends when the
+// response body is closed, so reading the body counts toward it.
+func (t *retryTransport) attempt(req *http.Request) (*http.Response, error) {
+	if t.attemptTimeout <= 0 {
+		return t.base.RoundTrip(req)
+	}
+	ctx, cancel := context.WithTimeout(req.Context(), t.attemptTimeout)
+	resp, err := t.base.RoundTrip(req.Clone(ctx))
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
+	return resp, nil
+}
+
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnClose) Close() error {
+	err := c.ReadCloser.Close()
+	c.cancel()
+	return err
+}
+
 // shouldRetry reports whether a response is a transient failure worth retrying.
 func shouldRetry(resp *http.Response) bool {
 	switch resp.StatusCode {
@@ -114,26 +165,43 @@ func shouldRetry(resp *http.Response) bool {
 	return resp.StatusCode >= 500 && resp.StatusCode != http.StatusNotImplemented
 }
 
-// backoff returns the delay before the given attempt (1-based), honoring
-// Retry-After from the last response when present.
-func (t *retryTransport) backoff(attempt int, resp *http.Response) time.Duration {
-	if resp != nil {
-		if d, ok := retryAfter(resp); ok {
-			if d > t.maxDelay {
-				return t.maxDelay
-			}
-			return d
+// wait returns the delay before the given attempt (1-based): the wait the
+// last response asked for, or exponential backoff. A requested wait that
+// outlasts the request's deadline is a RateLimitError instead.
+func (t *retryTransport) wait(ctx context.Context, req *http.Request, attempt int, resp *http.Response) (time.Duration, error) {
+	if d, ok := t.requestedWait(resp); ok {
+		deadline, hasDeadline := ctx.Deadline()
+		if hasDeadline && d > time.Until(deadline) || !hasDeadline && d > t.maxWait {
+			return 0, &RateLimitError{Host: req.URL.Host, Until: t.now().Add(d)}
 		}
+		return d, nil
 	}
 	delay := time.Duration(float64(t.baseDelay) * math.Pow(2, float64(attempt-1)))
-	if delay > t.maxDelay {
-		return t.maxDelay
+	return min(delay, t.maxDelay), nil
+}
+
+// requestedWait is how long the server asked to wait: Retry-After, or until
+// X-RateLimit-Reset when the limit is used up.
+func (t *retryTransport) requestedWait(resp *http.Response) (time.Duration, bool) {
+	if resp == nil {
+		return 0, false
 	}
-	return delay
+	if d, ok := retryAfter(resp, t.now()); ok {
+		return d, true
+	}
+	if resp.Header.Get("X-RateLimit-Remaining") != "0" {
+		return 0, false
+	}
+	reset, err := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	// A second past the reset, so the first request after it isn't early.
+	return max(time.Unix(reset, 0).Sub(t.now())+time.Second, 0), true
 }
 
 // retryAfter parses the Retry-After header (delta-seconds or HTTP-date).
-func retryAfter(resp *http.Response) (time.Duration, bool) {
+func retryAfter(resp *http.Response, now time.Time) (time.Duration, bool) {
 	v := resp.Header.Get("Retry-After")
 	if v == "" {
 		return 0, false
@@ -145,11 +213,7 @@ func retryAfter(resp *http.Response) (time.Duration, bool) {
 		return time.Duration(secs) * time.Second, true
 	}
 	if when, err := http.ParseTime(v); err == nil {
-		d := time.Until(when)
-		if d < 0 {
-			d = 0
-		}
-		return d, true
+		return max(when.Sub(now), 0), true
 	}
 	return 0, false
 }

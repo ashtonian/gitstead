@@ -160,13 +160,17 @@ type syncError struct {
 // jobs lists the copies this run backs up, fetches and, under
 // remote_sync.enabled, takes offsite: selected repos, and the workgroup
 // members of selected repos (all of them when nothing is selected). Repos
-// fetched within min_fetch_interval are not fetched again.
+// fetched within min_fetch_interval are not fetched again; stale ones are
+// only backed up.
 func (c *SyncCmd) jobs(cfg *config.Config, st *state.State, pass func(string, *state.RepoState) bool, machine string) (jobs []copyJob, skippedRecent int) {
 	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
 		repo := st.Repos[key]
-		if !pass(key, repo) || repo.Status == "stale" || !repo.Cloned {
+		if !pass(key, repo) || !repo.Cloned {
 			continue
 		}
+		// A stale repo's upstream is gone, so it isn't fetched or pushed;
+		// its local work is still backed up.
+		stale := repo.Status == "stale"
 		repoCfg := cfg.ResolveForRepo(key)
 		var backup *gitops.BackupConfig
 		if !c.NoBackup && repoCfg.Backup.Enabled {
@@ -175,14 +179,14 @@ func (c *SyncCmd) jobs(cfg *config.Config, st *state.State, pass func(string, *s
 		}
 		job := repoJob(cfg, key, repo, backup)
 		// sync.enabled: false keeps a repo tracked and backed up, never fetched.
-		if !c.NoFetch && repoCfg.Sync.Enabled {
+		if !c.NoFetch && repoCfg.Sync.Enabled && !stale {
 			if !c.Force && !repo.LastFetch.IsZero() && time.Since(repo.LastFetch) < repoCfg.Sync.MinFetchInterval {
 				skippedRecent++
 			} else {
 				job.fetch = true
 			}
 		}
-		if policy := cfg.RemoteSyncFor(key, repo.DiscoveredBy); policy.Enabled && machine != "" {
+		if policy := cfg.RemoteSyncFor(key, repo.DiscoveredBy); policy.Enabled && machine != "" && !stale {
 			job.offsite = offsiteFor(cfg, policy, machine, identityOf(repo), job.sshKey, repo.OffsiteStatus)
 		}
 		jobs = append(jobs, job)

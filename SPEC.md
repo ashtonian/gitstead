@@ -617,8 +617,8 @@ sync:
   timeout_per_repo: "5m"    # one repo's fetch, retries included
   backup_timeout: "2m"      # one working copy's backup and status read
   clone_timeout: "30m"      # one clone
-  api_timeout: "60s"        # one provider API request, retries included
-  discovery_timeout: "5m"   # one discovery rule, lookups included
+  api_timeout: "60s"        # one provider API request attempt
+  discovery_timeout: "5m"   # one discovery rule: lookups, retries and rate-limit waits included
 
   # Number of retries on transient network failures (per repo).
   retries: 2
@@ -650,7 +650,8 @@ cleanup:
   # - remove_and_delete: remove from state AND delete from disk after grace_period.
   #   Unique work is archived to backup.archive_dir first; a repo that can't be
   #   archived is kept, stays tracked and records the reason in its error.
-  # - ignore: never mark stale, never remove. Manual cleanup only.
+  # - ignore: never mark stale, never remove; such repos keep syncing. Manual cleanup only.
+  # A stale repo is no longer fetched or pushed offsite, but is still backed up.
   policy: "mark_stale"
 
   # Grace period before "remove" or "remove_and_delete" policies take effect.
@@ -658,7 +659,8 @@ cleanup:
   # temporary API failures or org permission changes.
   grace_period: "30d"
 
-  # Never auto-cleanup manually-added repos (via `git-mgr clone` or `git-mgr adopt`).
+  # Never judge repos added by hand: `git-mgr clone`, `git-mgr adopt` and
+  # `repos:` entries (rule "_manual"). They stay tracked until `git-mgr remove`.
   protect_manual: true
 
 # ============================================================================

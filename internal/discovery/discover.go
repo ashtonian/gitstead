@@ -44,6 +44,9 @@ type DiscoverResult struct {
 	Err        error // non-nil if this rule failed (others may still succeed)
 }
 
+// ManualRule is the rule a `repos:` entry is discovered by.
+const ManualRule = "_manual"
+
 // AnyFailed reports whether any discovery rule errored. Callers use this to
 // suppress stale detection on a partial run: a transient provider outage yields
 // an incomplete discovered set, and marking the missing repos stale (or, under
@@ -164,7 +167,7 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 		}
 		if existing, ok := discovered[parsed.Key()]; ok {
 			parsed.Tags = mergeTags(existing.Tags, parsed.Tags)
-			if existing.DiscoveredBy != "" && existing.DiscoveredBy != "_manual" {
+			if existing.DiscoveredBy != "" && existing.DiscoveredBy != ManualRule {
 				parsed.DiscoveredBy = existing.DiscoveredBy
 			}
 		}
@@ -246,7 +249,7 @@ func parseManualRepo(mr config.ManualRepo) (*Repo, error) {
 		Name:         id.Name,
 		FullName:     id.FullName,
 		Tags:         mr.Tags,
-		DiscoveredBy: "_manual",
+		DiscoveredBy: ManualRule,
 	}
 	if strings.HasPrefix(mr.URL, "http://") || strings.HasPrefix(mr.URL, "https://") {
 		r.HTTPURL = mr.URL

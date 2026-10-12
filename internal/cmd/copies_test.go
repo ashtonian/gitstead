@@ -159,6 +159,9 @@ func TestSyncJobs(t *testing.T) {
 		var out []string
 		for _, j := range jobs {
 			label := j.label
+			if j.fetch {
+				label += "+fetch"
+			}
 			if j.offsite != nil {
 				label += "+offsite"
 			}
@@ -167,13 +170,13 @@ func TestSyncJobs(t *testing.T) {
 		return out
 	}
 
-	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app h/o/lib fleet/agent" {
-		t.Errorf("jobs = %s; want each working copy once, stale repos left out", got)
+	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+fetch h/o/lib+fetch h/o/old fleet/agent" {
+		t.Errorf("jobs = %s; want each working copy once, the stale repo backed up but not fetched", got)
 	}
-	if got := strings.Join(labels(&SyncCmd{Tag: "work"}), " "); got != "h/o/app" {
+	if got := strings.Join(labels(&SyncCmd{Tag: "work"}), " "); got != "h/o/app+fetch" {
 		t.Errorf("jobs for --tag work = %s; members of unselected repos should be left out", got)
 	}
-	if got := strings.Join(labels(&SyncCmd{NoBackup: true}), " "); got != "h/o/app h/o/lib" {
+	if got := strings.Join(labels(&SyncCmd{NoBackup: true}), " "); got != "h/o/app+fetch h/o/lib+fetch h/o/old" {
 		t.Errorf("jobs for --no-backup = %s; members are only backed up", got)
 	}
 
@@ -182,7 +185,7 @@ func TestSyncJobs(t *testing.T) {
 	off := false
 	cfg.RemoteSync.Enabled = true
 	cfg.Overrides = []config.Override{{Repos: []string{"h/o/lib"}, RemoteSync: &config.RemoteSyncOverride{Enabled: &off}}}
-	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+offsite h/o/lib fleet/agent" {
+	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+fetch+offsite h/o/lib+fetch h/o/old fleet/agent" {
 		t.Errorf("jobs with remote_sync = %s", got)
 	}
 }

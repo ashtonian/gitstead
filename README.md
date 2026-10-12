@@ -677,8 +677,8 @@ Nothing waits on a person or hangs forever:
 | `sync.backup_timeout` | `2m` | One working copy's backup (taken before its fetch, on its own budget) and status read. |
 | `sync.timeout_per_repo` | `5m` | One repo's fetch, retries included. |
 | `sync.clone_timeout` | `30m` | One clone. |
-| `sync.api_timeout` | `60s` | One provider API request, retries included. |
-| `sync.discovery_timeout` | `5m` | One discovery rule: listing plus language/topic lookups. |
+| `sync.api_timeout` | `60s` | One provider API request attempt. |
+| `sync.discovery_timeout` | `5m` | One discovery rule: listing plus language/topic lookups, retries and rate-limit waits. |
 | `lock_timeout` | `2m` | How long a command waits for another run's state write before exiting 75. |
 | `token_command` | `30s` (fixed) | Running a provider's `token_command`. |
 
@@ -760,16 +760,22 @@ broken setup. With `--quiet`, only failures are printed, to stderr.
 
 ## Resilience
 
-GitHub and Gitea requests retry automatically on rate-limit (429 / secondary
-limit) and 5xx responses, honoring `Retry-After` with capped back-off (the GitLab
-client has equivalent retry built in). If one discovery rule fails, the others
+GitHub and Gitea requests retry on rate limits (429, GitHub's primary and
+secondary limits), 5xx responses and attempts that time out (the GitLab client
+has equivalent retry built in). The wait a server asks for -- `Retry-After`, or
+until `X-RateLimit-Reset` -- is honoured in full; one that would outlast the
+rule's `discovery_timeout` fails the rule at once with the time the limit
+lifts, rather than sleeping into the deadline. If one discovery rule fails, the others
 still run, and stale detection is skipped for that run so a transient outage
 can't mark healthy repos stale. A run filtered with `--tag` or `--rule` only
 judges repos first found by the rules it ran, so `sync --tag personal` never
 marks work repos stale; repos from a failed rule are left exactly as they are.
 A rule whose result may be missing repos -- a search capped at 1000, a
 language or topic lookup that failed or timed out -- still adds what it found,
-but judges none of its repos stale that run.
+but judges none of its repos stale that run. Repos added by hand (`clone`,
+`adopt`, `repos:` entries) are never judged, and `cleanup.policy: ignore`
+judges nothing. A stale repo is no longer fetched or pushed offsite, but its
+local work is still backed up.
 An interrupted run is safe to repeat (see
 [Config changes](#config-changes-plan-and-apply)). SIGINT/SIGTERM cancels
 in-flight git and API operations cleanly.

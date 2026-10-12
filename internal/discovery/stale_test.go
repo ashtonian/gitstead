@@ -299,3 +299,30 @@ func TestStaleScopeOf_IncompleteRuleCoversNothing(t *testing.T) {
 		t.Error("with an incomplete rule, repos of removed rules must not be judged")
 	}
 }
+
+// "ignore" never marks a repo stale, so it keeps syncing.
+func TestCleanup_IgnoreLeavesReposAlone(t *testing.T) {
+	st, _ := stalePastGrace(t)
+	repo := st.Repos["host/owner/repo"]
+	repo.Status, repo.StaleSince = "clean", time.Time{}
+	cleanup := config.CleanupConfig{Policy: "ignore", GracePeriod: time.Minute, ProtectManual: true}
+
+	res := run(t, st, map[string]bool{}, StaleScope{all: true}, cleanup, mustNotRemove(t))
+
+	if repo.Status != "clean" || !repo.StaleSince.IsZero() || res.NewlyStale != 0 {
+		t.Errorf("ignore marked the repo: status=%q since=%v %+v", repo.Status, repo.StaleSince, res)
+	}
+}
+
+// A repos: entry is added by hand like a clone: dropping it from config
+// doesn't make it stale.
+func TestCleanup_ProtectsReposEntries(t *testing.T) {
+	st, dir := stalePastGrace(t)
+	st.Repos["host/owner/repo"].DiscoveredBy = ManualRule
+
+	res := run(t, st, map[string]bool{}, StaleScope{all: true}, removeAndDelete(), mustNotRemove(t))
+
+	if _, err := os.Stat(dir); err != nil || st.Repos["host/owner/repo"] == nil || res.Reapable != 0 {
+		t.Errorf("a repos: entry was judged: %+v, %v", res, err)
+	}
+}
