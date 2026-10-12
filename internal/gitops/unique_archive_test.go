@@ -34,63 +34,6 @@ func commitFile(t *testing.T, dir, name, content string) {
 	mustGit(t, dir, "commit", "-qm", "add "+name)
 }
 
-func TestSnapshotCommit_UnderIndexLockKeepsIndexAndIncludesUntracked(t *testing.T) {
-	dir := setupTestRepo(t)
-	ctx := context.Background()
-	writeFile(t, filepath.Join(dir, ".gitignore"), []byte("*.log\n"))
-	mustGit(t, dir, "add", ".gitignore")
-	mustGit(t, dir, "commit", "-qm", "ignore logs")
-
-	writeFile(t, filepath.Join(dir, "README.md"), []byte("# changed\n"))
-	writeFile(t, filepath.Join(dir, "new.txt"), []byte("untracked\n"))
-	writeFile(t, filepath.Join(dir, "debug.log"), []byte("ignored\n"))
-	statusBefore := mustGit(t, dir, "status", "--porcelain")
-	lock := filepath.Join(dir, ".git", "index.lock")
-	writeFile(t, lock, nil) // an agent's git command holds the lock
-
-	oid, err := gitops.SnapshotCommit(ctx, dir, "snapshot")
-	if err != nil {
-		t.Fatalf("snapshot with index.lock held: %v", err)
-	}
-	os.Remove(lock)
-
-	if got := mustGit(t, dir, "show", oid+":README.md"); got != "# changed" {
-		t.Errorf("snapshot README.md = %q", got)
-	}
-	if got := mustGit(t, dir, "show", oid+":new.txt"); got != "untracked" {
-		t.Errorf("snapshot new.txt = %q", got)
-	}
-	if out, err := gitops.Git(ctx, dir, "show", oid+":debug.log"); err == nil {
-		t.Errorf("ignored file must not be in the snapshot, got %q", out)
-	}
-	if parent := mustGit(t, dir, "rev-parse", oid+"^"); parent != mustGit(t, dir, "rev-parse", "HEAD") {
-		t.Error("snapshot parent must be HEAD")
-	}
-	if author := mustGit(t, dir, "log", "-1", "--format=%an", oid); author != "git-mgr" {
-		t.Errorf("snapshot author = %q", author)
-	}
-	if after := mustGit(t, dir, "status", "--porcelain"); after != statusBefore {
-		t.Errorf("snapshot changed the index or tree:\nbefore %q\nafter  %q", statusBefore, after)
-	}
-}
-
-func TestSnapshotCommit_UnbornRepoWithoutIdentity(t *testing.T) {
-	dir := t.TempDir()
-	mustGit(t, dir, "init", "-q")
-	writeFile(t, filepath.Join(dir, "first.txt"), []byte("hello\n"))
-
-	oid, err := gitops.SnapshotCommit(context.Background(), dir, "snapshot")
-	if err != nil {
-		t.Fatalf("snapshot of an unborn repo with no user.email: %v", err)
-	}
-	if got := mustGit(t, dir, "show", oid+":first.txt"); got != "hello" {
-		t.Errorf("snapshot first.txt = %q", got)
-	}
-	if _, err := gitops.Git(context.Background(), dir, "rev-parse", "--verify", "-q", oid+"^"); err == nil {
-		t.Error("snapshot of an unborn branch must have no parent")
-	}
-}
-
 func TestInspectUniqueWork(t *testing.T) {
 	ctx := context.Background()
 	tests := []struct {
@@ -201,11 +144,12 @@ func TestRemoveClone_ArchiveRestoresUniqueWork(t *testing.T) {
 	if worktreeRef == "" || stashRef == "" {
 		t.Fatalf("archive must carry worktree and stash refs, got:\n%s", refs)
 	}
-	if got := mustGit(t, restored, "show", worktreeRef+":notes.txt"); got != "untracked" {
-		t.Errorf("restored untracked file = %q", got)
-	}
-	if got := mustGit(t, restored, "show", worktreeRef+":a.txt"); got != "dirty" {
-		t.Errorf("restored dirty file = %q", got)
+	mustGit(t, restored, "checkout", "-q", "--detach", featureTip)
+	mustGit(t, restored, "stash", "apply", "-q", "--index", worktreeRef)
+	for name, want := range map[string]string{"a.txt": "dirty\n", "notes.txt": "untracked\n"} {
+		if got, _ := os.ReadFile(filepath.Join(restored, name)); string(got) != want {
+			t.Errorf("restored %s = %q, want %q", name, got, want)
+		}
 	}
 	if got := mustGit(t, restored, "show", stashRef+":a.txt"); got != "stashed" {
 		t.Errorf("restored stash = %q", got)
@@ -239,6 +183,21 @@ func TestRemoveClone_UninspectableIsKept(t *testing.T) {
 
 // Removing a worktree keeps its branch in the source repo and archives only
 // the working tree.
+// A nested repository can't go into the archive, so the clone is kept.
+func TestRemoveClone_NestedRepoIsKept(t *testing.T) {
+	_, clone := remoteAndClone(t)
+	nested := filepath.Join(clone, "vendor-repo")
+	mustGit(t, clone, "init", "-q", nested)
+	writeFile(t, filepath.Join(nested, "only-copy.txt"), []byte("x"))
+
+	if _, err := gitops.RemoveClone(context.Background(), clone, t.TempDir(), "x", false); err == nil {
+		t.Fatal("RemoveClone must refuse a clone holding a nested repository")
+	}
+	if _, err := os.Stat(filepath.Join(nested, "only-copy.txt")); err != nil {
+		t.Fatalf("nested repository was deleted: %v", err)
+	}
+}
+
 func TestRemoveClone_AlreadyGoneIsRemoved(t *testing.T) {
 	gone := filepath.Join(t.TempDir(), "a", "b", "gone")
 	bundle, err := gitops.RemoveClone(context.Background(), gone, t.TempDir(), "x", false)
@@ -262,9 +221,16 @@ func TestRemoveWorktree_KeepsBranchAndArchivesWorkingTree(t *testing.T) {
 	writeFile(t, filepath.Join(wt, "agent.txt"), []byte("uncommitted\n"))
 	tip := mustGit(t, wt, "rev-parse", "HEAD")
 
+	if _, err := gitops.Backup(ctx, wt, gitops.NewBackupConfig(gitops.WithStrategy("stash-ref"))); err != nil {
+		t.Fatal(err)
+	}
+
 	bundle, err := gitops.RemoveWorktree(ctx, source, wt, t.TempDir(), "app-agent-1", false)
 	if err != nil {
 		t.Fatalf("RemoveWorktree: %v", err)
+	}
+	if refs := mustGit(t, source, "for-each-ref", "refs/git-mgr/backups/"); refs != "" {
+		t.Errorf("a removed worktree's backup refs must go with it:\n%s", refs)
 	}
 	if _, err := os.Stat(wt); !os.IsNotExist(err) {
 		t.Fatal("worktree directory should be removed")

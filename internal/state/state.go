@@ -55,13 +55,15 @@ type RepoState struct {
 	Description  string   `yaml:"description" json:"description"`
 
 	// Sync State
-	LastFetch          time.Time `yaml:"last_fetch" json:"last_fetch"`
-	LastFetchError     string    `yaml:"last_fetch_error" json:"last_fetch_error"`
-	LastBackup         time.Time `yaml:"last_backup" json:"last_backup"`
-	LastBackupRef      string    `yaml:"last_backup_ref" json:"last_backup_ref"`
-	LastBackupHasPatch bool      `yaml:"last_backup_has_patch" json:"last_backup_has_patch"`
-	Status             string    `yaml:"status" json:"status"` // clean, dirty, conflict, error, uncloned, missing, stale
-	Error              string    `yaml:"error" json:"error"`
+	LastFetch      time.Time `yaml:"last_fetch" json:"last_fetch"`
+	LastFetchError string    `yaml:"last_fetch_error" json:"last_fetch_error"`
+	// LastBackup is when the working copy's state was last known to be saved,
+	// by a new backup or one identical to it; LastBackupID names that backup.
+	LastBackup      time.Time `yaml:"last_backup" json:"last_backup"`
+	LastBackupID    string    `yaml:"last_backup_id,omitempty" json:"last_backup_id,omitempty"`
+	LastBackupError string    `yaml:"last_backup_error,omitempty" json:"last_backup_error,omitempty"`
+	Status          string    `yaml:"status" json:"status"` // clean, dirty, conflict, error, uncloned, missing, stale
+	Error           string    `yaml:"error" json:"error"`
 
 	// Discovery State
 	FirstSeen      time.Time `yaml:"first_seen" json:"first_seen"`

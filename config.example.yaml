@@ -241,17 +241,29 @@ backup:
   # Enable transparent backup of uncommitted changes during sync.
   enabled: true
 
-  # Strategy:
-  #   stash-ref - git stash create + custom ref. Fast, atomic. Tracked files only.
-  #   patch     - Generates patch files + tar of untracked. Captures everything.
-  #   both      - Both strategies. Maximum safety.
+  # Each backup is a snapshot of the index, the working tree and the untracked
+  # files, taken without touching the index or index.lock. Strategy picks where
+  # it is kept:
+  #   stash-ref - a stash-format commit at refs/git-mgr/backups/<copy>/<id>;
+  #               restore with `git stash apply --index <ref>`.
+  #   patch     - patches + a tarball under patch_dir; outlives the repo.
+  #   both      - both.
   strategy: "both"
 
-  # Include untracked files in patch backups.
+  # Back up untracked files (ignored files never are).
   include_untracked: true
 
-  # Max backups per repo. Oldest pruned first. 0 = unlimited.
-  max_per_repo: 10
+  # Untracked files over these sizes are left out of the backup and reported.
+  max_untracked_file_mb: 50
+  max_untracked_total_mb: 500
+
+  # Retention, per working copy (each clone and each worktree): every backup
+  # younger than keep_all, then the newest backup of each day younger than
+  # keep_daily, then at most max_per_copy (0 = no cap). The newest backup is
+  # always kept, and an unchanged state is never saved twice.
+  keep_all: "24h"
+  keep_daily: "336h"
+  max_per_copy: 100
 
   # Patch file storage directory.
   # Default: ~/.local/share/git-mgr/patches/
@@ -265,10 +277,11 @@ backup:
   # Default: ~/.local/share/git-mgr/archive/
   archive_dir: ""
 
-  # Also push uncommitted tracked changes to a recoverable branch
-  # (refs/heads/git-mgr/wip/<branch>) on push_remote. Unlike the hidden
-  # stash-ref backup, this is a normal branch visible in the remote's UI, so
-  # dirty work is saved offsite and easy to recover. Force-updated each run.
+  # Also push uncommitted tracked changes, as one commit on top of HEAD, to a
+  # recoverable branch (refs/heads/git-mgr/wip/<branch>) on push_remote.
+  # Unlike the hidden snapshot ref, this is a normal branch visible in the
+  # remote's UI, so dirty work is saved offsite. Untracked files are not pushed.
+  # Force-updated each run.
   # Equivalent to passing `--push-branch` to `git-mgr sync`/`git-mgr backup`.
   push_branch: false
 

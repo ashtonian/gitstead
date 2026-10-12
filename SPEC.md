@@ -47,7 +47,7 @@
 
 **Why git CLI wins:**
 
-1. **`git stash create` is not supported** -- this is the core of our backup strategy
+1. **Temporary-index plumbing** -- backups build trees with `GIT_INDEX_FILE`, `update-index --stdin`, `write-tree` and `commit-tree`, and restore with `git stash apply --index`; go-git has no equivalent
 2. **Performance** -- go-git uses ~8x more memory for clone/fetch. Status is 70x slower on large repos. With 100+ repos this matters.
 3. **Completeness** -- every operation works perfectly via CLI with zero caveats
 4. **git is a hard dependency anyway** -- no portability win from go-git
@@ -193,23 +193,22 @@ Run only the backup step (no fetch).
 | `--repos <glob>` | Filter to specific repos |
 | `--tag <tag>` | Filter by tag |
 | `--list` | List existing backups instead of creating new ones |
-| `--restore <ref-or-timestamp>` | Show restore instructions for a specific backup |
+| `--restore <id>` | Show restore instructions for a specific backup (`latest` for the newest) |
+
+Exits non-zero if any selected repo failed to back up; the failure is also
+stored as `last_backup_error` and shown as `failed` in `status`.
 
 ```
-$ git-mgr backup --list --repos */git-mgr
+$ git-mgr backup --list --repos '*/git-mgr'
 github.com/ashtonian/git-mgr:
-  2026-04-17T10:30:00Z  ref:refs/git-mgr/backups/20260417T103000Z  patch:~/.local/share/git-mgr/patches/...
-  2026-04-17T10:15:00Z  ref:refs/git-mgr/backups/20260417T101500Z  patch:~/.local/share/git-mgr/patches/...
+  20261012T150000.000Z  snapshot, patch
+  20261012T155117.905Z  snapshot, patch, 1 untracked path(s) left out
 
-$ git-mgr backup --restore 20260417T103000Z --repos */git-mgr
-To restore this backup:
-  # Apply stash ref (staged + unstaged tracked changes):
+$ git-mgr backup --restore 20261012T155117.905Z --repos '*/git-mgr'
+To restore backup 20261012T155117.905Z of github.com/ashtonian/git-mgr (onto a clean tree):
   cd ~/projects/github.com/ashtonian/git-mgr
-  git stash apply refs/git-mgr/backups/20260417T103000Z
-
-  # Or apply patches manually:
-  git apply ~/.local/share/git-mgr/patches/.../staged.patch --cached
-  git apply ~/.local/share/git-mgr/patches/.../unstaged.patch
+  git stash apply --index refs/git-mgr/backups/8ed3b5a3e9e769c3/20261012T155117.905Z
+  (not in this backup: huge.bin (3.0 MiB is over the 1.0 MiB file limit))
   tar -xzf ~/.local/share/git-mgr/patches/.../untracked.tar.gz
 ```
 
@@ -573,17 +572,24 @@ backup:
   # Enable transparent backup of uncommitted changes during sync.
   enabled: true
 
-  # Strategy: "stash-ref", "patch", or "both" (recommended).
-  # - stash-ref: `git stash create` + custom ref. Fast, atomic, git-native. Captures staged + unstaged tracked changes.
-  # - patch: Generates patch files + tar of untracked files. Captures everything including untracked.
-  # - both: Runs both strategies. Maximum safety.
+  # Strategy: where each snapshot (index, working tree, untracked files) is kept.
+  # - stash-ref: a stash-format commit at refs/git-mgr/backups/<copy>/<id>.
+  # - patch: the same snapshot as patches + a tarball under patch_dir; outlives the repo.
+  # - both: both (recommended).
   strategy: "both"
 
-  # Include untracked files in patch backups. Ignored for stash-ref.
+  # Back up untracked files (ignored files never are).
   include_untracked: true
+  # Untracked files over these sizes are left out and reported.
+  max_untracked_file_mb: 50
+  max_untracked_total_mb: 500
 
-  # Max backups to retain per repo. Oldest are pruned first. 0 = unlimited.
-  max_per_repo: 10
+  # Retention per working copy: every backup younger than keep_all, then the
+  # newest of each day younger than keep_daily, then at most max_per_copy
+  # (0 = no cap). The newest backup is always kept.
+  keep_all: "24h"
+  keep_daily: "336h"
+  max_per_copy: 100
 
   # Directory for patch file storage. Supports ~ expansion.
   # Default: ~/.local/share/git-mgr/patches/
@@ -594,12 +600,13 @@ backup:
   # Default: ~/.local/share/git-mgr/archive/
   archive_dir: ""
 
-  # Also force-push a snapshot of uncommitted tracked changes to a recoverable
-  # branch (refs/heads/git-mgr/wip/<branch>) on push_remote, in addition to the
-  # local backup. A normal, visible branch (not the hidden refs/git-mgr/*
-  # namespace), so dirty work is saved offsite. Equivalent to the --push-branch
-  # flag on `sync`/`backup`. Untracked-only changes are not captured (no commit
-  # to push); the working tree is never modified.
+  # Also force-push the uncommitted tracked changes, as one commit on top of
+  # HEAD, to a recoverable branch (refs/heads/git-mgr/wip/<branch>) on
+  # push_remote, in addition to the local backup. A normal, visible branch (not
+  # the hidden refs/git-mgr/* namespace), so dirty work is saved offsite.
+  # Equivalent to the --push-branch flag on `sync`/`backup`. Untracked files
+  # and the staged/unstaged split are not pushed. Recover with
+  # `git fetch <remote> git-mgr/wip/<branch> && git cherry-pick --no-commit FETCH_HEAD`.
   push_branch: false
   push_remote: "origin"
 
@@ -693,9 +700,9 @@ repos:
     # --- Sync State ---
     last_fetch: "2026-04-17T10:30:00Z"
     last_fetch_error: ""
-    last_backup: "2026-04-17T10:30:00Z"
-    last_backup_ref: "refs/git-mgr/backups/20260417T103000Z"
-    last_backup_has_patch: true
+    last_backup: "2026-04-17T10:30:00Z"   # last time the current state was known to be saved
+    last_backup_id: "20260417T103000.000Z"
+    last_backup_error: ""
     status: "dirty"                # clean, dirty, conflict, error, uncloned, missing, stale
     error: ""
 
@@ -728,149 +735,131 @@ On conflict: exit 0 with message "Another git-mgr instance is running, skipping.
 
 ### Overview
 
-The backup system captures uncommitted work in two complementary ways:
+A backup is a **snapshot** of one working copy: its index, the tracked files in
+its working tree, and its untracked files (ignored files never). It is built in
+temporary index files, so the repository's own index and `index.lock` are never
+read for writing or locked: a backup taken while an agent's `git commit` holds
+the lock succeeds and leaves the lock alone. Nothing in the working tree, index,
+branches or stash list changes.
 
-1. **Stash refs** -- `git stash create` produces a commit hash capturing all staged and unstaged changes to tracked files, without modifying working tree, index, or stash reflog. We store this under `refs/git-mgr/backups/<timestamp>`.
+The snapshot is stored in up to two forms, chosen by `backup.strategy`:
 
-2. **Patch files** -- `git diff` output plus a tar of untracked files, stored outside the repo entirely.
+1. **Snapshot ref** (`stash-ref`, `both`) -- a commit in the layout `git stash`
+   uses, kept at `refs/git-mgr/backups/<copy-id>/<backup-id>`.
+2. **Patch backup** (`patch`, `both`) -- the same snapshot exported to files in
+   `<patch_dir>/<copy-id>/<backup-id>/`, which outlive the repository.
 
-Neither mechanism touches the working tree, index, branches, or stash list. Both are invisible to normal git operations.
+### Working copies
+
+Every clone and every linked worktree is a **working copy** with its own copy
+ID: 16 hex characters stored in the copy's private git directory
+(`.git/git-mgr-copy-id`, or `.git/worktrees/<name>/git-mgr-copy-id`). Linked
+worktrees share one ref namespace, so the copy ID keeps their backups, and their
+retention, apart. The ID moves with the copy (`git worktree move`, `mv` of a
+clone).
+
+### Snapshot layout
+
+```
+       W  tracked working tree      <- the snapshot commit; refs point here
+     / | \
+    B  I  U
+       |
+       B
+```
+
+- **B** = HEAD when the snapshot was taken (absent on an unborn branch, where
+  I becomes W's first parent)
+- **I** = the index (on unresolved conflicts: B's tree, and `index_unmerged`
+  is recorded)
+- **U** = untracked files that fit the limits (absent when there are none)
+
+`git stash apply --index W` restores the staged and unstaged changes and the
+untracked files exactly. Snapshot commits carry a fixed identity
+(`git-mgr <git-mgr@localhost>`), are never signed, and are dated with B's commit
+date, so an unchanged state always produces the same W. A backup whose W equals
+the copy's latest backup is not saved again (outcome `unchanged`).
 
 ### Algorithm
 
 ```
-func Backup(repo RepoState, config BackupConfig) error:
-    path := repo.LocalPath
+func Backup(copy, cfg) (result, error):
+    if `git --no-optional-locks status --porcelain -z` is empty:
+        return clean
 
-    // ── Pre-flight ──────────────────────────────────────────────
-    if !exists(path + "/.git"):
-        return nil
+    I.tree  = write-tree   with GIT_INDEX_FILE=<copy of .git/index>
+    W.tree  = add -u; write-tree   with GIT_INDEX_FILE=<another copy>
+    U.tree  = update-index --add --stdin <untracked files>; write-tree
+              with GIT_INDEX_FILE=<new empty index>
+        untracked = ls-files -z --others --exclude-standard
+        skipped, with a reason: nested git repositories, files over
+        max_untracked_file_mb, files past max_untracked_total_mb, unreadable
+        files, sockets and other non-regular files
+    I, U, W = commit-tree ...   (fixed identity and date, --no-gpg-sign)
 
-    // Skip if any git lock files present (another operation in progress)
-    lockFiles := [".git/index.lock", ".git/HEAD.lock", ".git/config.lock",
-                  ".git/shallow.lock", ".git/refs/stash.lock"]
-    for _, lf := range lockFiles:
-        if exists(path + "/" + lf):
-            log.Warn("repo %s is locked (%s), skipping backup", repo.Name, lf)
-            return nil
+    copyID = CopyID(copy)
+    if W == latest backup's W (and it has every form the strategy wants):
+        return unchanged(latest.ID)
 
-    if isBareRepo(path):
-        return nil
-
-    // ── Detect working tree state ───────────────────────────────
-    hasStagedChanges   := gitExitCode(path, "diff", "--cached", "--quiet") != 0
-    hasUnstagedChanges := gitExitCode(path, "diff", "--quiet") != 0
-    untrackedFiles     := gitOutput(path, "ls-files", "--others", "--exclude-standard")
-    hasUntracked       := len(untrackedFiles) > 0
-
-    if !hasStagedChanges && !hasUnstagedChanges && !hasUntracked:
-        repo.Status = "clean"
-        return nil
-
-    // ── Detect special states ───────────────────────────────────
-    inRebase := exists(path+"/.git/rebase-merge") || exists(path+"/.git/rebase-apply")
-    inMerge  := exists(path + "/.git/MERGE_HEAD")
-    inCherryPick := exists(path + "/.git/CHERRY_PICK_HEAD")
-
-    timestamp := time.Now().UTC().Format("20060102T150405Z")
-
-    // ── Strategy: stash-ref ─────────────────────────────────────
-    if config.Strategy == "stash-ref" || config.Strategy == "both":
-        stashOID := gitOutput(path, "stash", "create")
-        if stashOID != "":
-            refName := "refs/git-mgr/backups/" + timestamp
-            gitExec(path, "update-ref", refName, stashOID)
-            repo.LastBackupRef = refName
-
-    // ── Strategy: patch ─────────────────────────────────────────
-    if config.Strategy == "patch" || config.Strategy == "both":
-        patchDir := filepath.Join(config.PatchDir, repo.Host, repo.Owner, repo.Name, timestamp)
-        os.MkdirAll(patchDir, 0700)
-
-        if hasStagedChanges:
-            patch := gitOutput(path, "diff", "--cached", "--binary", "--no-color")
-            writeFile(patchDir+"/staged.patch", patch)
-
-        if hasUnstagedChanges:
-            patch := gitOutput(path, "diff", "--binary", "--no-color")
-            writeFile(patchDir+"/unstaged.patch", patch)
-
-        if hasUntracked && config.IncludeUntracked:
-            files := strings.Split(untrackedFiles, "\n")
-            files = filterBySize(path, files, 50*1024*1024) // skip >50MB
-            if len(files) > 0:
-                tarExec(path, patchDir+"/untracked.tar.gz", files)
-                writeFile(patchDir+"/untracked.list", strings.Join(files, "\n"))
-
-        metadata := BackupMetadata{
-            HeadCommit: gitOutput(path, "rev-parse", "HEAD"),
-            CurrentBranch: gitOutput(path, "rev-parse", "--abbrev-ref", "HEAD"),
-            Timestamp: timestamp,
-            InRebase: inRebase, InMerge: inMerge, InCherryPick: inCherryPick,
-            HasStaged: hasStagedChanges, HasUnstaged: hasUnstagedChanges,
-            UntrackedCount: len(files),
-        }
-        writeJSON(patchDir+"/metadata.json", metadata)
-        repo.LastBackupHasPatch = true
-
-    // ── Prune old backups ───────────────────────────────────────
-    if config.MaxPerRepo > 0:
-        pruneStashRefs(path, "refs/git-mgr/backups/", config.MaxPerRepo)
-        prunePatchDirs(config.PatchDir, repo, config.MaxPerRepo)
-
-    repo.LastBackup = timestamp
-    repo.Status = "dirty"
-    return nil
+    id = UTC time "20060102T150405.000Z", later than the latest ID
+    stash-ref: update-ref refs/git-mgr/backups/<copyID>/<id> W "" (create only)
+    patch:     build <patch_dir>/<copyID>/<id>.partial/, rename to <id>/
+    prune each form that just succeeded, by retention
+    push_branch: push a commit of W's tree on B (no index, no untracked files)
+                 to refs/heads/git-mgr/wip/<branch>
+    any requested form that failed -> error (the result still names what was saved)
 ```
 
-### Stash Ref Internals
-
-`git stash create` creates a special merge commit:
-
-```
-       W (working tree state) <-- returned commit hash
-      / \
-     I   H (HEAD)
-     |
-     H
-```
-
-- **H** = HEAD commit, **I** = index state, **W** = working tree state
-- Stored in object DB but unreferenced until `git update-ref`
-- The ref `refs/git-mgr/backups/<timestamp>`:
-  - **Not shown by** `git branch -a`, `git tag`, `git stash list`, `git log`, any IDE
-  - **Only shown by** `git for-each-ref refs/git-mgr/`
-  - **Restoring**: `git stash apply <ref>`
-
-### Patch File Structure
+### Patch backup layout
 
 ```
 ~/.local/share/git-mgr/patches/
-└── github.com/
-    └── your-login/
-        └── git-mgr/
-            ├── 20260417T103000Z/
-            │   ├── metadata.json
-            │   ├── staged.patch
-            │   ├── unstaged.patch
-            │   ├── untracked.tar.gz
-            │   └── untracked.list
-            └── 20260417T101500Z/
-                └── ...
+└── 8ed3b5a3e9e769c3/                  # copy ID
+    ├── copy.json                      # copy ID, path, remotes
+    ├── 20261012T155117.905Z/
+    │   ├── metadata.json              # id, snapshot W, base B, branch, skipped paths
+    │   ├── staged.patch               # git diff --binary B..I (trees)
+    │   ├── unstaged.patch             # git diff --binary I..W (trees)
+    │   └── untracked.tar.gz           # U's files, written from the object store
+    └── 20261012T163000.001Z/
 ```
+
+Patches are tree-to-tree diffs with fixed options (`--binary --no-renames
+--no-ext-diff --no-textconv`, `a/` and `b/` prefixes), so user diff settings
+never leak in. The tarball is written in Go from U's blobs: no path quoting, no
+argument lists, symlinks and executable bits kept. `copy.json` lets a fresh
+clone at the same path find the patch backups of the copy it replaced.
+
+### Retention
+
+Per copy and per form, after a successful backup: keep every backup younger
+than `keep_all` (24h), then the newest backup of each UTC day younger than
+`keep_daily` (14 days), then at most `max_per_copy` (100). The newest backup is
+always kept. A failed backup prunes nothing.
+
+### Restore
+
+| Form | In place (`restore --apply`, `wg recover --apply`) | Scratch (`--into <dir>`) |
+|---|---|---|
+| Snapshot ref | `git stash apply --index W`; on an unborn branch, `read-tree` + `checkout-index` of W and U, then `read-tree` of I | clone, check out B detached (or an orphan branch), then the same |
+| Patch only | `git apply --index staged.patch`, `git apply unstaged.patch`, untar refusing to overwrite or leave the tree | clone, check out the recorded base, then the same |
+
+`--apply` refuses a dirty tree without `--force`; `git stash apply` itself
+refuses to overwrite an untracked file and reports merge conflicts when HEAD
+has moved since the backup.
 
 ### Safety Properties
 
 | Property | Guarantee |
 |---|---|
-| Working tree modification | NEVER -- all operations are read-only |
-| Index modification | NEVER -- `git stash create` reads but doesn't write index |
-| Branch modification | NEVER -- no checkout, reset, or commit to any branch |
-| Stash list modification | NEVER -- `stash create` != `stash save/push` |
-| Concurrent git safety | Skip if any `.git/*.lock` file exists |
-| Large file safety | Untracked files > 50MB are excluded from patch tar |
-| Atomic ref write | `git update-ref` is atomic |
-| Atomic state write | Write to tmp + rename |
+| Working tree, index, branches, stash | Never modified: all trees are built in temporary index files |
+| `index.lock` | Never taken; backups run while another git command holds it |
+| Optional locks | Every git call runs with `--no-optional-locks` |
+| Worktrees | Separate copy IDs, refs and retention |
+| Unchanged state | Not saved again; identical snapshots have identical commit IDs |
+| Large or odd untracked files | Left out and reported with a reason, never silently dropped |
+| Partial failure | Reported as an error and in `last_backup_error`; prunes nothing |
+| Atomic writes | Refs via `update-ref`; patch backups via `.partial` + rename; JSON via temp + rename |
 
 ---
 

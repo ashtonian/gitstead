@@ -176,17 +176,19 @@ func (c *SyncCmd) Run(ctx *Context) error {
 				backupCfg := backupConfigFor(cfg, repoCfg, key, repo.DiscoveredBy, c.PushBranch, "")
 				br, err := gitops.Backup(repoCtx, repo.LocalPath, backupCfg)
 				mu.Lock()
+				recordBackup(repo, br, err, time.Now())
 				if err != nil {
-					log.Warn("backup failed", "repo", key, "error", err)
-				} else if br.IsDirty {
+					result.failed++
+					result.errors = append(result.errors, syncError{repo: key, err: err})
+				}
+				if br.Outcome == gitops.BackupSaved {
 					result.backedUp++
-					repo.Status = "dirty"
-					repo.LastBackup = time.Now()
-					repo.LastBackupRef = br.RefName
-					repo.LastBackupHasPatch = br.HasPatch
-					if br.PushedBranch != "" {
-						log.Info("pushed WIP branch", "repo", key, "ref", br.PushedBranch)
-					}
+				}
+				if br.Dirty() {
+					log.Debug("backup", "repo", key, "outcome", br.Outcome.String(), "id", br.ID, "pushed", br.PushedBranch)
+				}
+				if len(br.Skipped) > 0 {
+					log.Warn("untracked paths left out of backup", "repo", key, "count", len(br.Skipped), "paths", skippedSummary(br.Skipped))
 				}
 				mu.Unlock()
 			}
@@ -221,10 +223,10 @@ func (c *SyncCmd) Run(ctx *Context) error {
 				}
 				br, berr := gitops.Backup(ctx.GoCtx(), m.Path, bcfg)
 				if berr != nil {
-					log.Warn("workgroup member backup failed", "workgroup", wgName, "member", m.Name, "error", berr)
-					continue
+					result.failed++
+					result.errors = append(result.errors, syncError{repo: wgName + "/" + m.Name, err: berr})
 				}
-				if br.IsDirty {
+				if br.Outcome == gitops.BackupSaved {
 					result.backedUp++
 				}
 			}

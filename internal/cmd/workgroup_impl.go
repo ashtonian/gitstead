@@ -193,7 +193,7 @@ func (c *WGBackupCmd) Run(ctx *Context) error {
 	}
 
 	bcfg := backupConfigFor(cfg, cfg.ResolveForRepo(""), "", "", c.PushBranch, "")
-	backed := 0
+	saved, failed := 0, 0
 	for _, m := range ws.Members {
 		if c.Member != "" && m.Name != c.Member {
 			continue
@@ -203,25 +203,21 @@ func (c *WGBackupCmd) Run(ctx *Context) error {
 		}
 		br, berr := gitops.Backup(ctx.GoCtx(), m.Path, bcfg)
 		if berr != nil {
-			fmt.Printf("  %s: error: %v\n", m.Name, berr)
-			continue
+			failed++
+			fmt.Fprintf(os.Stderr, "  %s: %v\n", m.Name, berr)
 		}
-		if br.IsDirty {
-			backed++
-			if !ctx.Quiet {
-				where := br.RefName
-				if where == "" {
-					where = "patch"
-				}
-				if br.PushedBranch != "" {
-					where += " + " + br.PushedBranch
-				}
-				fmt.Printf("  %s: backed up (%s)\n", m.Name, where)
-			}
+		if br.Outcome == gitops.BackupSaved {
+			saved++
+		}
+		if br.Dirty() && (!ctx.Quiet || len(br.Skipped) > 0) {
+			fmt.Printf("  %s: %s\n", m.Name, describeBackup(br))
 		}
 	}
 	if !ctx.Quiet {
-		fmt.Printf("Backed up %d dirty member(s) of %q\n", backed, c.Name)
+		fmt.Printf("Saved %d new backup(s) for %q\n", saved, c.Name)
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d member(s) of %q failed to back up", failed, c.Name)
 	}
 	return nil
 }
