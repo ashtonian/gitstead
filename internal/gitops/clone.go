@@ -33,9 +33,6 @@ func IsStaging(name string) bool {
 // default SSH configuration.
 func Clone(ctx context.Context, url, destPath, sshKeyPath string) error {
 	parent, base := filepath.Dir(destPath), filepath.Base(destPath)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return fmt.Errorf("creating parent dir: %w", err)
-	}
 	if err := checkFree(destPath); err != nil {
 		return err
 	}
@@ -79,14 +76,26 @@ func Clone(ctx context.Context, url, destPath, sshKeyPath string) error {
 	return nil
 }
 
-// mkdirStaging creates an empty staging directory for base. Unlike
-// os.MkdirTemp it honours the umask, so the finished clone gets the
-// permissions git itself would have given it.
+// mkdirStaging creates an empty staging directory for base in parent,
+// creating parent too. Unlike os.MkdirTemp it honours the umask, so the
+// finished clone gets the permissions git itself would have given it.
 func mkdirStaging(parent, base string) (string, error) {
-	for {
+	// A move tidying the directories it emptied can remove parent before the
+	// staging directory is in it, so a vanished parent is made again.
+	for retries := 3; ; {
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			return "", err
+		}
 		dir := filepath.Join(parent, fmt.Sprintf("%s%s-%08x", stagingPrefix, base, rand.Uint32()))
-		if err := os.Mkdir(dir, 0o777); !errors.Is(err, fs.ErrExist) {
-			return dir, err
+		err := os.Mkdir(dir, 0o777)
+		switch {
+		case err == nil:
+			return dir, nil
+		case errors.Is(err, fs.ErrExist):
+		case errors.Is(err, fs.ErrNotExist) && retries > 0:
+			retries--
+		default:
+			return "", err
 		}
 	}
 }

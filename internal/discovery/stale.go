@@ -14,7 +14,9 @@ type CleanupResult struct {
 	NewlyStale int // repos that transitioned to stale on this pass
 	Reapable   int // stale repos past the grace period eligible for cleanup
 	Reaped     int // repos removed from tracking (Run only)
-	Failed     int // repos whose on-disk deletion failed (Run only); left tracked
+	// Kept are the repos whose files couldn't be deleted, and why (Run only).
+	// They stay tracked, so cleanup tries them again next run.
+	Kept map[string]error
 }
 
 // RemoveFunc deletes a stale repo's files. When it cannot do so without
@@ -101,23 +103,24 @@ func (c Cleanup) Run(st *state.State, discovered map[string]bool, scope StaleSco
 		return res, err
 	}
 
-	failures := make(map[string]error)
+	removed := map[string]bool{}
 	for _, d := range due {
 		if err := c.Remove(d.key, &d.repo); err != nil {
-			failures[d.key] = err
+			if res.Kept == nil {
+				res.Kept = map[string]error{}
+			}
+			res.Kept[d.key] = err
+			continue
 		}
+		removed[d.key] = true
+	}
+	if len(removed) == 0 {
+		return res, nil
 	}
 	err = c.Update(func(st *state.State) error {
 		for _, d := range due {
 			repo := st.Repos[d.key]
-			if repo == nil || repo.LocalPath != d.repo.LocalPath || repo.Status != "stale" {
-				continue
-			}
-			if ferr := failures[d.key]; ferr != nil {
-				// Left tracked so the failure stays visible and is retried
-				// next run rather than silently orphaning the directory.
-				repo.Error = "stale cleanup kept the files: " + ferr.Error()
-				res.Failed++
+			if !removed[d.key] || repo == nil || repo.LocalPath != d.repo.LocalPath || repo.Status != "stale" {
 				continue
 			}
 			delete(st.Repos, d.key)
@@ -156,7 +159,6 @@ func (c Cleanup) mark(st *state.State, discovered map[string]bool, scope StaleSc
 				repo.Status = "clean"
 			}
 			repo.StaleSince = time.Time{}
-			repo.LastDiscovered = now
 			continue
 		}
 		// "ignore" leaves a repo that dropped out of discovery as it is.

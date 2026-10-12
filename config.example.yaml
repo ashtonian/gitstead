@@ -25,7 +25,8 @@ path_template: "{{.Host}}/{{.Owner}}/{{.Name}}"
 #           credentials. Override per repo set under `overrides:`.
 clone_protocol: "ssh"
 
-# Max concurrent git operations (clone, fetch, backup).
+# Max concurrent git operations: fetches, backups, and the clones and other
+# changes of different repos that sync and apply make.
 concurrency: 8
 
 # How long a command waits for another run to finish writing the state file

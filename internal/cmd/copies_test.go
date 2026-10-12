@@ -17,7 +17,7 @@ import (
 func TestRecordCopies(t *testing.T) {
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	backup := &gitops.BackupConfig{}
-	clean := &gitops.RepoStatus{HeadCommit: "abc", CurrentBranch: "main"}
+	clean := &gitops.RepoStatus{CurrentBranch: "main"}
 	repoAt := func(path string) copyJob { return copyJob{repoKey: "h/o/r", path: path, backup: backup} }
 
 	tests := []struct {
@@ -31,7 +31,7 @@ func TestRecordCopies(t *testing.T) {
 			repo: state.RepoState{LocalPath: "/r", Status: "error", LastFetchError: "timeout"},
 			out:  copyOutcome{job: repoAt("/r"), fetched: true, status: clean, at: now},
 			check: func(t *testing.T, r *state.RepoState) {
-				if r.Status != "clean" || r.LastFetchError != "" || !r.LastFetch.Equal(now) || r.HeadCommit != "abc" {
+				if r.Status != "clean" || r.LastFetchError != "" || !r.LastFetch.Equal(now) || r.CurrentBranch != "main" {
 					t.Errorf("repo = %+v", r)
 				}
 			},
@@ -58,20 +58,20 @@ func TestRecordCopies(t *testing.T) {
 		},
 		{
 			name: "a backup moves LastBackup",
-			repo: state.RepoState{LocalPath: "/r", BackupStatus: state.BackupStatus{LastBackupID: "old"}},
+			repo: state.RepoState{LocalPath: "/r", BackupStatus: state.BackupStatus{LastBackup: now.Add(-time.Hour), LastBackupError: "disk full"}},
 			out:  copyOutcome{job: repoAt("/r"), backup: &gitops.BackupResult{ID: "new"}, at: now},
 			check: func(t *testing.T, r *state.RepoState) {
-				if r.LastBackupID != "new" || !r.LastBackup.Equal(now) || r.LastBackupError != "" {
+				if !r.LastBackup.Equal(now) || r.LastBackupError != "" {
 					t.Errorf("repo = %+v", r)
 				}
 			},
 		},
 		{
 			name: "a failed backup keeps the last good one",
-			repo: state.RepoState{LocalPath: "/r", BackupStatus: state.BackupStatus{LastBackupID: "old", LastBackup: now.Add(-time.Hour)}},
+			repo: state.RepoState{LocalPath: "/r", BackupStatus: state.BackupStatus{LastBackup: now.Add(-time.Hour)}},
 			out:  copyOutcome{job: repoAt("/r"), backup: &gitops.BackupResult{}, backupErr: errors.New("disk full"), at: now},
 			check: func(t *testing.T, r *state.RepoState) {
-				if r.LastBackupID != "old" || !r.LastBackup.Equal(now.Add(-time.Hour)) || r.LastBackupError != "disk full" {
+				if !r.LastBackup.Equal(now.Add(-time.Hour)) || r.LastBackupError != "disk full" {
 					t.Errorf("repo = %+v", r)
 				}
 			},
@@ -120,10 +120,10 @@ func TestRecordCopies_Member(t *testing.T) {
 		{job: job("a2", "/w/elsewhere"), backup: &gitops.BackupResult{ID: "b2"}, at: now},
 	})
 	m := st.Workgroups["fleet"].Members
-	if m[0].LastBackupID != "b1" || !m[0].LastBackup.Equal(now) {
+	if !m[0].LastBackup.Equal(now) {
 		t.Errorf("member a1 = %+v", m[0])
 	}
-	if m[1].LastBackupID != "" {
+	if !m[1].LastBackup.IsZero() {
 		t.Errorf("a member moved meanwhile was recorded: %+v", m[1])
 	}
 }

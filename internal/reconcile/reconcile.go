@@ -23,6 +23,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/ashtonian/git-mgr/internal/state"
@@ -62,9 +63,23 @@ type Action struct {
 	// agent may be using; they wait for an explicit `git-mgr apply`.
 	Disruptive bool `json:"disruptive"`
 
-	// run makes the change and records it in env.State. Its string reports
-	// anything worth showing, such as where removed work was archived.
-	run func(ctx context.Context, env *Env) (string, error)
+	// run makes the change on disk and returns what to record of it.
+	run func(ctx context.Context, env *Env) (outcome, error)
+}
+
+// outcome is what an action did, and what of it to record.
+type outcome struct {
+	// info reports anything worth showing, such as where removed work was
+	// archived.
+	info string
+	// record saves the change in state; nil when there is nothing to save. It
+	// runs even when the action failed, for the part that was done. A record
+	// that fails must leave the state as it found it, since it shares its
+	// write with other actions' records.
+	record func(st *state.State) error
+	// after, if set, runs once the record is saved; its info is added to the
+	// action's.
+	after func(ctx context.Context) (string, error)
 }
 
 // Workgroup reports whether the action changes a workgroup rather than a
@@ -147,12 +162,17 @@ func (p *Plan) Disruptive() int {
 
 // Env is what applying a plan acts on.
 type Env struct {
+	// State is the state Update keeps current. Workgroup actions read it;
+	// repo actions run at once and read only what their plan gives them.
 	State *state.State
 	// Update applies a change to the latest state and saves it, under the
 	// state lock, so other git-mgr runs can work between actions: an action
 	// does its slow disk work (a clone, an archive) first and only then
 	// records the result. Required.
 	Update func(change func(*state.State) error) error
+	// Concurrency is how many repos' actions do disk work at once; below 1
+	// means one.
+	Concurrency int
 	// CloneTimeout bounds each clone; 0 means none.
 	CloneTimeout time.Duration
 	// ArchiveDir receives the unique work of anything removed.
@@ -162,6 +182,7 @@ type Env struct {
 	KeepDirs []string
 	Now      func() time.Time
 
+	mu sync.Mutex
 	// moved maps paths moved during this run to their new location, so later
 	// actions find a workgroup's source after its repo moved.
 	moved map[string]string
@@ -176,6 +197,8 @@ func (env *Env) now() time.Time {
 
 // resolve returns where path is now, following moves made during this run.
 func (env *Env) resolve(path string) string {
+	env.mu.Lock()
+	defer env.mu.Unlock()
 	if to, ok := env.moved[path]; ok {
 		return to
 	}
@@ -183,6 +206,8 @@ func (env *Env) resolve(path string) string {
 }
 
 func (env *Env) noteMove(from, to string) {
+	env.mu.Lock()
+	defer env.mu.Unlock()
 	if env.moved == nil {
 		env.moved = map[string]string{}
 	}
@@ -208,42 +233,6 @@ func All(Action) bool { return true }
 
 // None selects no action.
 func None(Action) bool { return false }
-
-// Apply records this run's observations, then runs the actions include
-// selects, in order; each action records what it did in state as soon as it
-// has done it. An action whose target already failed in this run is skipped,
-// so a failed rename never leads to a move.
-func (p *Plan) Apply(ctx context.Context, env *Env, include func(Action) bool) []Result {
-	if len(p.record) > 0 {
-		err := env.Update(func(st *state.State) error {
-			for _, rec := range p.record {
-				rec(ctx, st)
-			}
-			return nil
-		})
-		if err != nil {
-			return []Result{{Err: err}}
-		}
-	}
-
-	var results []Result
-	failed := map[string]bool{}
-	for _, a := range p.Actions {
-		if !include(a) {
-			continue
-		}
-		if failed[a.Target] {
-			results = append(results, Result{Action: a, Err: ErrSkipped})
-			continue
-		}
-		info, err := a.run(ctx, env)
-		if err != nil {
-			failed[a.Target] = true
-		}
-		results = append(results, Result{Action: a, Info: info, Err: err})
-	}
-	return results
-}
 
 // removeEmptyParents removes the now-empty directories above path, stopping
 // at the first one that isn't empty or that env keeps.

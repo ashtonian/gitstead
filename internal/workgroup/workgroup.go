@@ -319,9 +319,9 @@ func TrackRepos(ctx context.Context, st *state.State, spec *Spec) (added int, sk
 		tags := []string{"workgroup:" + spec.Name}
 		st.Repos[key] = &state.RepoState{
 			CloneURL: id.URL, Host: id.Host, Owner: id.Owner, Name: id.Name,
-			FullName: id.FullName, Provider: id.Host, LocalPath: localPath,
+			FullName: id.FullName, LocalPath: localPath,
 			CopyID: gitops.ReadCopyID(ctx, localPath), Cloned: true, ManuallyAdded: true,
-			Status: "clean", Tags: tags, UserTags: tags, FirstSeen: time.Now(),
+			Status: "clean", Tags: tags, UserTags: tags,
 		}
 		added++
 	}

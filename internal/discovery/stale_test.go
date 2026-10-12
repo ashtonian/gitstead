@@ -74,7 +74,7 @@ func TestCleanup_PreviewNeverDeletes(t *testing.T) {
 	if _, ok := st.Repos["host/owner/repo"]; !ok {
 		t.Fatal("preview untracked the repo")
 	}
-	if res.Reaped != 0 || res.Failed != 0 {
+	if res.Reaped != 0 || len(res.Kept) != 0 {
 		t.Fatalf("preview reaped/failed should be 0, got %+v", res)
 	}
 	if res.Reapable != 1 {
@@ -93,13 +93,13 @@ func TestCleanup_ApplyDeletes(t *testing.T) {
 	if _, ok := st.Repos["host/owner/repo"]; ok {
 		t.Fatal("apply should have untracked the repo")
 	}
-	if res.Reaped != 1 || res.Failed != 0 {
-		t.Fatalf("expected Reaped=1 Failed=0, got %+v", res)
+	if res.Reaped != 1 || len(res.Kept) != 0 {
+		t.Fatalf("expected Reaped=1 and nothing kept, got %+v", res)
 	}
 }
 
 // A repo whose files the remover keeps (unique work it could not archive, an
-// unsafe path) stays tracked, counted as Failed and carries the reason.
+// unsafe path) stays tracked and is reported with the reason.
 func TestCleanup_KeepsRepoWhenRemoveFails(t *testing.T) {
 	st, dir := stalePastGrace(t)
 	refuse := func(string, *state.RepoState) error { return errors.New("cannot archive") }
@@ -109,15 +109,11 @@ func TestCleanup_KeepsRepoWhenRemoveFails(t *testing.T) {
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("kept repo's files are gone: %v", err)
 	}
-	repo, ok := st.Repos["host/owner/repo"]
-	if !ok {
+	if _, ok := st.Repos["host/owner/repo"]; !ok {
 		t.Fatal("repo should stay tracked after a refused delete")
 	}
-	if !strings.Contains(repo.Error, "cannot archive") {
-		t.Fatalf("repo error should carry the reason, got %q", repo.Error)
-	}
-	if res.Failed != 1 || res.Reaped != 0 {
-		t.Fatalf("expected Failed=1 Reaped=0, got %+v", res)
+	if err := res.Kept["host/owner/repo"]; err == nil || !strings.Contains(err.Error(), "cannot archive") || res.Reaped != 0 {
+		t.Fatalf("want the repo kept with its reason and nothing reaped, got %+v", res)
 	}
 }
 
@@ -134,7 +130,7 @@ func TestCleanup_KeepsRepoChangedMeanwhile(t *testing.T) {
 	if _, ok := st.Repos["host/owner/repo"]; !ok {
 		t.Fatal("a repo found again meanwhile was untracked")
 	}
-	if res.Reaped != 0 || res.Failed != 0 {
+	if res.Reaped != 0 || len(res.Kept) != 0 {
 		t.Fatalf("expected nothing reaped, got %+v", res)
 	}
 }

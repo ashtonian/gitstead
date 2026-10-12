@@ -16,12 +16,11 @@ func scaleState(b *testing.B, n int) string {
 		key := fmt.Sprintf("github.com/owner%d/repo-name-%d", i%50, i)
 		s.Repos[key] = &RepoState{
 			Host: "github.com", Owner: fmt.Sprintf("owner%d", i%50), Name: fmt.Sprintf("repo-name-%d", i),
-			FullName: fmt.Sprintf("owner%d/repo-name-%d", i%50, i), Provider: "github.com", ProviderID: fmt.Sprint(100000 + i),
-			CloneURL: "git@github.com:" + key + ".git", LocalPath: "/Users/me/projects/" + key, DefaultBranch: "main",
-			HeadCommit: "0123456789abcdef0123456789abcdef01234567", CurrentBranch: "main", Tags: []string{"work", "go"},
-			DiscoveredBy: "work", Cloned: true, LastFetch: now, BackupStatus: BackupStatus{LastBackup: now, LastBackupID: "20261012T181037.050Z"},
-			Status: "clean", FirstSeen: now, LastDiscovered: now, CopyID: "0123456789abcdef",
+			FullName: fmt.Sprintf("owner%d/repo-name-%d", i%50, i), ProviderID: fmt.Sprint(100000 + i),
+			CloneURL: "git@github.com:" + key + ".git", LocalPath: "/Users/me/projects/" + key, CopyID: "0123456789abcdef",
+			Cloned: true, DiscoveredBy: "work", Tags: []string{"work", "go"},
 			ManagedConfig: map[string]string{"core.sshcommand": "ssh -i '/Users/me/.ssh/id_work' -o IdentitiesOnly=yes", "user.email": "me@acme.com"},
+			Status:        "clean", CurrentBranch: "main", LastFetch: now, BackupStatus: BackupStatus{LastBackup: now},
 			OffsiteStatus: OffsiteStatus{OffsiteRemote: "origin", OffsiteNamespace: "refs/git-mgr/mac-1a2b3c/0123456789abcdef", OffsiteWIP: []string{"20261012T181037.050Z"}, LastOffsite: now},
 		}
 	}

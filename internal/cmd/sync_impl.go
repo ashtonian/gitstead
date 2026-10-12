@@ -92,8 +92,9 @@ func (c *SyncCmd) Run(ctx *Context) error {
 			if outcome.Reaped > 0 {
 				log.Info("cleaned up stale repos", "count", outcome.Reaped, "policy", cfg.Cleanup.Policy)
 			}
-			if outcome.Failed > 0 {
-				log.Warn("some stale repos could not be deleted", "count", outcome.Failed)
+			for _, key := range slices.Sorted(maps.Keys(outcome.Kept)) {
+				tried++
+				failures = append(failures, syncError{key, fmt.Errorf("stale cleanup kept its files: %w", outcome.Kept[key])})
 			}
 		}
 	}

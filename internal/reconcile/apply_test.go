@@ -2,6 +2,7 @@ package reconcile_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,10 +95,11 @@ func (w *world) plan() *reconcile.Plan {
 func (w *world) apply(p *reconcile.Plan, include func(reconcile.Action) bool) []reconcile.Result {
 	w.t.Helper()
 	env := &reconcile.Env{
-		State:      w.st,
-		Update:     func(change func(*state.State) error) error { return w.st.Update(time.Second, change) },
-		ArchiveDir: w.cfg.Backup.ArchiveDir,
-		KeepDirs:   []string{w.cfg.BaseDir, w.cfg.WorkgroupBaseDir},
+		State:       w.st,
+		Update:      func(change func(*state.State) error) error { return w.st.Update(time.Second, change) },
+		Concurrency: w.cfg.Concurrency,
+		ArchiveDir:  w.cfg.Backup.ArchiveDir,
+		KeepDirs:    []string{w.cfg.BaseDir, w.cfg.WorkgroupBaseDir},
 	}
 	results := reconcile.ApplyPlan(context.Background(), w.cfg, env, p, reconcile.Scope{Repos: true, Workgroups: true}, include)
 	for _, r := range results {
@@ -437,6 +439,37 @@ func TestApply_AccountSigning(t *testing.T) {
 	w.converge()
 	if _, err := gitops.Git(context.Background(), repo, "config", "--local", "commit.gpgsign"); err == nil {
 		t.Error("commit.gpgsign should be unset under inherit")
+	}
+}
+
+// Many repos clone at once, then all move at once when the layout changes,
+// and every one is recorded.
+func TestApply_ManyReposAtOnce(t *testing.T) {
+	root := t.TempDir()
+	w := newWorld(t, root)
+	w.cfg.Concurrency = 4
+	w.found = map[string]discovery.Repo{}
+	for i := range 6 {
+		name := fmt.Sprintf("app%d", i)
+		w.found["local/remotes/"+name] = discovery.Repo{
+			Host: "local", Owner: "remotes", Name: name, FullName: "remotes/" + name, SSHURL: bareRemote(t, root, name),
+		}
+	}
+	assertKinds(t, w.plan(), "clone", "clone", "clone", "clone", "clone", "clone")
+	w.converge()
+
+	w.cfg.PathTemplate = "{{.Name}}"
+	assertKinds(t, w.plan(), "move!", "move!", "move!", "move!", "move!", "move!")
+	w.converge()
+	for key, r := range w.found {
+		want := filepath.Join(w.cfg.BaseDir, r.Name)
+		if got := w.st.Repos[key].LocalPath; got != want {
+			t.Errorf("%s recorded at %s, want %s", key, got, want)
+		}
+		mustGit(t, want, "status", "--short")
+	}
+	if _, err := os.Stat(filepath.Join(w.cfg.BaseDir, "local")); !os.IsNotExist(err) {
+		t.Error("the moves should remove the directories they emptied")
 	}
 }
 

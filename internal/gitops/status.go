@@ -8,7 +8,6 @@ import (
 
 // RepoStatus describes the working tree state of a repo.
 type RepoStatus struct {
-	HeadCommit    string
 	CurrentBranch string
 	HasStaged     bool
 	HasUnstaged   bool
@@ -21,12 +20,6 @@ type RepoStatus struct {
 // GetStatus returns the current status of a repo's working tree.
 func GetStatus(ctx context.Context, repoPath string) (*RepoStatus, error) {
 	rs := &RepoStatus{}
-
-	head, err := Git(ctx, repoPath, "rev-parse", "HEAD")
-	if err != nil {
-		return nil, err
-	}
-	rs.HeadCommit = head
 
 	branch, err := Git(ctx, repoPath, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
