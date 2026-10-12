@@ -59,7 +59,7 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 	plan := reconcile.Compute(ctx.GoCtx(), cfg, st, reconcile.Scope{Discovered: discovered, Rules: scope, Repos: true})
 	var applyErr error
 	if c.Apply {
-		applyErr = applyAuto(ctx, cfg, st, plan, reconcile.Safe)
+		applyErr = changesOutcome(applyAuto(ctx, cfg, st, plan, reconcile.Safe), plan)
 	} else {
 		printPlan(plan, "safe")
 	}

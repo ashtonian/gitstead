@@ -59,7 +59,7 @@ func (c *WGRecoverCmd) Run(ctx *Context) error {
 		return fmt.Errorf("--into requires a single member (use --member)")
 	}
 
-	found, failed := 0, 0
+	found, failed, attempted := 0, 0, 0
 	for _, m := range members {
 		label := c.Name + "/" + m.Name
 		if !gitops.HasGitDir(m.Path) {
@@ -71,6 +71,7 @@ func (c *WGRecoverCmd) Run(ctx *Context) error {
 			fmt.Printf("  %s: no local backup found\n", m.Name)
 			continue
 		}
+		attempted++
 		if err != nil {
 			failed++
 			fmt.Fprintf(os.Stderr, "  %s: %v\n", m.Name, err)
@@ -86,10 +87,7 @@ func (c *WGRecoverCmd) Run(ctx *Context) error {
 		fmt.Println("No local backups found. WIP pushed via --push-branch is on the remote:")
 		fmt.Println("  git -C <member> fetch <remote> git-mgr/wip/<branch> && git -C <member> cherry-pick --no-commit FETCH_HEAD")
 	}
-	if failed > 0 {
-		return fmt.Errorf("%d member(s) could not be recovered", failed)
-	}
-	return nil
+	return outcome(failed, attempted, "members could not be recovered")
 }
 
 // WGCheckCmd asserts a workgroup is set up and in sync.
@@ -351,10 +349,7 @@ func (c *WGExecCmd) Run(ctx *Context) error {
 			fmt.Printf("(error: %v)\n", r.Err)
 		}
 	}
-	if failed > 0 {
-		return fmt.Errorf("%d member(s) failed", failed)
-	}
-	return nil
+	return outcome(failed, len(results), "members failed")
 }
 
 // --- shared helpers ---
@@ -406,10 +401,7 @@ func reportOps(name, verb string, results []workgroup.OpResult, quiet bool) erro
 	if !quiet {
 		fmt.Printf("%s: %d %s, %d skipped, %d failed\n", name, ok, verb, skipped, failed)
 	}
-	if failed > 0 {
-		return fmt.Errorf("%d member(s) failed", failed)
-	}
-	return nil
+	return outcome(failed, len(results), "members failed")
 }
 
 func memberState(m workgroup.MemberHealth) string {

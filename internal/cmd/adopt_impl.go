@@ -89,10 +89,12 @@ func (c *AdoptCmd) scanAndAdopt(ctx *Context, cfg *config.Config, st *state.Stat
 	}
 
 	fmt.Printf("Found %d git repos\n", len(found))
+	failed := 0
 	for _, repoPath := range found {
 		if err := c.adoptSingle(ctx, cfg, st, repoPath); err != nil {
-			fmt.Printf("  %s: %v\n", repoPath, err)
+			fmt.Fprintf(os.Stderr, "  %s: %v\n", repoPath, err)
+			failed++
 		}
 	}
-	return nil
+	return outcome(failed, len(found), "repos could not be adopted")
 }

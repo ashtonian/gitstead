@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -127,7 +126,10 @@ func (c *ManifestImportCmd) Run(ctx *Context) error {
 	if !c.DryRun {
 		fmt.Printf("Imported %d repos (%d already tracked)\n", added, skipped)
 	}
-	return errors.Join(errs...)
+	for _, err := range errs {
+		fmt.Fprintf(os.Stderr, "  %v\n", err)
+	}
+	return outcome(len(errs), added+len(errs), "manifest entries could not be imported")
 }
 
 // relToBase returns localPath relative to base when it lives under base, else

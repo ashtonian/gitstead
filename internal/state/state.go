@@ -16,6 +16,9 @@ import (
 // CurrentVersion is the state schema this build reads and writes.
 const CurrentVersion = 2
 
+// ErrLocked reports that another git-mgr run holds the state lock.
+var ErrLocked = errors.New("another git-mgr instance is running")
+
 // ErrNewerState reports a state file written by a newer git-mgr. It is never
 // read or rewritten, so an older binary can't drop fields it doesn't know.
 var ErrNewerState = errors.New("state file is newer than this git-mgr")
@@ -238,7 +241,10 @@ func (s *State) AcquireLock() error {
 
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
-		return fmt.Errorf("another git-mgr instance is running")
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return ErrLocked
+		}
+		return fmt.Errorf("locking %s: %w", lockPath, err)
 	}
 
 	s.lockFD = f

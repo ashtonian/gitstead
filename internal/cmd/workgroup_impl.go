@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -195,7 +194,7 @@ func (c *WGBackupCmd) Run(ctx *Context) error {
 	}
 
 	bcfg := backupConfigFor(cfg, cfg.ResolveForRepo(""), "", "", c.PushBranch, "")
-	saved, failed := 0, 0
+	saved, failed, attempted := 0, 0, 0
 	for _, m := range ws.Members {
 		if c.Member != "" && m.Name != c.Member {
 			continue
@@ -203,6 +202,7 @@ func (c *WGBackupCmd) Run(ctx *Context) error {
 		if !gitops.HasGitDir(m.Path) {
 			continue
 		}
+		attempted++
 		br, berr := gitops.Backup(ctx.GoCtx(), m.Path, bcfg)
 		if berr != nil {
 			failed++
@@ -218,10 +218,7 @@ func (c *WGBackupCmd) Run(ctx *Context) error {
 	if !ctx.Quiet {
 		fmt.Printf("Saved %d new backup(s) for %q\n", saved, c.Name)
 	}
-	if failed > 0 {
-		return fmt.Errorf("%d member(s) of %q failed to back up", failed, c.Name)
-	}
-	return nil
+	return outcome(failed, attempted, "members of %q failed to back up", c.Name)
 }
 
 // WGRemoveCmd tears down a workgroup.
@@ -336,11 +333,10 @@ func (c *WGCreateCmd) materialize(ctx *Context) error {
 		fmt.Printf("Workgroup %q: %d members (%d created) at %s\n", c.Name, len(spec.Members), created, spec.Root)
 	}
 	// Give the members their accounts' managed git config.
-	ensureErr := ensureWorkgroups(ctx, cfg, st, c.Name, false)
-	if failed > 0 {
-		return errors.Join(fmt.Errorf("%d member(s) failed", failed), ensureErr)
+	if err := ensureWorkgroups(ctx, cfg, st, c.Name, false); err != nil {
+		return err
 	}
-	return ensureErr
+	return outcome(failed, len(spec.Members), "members could not be created")
 }
 
 func (c *WGEnsureCmd) Run(ctx *Context) error {
@@ -374,7 +370,7 @@ func ensureWorkgroups(ctx *Context, cfg *config.Config, st *state.State, name st
 		}
 		return nil
 	}
-	return errors.Join(applyAuto(ctx, cfg, st, plan, reconcile.Safe), blockedErr(plan))
+	return changesOutcome(applyAuto(ctx, cfg, st, plan, reconcile.Safe), plan)
 }
 
 func (c *WGAdoptCmd) Run(ctx *Context) error {
@@ -526,7 +522,7 @@ func (c *WGRemoveCmd) Run(ctx *Context) error {
 		if serr := st.Save(); serr != nil {
 			return serr
 		}
-		return fmt.Errorf("workgroup %q: %d of %d members could not be removed and are still tracked", c.Name, kept, len(spec.Members))
+		return outcome(kept, len(spec.Members), "members of %q could not be removed and are still tracked", c.Name)
 	}
 	workgroup.RemoveEmptyRoot(spec)
 	delete(st.Workgroups, c.Name)
@@ -566,7 +562,7 @@ func lockedState(ctx *Context) (*state.State, func(), error) {
 		return nil, nil, err
 	}
 	if err := st.AcquireLock(); err != nil {
-		return nil, nil, fmt.Errorf("another git-mgr instance is running; try again")
+		return nil, nil, err
 	}
 	if err := st.Reload(); err != nil {
 		st.ReleaseLock()
