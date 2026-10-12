@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -174,9 +175,9 @@ type WGListCmd struct{}
 
 // WGBackupCmd backs up every member's working tree so agent WIP is preserved.
 type WGBackupCmd struct {
-	Name       string `arg:"" help:"Workgroup to back up." predictor:"workgroup"`
-	Member     string `help:"Only back up this member." default:""`
-	PushBranch bool   `help:"Also push WIP to a recoverable remote branch (git-mgr/wip/<branch>)." name:"push-branch"`
+	Name    string `arg:"" help:"Workgroup to back up." predictor:"workgroup"`
+	Member  string `help:"Only back up this member." default:""`
+	Offsite bool   `help:"Also push each member's WIP and unpushed commits offsite (remote_sync), even when remote_sync.enabled is off."`
 }
 
 func (c *WGBackupCmd) Run(ctx *Context) error {
@@ -192,42 +193,71 @@ func (c *WGBackupCmd) Run(ctx *Context) error {
 	if !ok {
 		return fmt.Errorf("workgroup %q not found in state; run 'workgroup ensure %s' first", c.Name, c.Name)
 	}
+	machine := ""
+	if c.Offsite {
+		if machine, err = ensureMachine(cfg, st); err != nil {
+			return err
+		}
+	}
 
-	bcfg := backupConfigFor(cfg, cfg.ResolveForRepo(""), "", "", c.PushBranch, "")
-	saved, failed, attempted := 0, 0, 0
+	var jobs []copyJob
 	for _, m := range ws.Members {
-		if c.Member != "" && m.Name != c.Member {
+		if c.Member != "" && m.Name != c.Member || !gitops.HasGitDir(m.Path) {
 			continue
 		}
-		if !gitops.HasGitDir(m.Path) {
-			continue
+		job := memberJob(cfg, st, c.Name, m, true)
+		if c.Offsite {
+			job.offsite = memberOffsite(cfg, st, machine, m, job.sshKey)
 		}
-		attempted++
-		br, berr := gitops.Backup(ctx.GoCtx(), m.Path, bcfg)
-		if berr != nil {
+		if job.backup != nil || job.offsite != nil {
+			jobs = append(jobs, job)
+		}
+	}
+	outcomes := runCopies(ctx.GoCtx(), ctx.Logger(), jobs, cfg.Concurrency)
+	if err := st.Update(cfg.LockTimeout, func(st *state.State) error {
+		recordCopies(st, outcomes)
+		return nil
+	}); err != nil {
+		return fmt.Errorf("recording backups: %w", err)
+	}
+
+	saved, failed := 0, 0
+	for _, o := range outcomes {
+		if errs := o.failed(); len(errs) > 0 {
 			failed++
-			fmt.Fprintf(os.Stderr, "  %s: %v\n", m.Name, berr)
+			fmt.Fprintf(os.Stderr, "  %s: %v\n", o.job.member, errors.Join(errs...))
 		}
-		if br.Outcome == gitops.BackupSaved {
-			saved++
+		if br := o.backup; br != nil {
+			if br.Outcome == gitops.BackupSaved {
+				saved++
+			}
+			if br.Dirty() && (!ctx.Quiet || len(br.Skipped) > 0) {
+				fmt.Printf("  %s: %s\n", o.job.member, describeBackup(br))
+			}
 		}
-		if br.Dirty() && (!ctx.Quiet || len(br.Skipped) > 0) {
-			fmt.Printf("  %s: %s\n", m.Name, describeBackup(br))
+		if !o.offsitePlan.Empty() && !ctx.Quiet {
+			fmt.Printf("  %s: %s\n", o.job.member, describeOffsite(o.offsitePlan, false))
 		}
 	}
 	if !ctx.Quiet {
 		fmt.Printf("Saved %d new backup(s) for %q\n", saved, c.Name)
 	}
-	return outcome(failed, attempted, "members of %q failed to back up", c.Name)
+	return outcome(failed, len(jobs), "members of %q failed to back up", c.Name)
+}
+
+// memberOffsite is a member's offsite spec under the policy of the repo it
+// is a copy of, enabled or not.
+func memberOffsite(cfg *config.Config, st *state.State, machine string, m state.WorkgroupMemberState, sshKey string) *offsiteSpec {
+	return offsiteFor(cfg, memberRemoteSync(cfg, st, m), machine, memberIdentity(st, m), sshKey, m.OffsiteStatus)
 }
 
 // WGRemoveCmd tears down a workgroup.
 type WGRemoveCmd struct {
-	Name       string `arg:"" help:"Workgroup to remove." predictor:"workgroup"`
-	Delete     bool   `help:"Also delete member directories from disk."`
-	Yes        bool   `help:"Skip confirmation."`
-	Force      bool   `help:"Discard uncommitted member work without backing it up first."`
-	PushBranch bool   `help:"Also push members' WIP to a recoverable remote branch during the safety backup." name:"push-branch"`
+	Name    string `arg:"" help:"Workgroup to remove." predictor:"workgroup"`
+	Delete  bool   `help:"Also delete member directories from disk."`
+	Yes     bool   `help:"Skip confirmation."`
+	Force   bool   `help:"Discard uncommitted member work without backing it up first."`
+	Offsite bool   `help:"Push each member's WIP and unpushed commits offsite (remote_sync) before deleting it; a member that can't be pushed is kept."`
 }
 
 func (c *WGCreateCmd) Run(ctx *Context) error {
@@ -504,13 +534,23 @@ func (c *WGRemoveCmd) Run(ctx *Context) error {
 		return err
 	}
 
+	machine := ""
+	if c.Offsite && !c.Force {
+		if machine, err = ensureMachine(cfg, st); err != nil {
+			return err
+		}
+	}
 	var removed []workgroup.Member
 	for _, m := range spec.Members {
-		if c.PushBranch && !c.Force {
-			repoCfg := cfg.ResolveForRepo(m.RepoKey)
-			bcfg := backupConfigFor(cfg, repoCfg, m.RepoKey, "", c.PushBranch, "")
-			if _, berr := gitops.Backup(ctx.GoCtx(), m.Path, bcfg); berr != nil {
-				fmt.Fprintf(os.Stderr, "  %s: kept, pushing backup branch failed: %v\n", m.Name, berr)
+		if c.Offsite && !c.Force && gitops.HasGitDir(m.Path) {
+			sm := state.WorkgroupMemberState{Name: m.Name, Path: m.Path, RepoKey: m.RepoKey, RepoURL: m.RepoURL}
+			if rec := memberAt(st, c.Name, m.Name, m.Path); rec != nil {
+				sm.OffsiteStatus = rec.OffsiteStatus
+			}
+			job := memberJob(cfg, st, c.Name, sm, true)
+			job.offsite = memberOffsite(cfg, st, machine, sm, job.sshKey)
+			if errs := runCopies(ctx.GoCtx(), ctx.Logger(), []copyJob{job}, 1)[0].failed(); len(errs) > 0 {
+				fmt.Fprintf(os.Stderr, "  %s: kept, it couldn't be taken offsite: %v\n", m.Name, errors.Join(errs...))
 				continue
 			}
 		}

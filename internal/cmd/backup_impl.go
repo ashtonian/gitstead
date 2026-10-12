@@ -12,26 +12,16 @@ import (
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
-// backupConfigFor builds a gitops.BackupConfig from resolved per-repo config,
-// layering in push-branch (with its resolved SSH key) when enabled by config or
-// the CLI flag. pushRemoteFlag overrides the configured remote when non-empty.
-func backupConfigFor(cfg, repoCfg *config.Config, key, discoveredBy string, pushBranchFlag bool, pushRemoteFlag string) gitops.BackupConfig {
+// backupConfigFor is the backup configuration a repo resolves to.
+func backupConfigFor(repoCfg *config.Config) gitops.BackupConfig {
 	b := repoCfg.Backup
-	opts := []gitops.BackupOption{
+	return gitops.NewBackupConfig(
 		gitops.WithStrategy(b.Strategy),
 		gitops.WithIncludeUntracked(b.IncludeUntracked),
 		gitops.WithUntrackedLimits(int64(b.MaxUntrackedFileMB)<<20, int64(b.MaxUntrackedTotalMB)<<20),
 		gitops.WithRetention(gitops.Retention{KeepAll: b.KeepAll, KeepDaily: b.KeepDaily, Max: b.MaxPerCopy}),
 		gitops.WithPatchDir(b.PatchDir),
-	}
-	if pushBranchFlag || b.PushBranch {
-		remote := pushRemoteFlag
-		if remote == "" {
-			remote = b.PushRemote
-		}
-		opts = append(opts, gitops.WithPushBranch(remote, cfg.ResolveSSHKey(key, discoveredBy)))
-	}
-	return gitops.NewBackupConfig(opts...)
+	)
 }
 
 // describeBackup summarises a backup run for one line of output.
@@ -44,9 +34,6 @@ func describeBackup(br *gitops.BackupResult) string {
 		parts = append(parts, "unchanged since "+br.ID)
 	default:
 		parts = append(parts, "clean")
-	}
-	if br.PushedBranch != "" {
-		parts = append(parts, "pushed "+br.PushedBranch)
 	}
 	if br.IndexUnmerged {
 		parts = append(parts, "index had conflicts, kept as unstaged")
@@ -105,7 +92,7 @@ func (c *BackupCmd) Run(ctx *Context) error {
 		if !pass(key, repo) || !repo.Cloned {
 			continue
 		}
-		b := backupConfigFor(cfg, cfg.ResolveForRepo(key), key, repo.DiscoveredBy, c.PushBranch, c.PushRemote)
+		b := backupConfigFor(cfg.ResolveForRepo(key))
 		jobs = append(jobs, repoJob(cfg, key, repo, &b))
 	}
 	outcomes := runCopies(ctx.GoCtx(), ctx.Logger(), jobs, cfg.Concurrency)

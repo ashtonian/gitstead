@@ -51,3 +51,12 @@ calling out:
 - **Backups** of uncommitted work are stored under `refs/git-mgr/backups/*` and
   in the patch directory; treat those as containing potentially sensitive
   source just like the repos themselves.
+- **Offsite copies** (`remote_sync`) push uncommitted work -- untracked files
+  included -- and unpushed commits to hidden refs on the remote. They don't
+  appear in branch lists or trigger CI, but anyone who can read the remote can
+  fetch them, so an untracked `.env` in a working copy reaches everyone with
+  read access. Exclude such files with `.gitignore` (ignored files are never
+  backed up), set `remote_sync.enabled: false` for those repos, or point
+  `remote_sync.remote` at a private backup remote. git-mgr force-pushes only
+  inside each copy's own namespace (and, with `wip: branch`, its own
+  `git-mgr/wip/<machine>/<copy>` branch).

@@ -604,15 +604,15 @@ func TestE2E_WGCreateFromFlags(t *testing.T) {
 	}
 }
 
-// TestE2E_BackupPushBranch adopts a repo whose origin is a local bare remote,
-// dirties it, and runs `backup --push-branch`, asserting the WIP snapshot lands
-// on the remote as a normal branch while the working tree stays dirty.
-func TestE2E_BackupPushBranch(t *testing.T) {
+// TestE2E_RemoteSync adopts a repo whose origin is a local bare remote, gives
+// it uncommitted work and an unpushed commit, and runs `sync` with
+// remote_sync on: both land on the remote under the copy's hidden namespace,
+// no branch is pushed, and the working tree is untouched.
+func TestE2E_RemoteSync(t *testing.T) {
 	env := newLocalEnv(t)
 	tmp := t.TempDir()
 
-	// Bare "remote" + a working clone with origin pointing at it.
-	gitCmd(t, tmp, "init", "-q", "--bare", "remote.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", "remote.git")
 	gitCmd(t, tmp, "clone", "-q", "remote.git", "app")
 	remote := filepath.Join(tmp, "remote.git")
 	app := filepath.Join(tmp, "app")
@@ -625,35 +625,63 @@ func TestE2E_BackupPushBranch(t *testing.T) {
 	gitCmd(t, app, "commit", "-qm", "init")
 	gitCmd(t, app, "push", "-q", "origin", "HEAD")
 
-	cfg := fmt.Sprintf("base_dir: %s\nbackup:\n  patch_dir: %s\n", env.baseDir, filepath.Join(tmp, "patches"))
+	cfg := fmt.Sprintf("base_dir: %s\nsync:\n  auto_discover: false\nbackup:\n  patch_dir: %s\nremote_sync:\n  enabled: true\n",
+		env.baseDir, filepath.Join(tmp, "patches"))
 	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
-	// Adopt the working clone (its origin is a local-path remote).
 	if out, code := env.run(t, "adopt", app); code != 0 {
 		t.Fatalf("adopt exit %d:\n%s", code, out)
 	}
 
-	// Dirty a tracked file, then back up + push WIP.
-	if err := os.WriteFile(filepath.Join(app, "file.txt"), []byte("v1\nwip\n"), 0o644); err != nil {
+	// An unpushed commit, then uncommitted work on top.
+	if err := os.WriteFile(filepath.Join(app, "file.txt"), []byte("v2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, code := env.run(t, "backup", "--push-branch")
-	if code != 0 {
-		t.Fatalf("backup --push-branch exit %d:\n%s", code, out)
+	gitCmd(t, app, "commit", "-qam", "local only")
+	if err := os.WriteFile(filepath.Join(app, "file.txt"), []byte("v2\nwip\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(out, "git-mgr/wip/") {
-		t.Errorf("expected a pushed WIP branch in output:\n%s", out)
-	}
-
-	// The WIP branch must exist on the remote as a normal branch.
-	if refs := gitCmd(t, remote, "for-each-ref", "refs/heads/git-mgr/wip/"); !strings.Contains(refs, "git-mgr/wip/") {
-		t.Errorf("WIP branch missing on remote: %q", refs)
+	if out, code := env.run(t, "sync", "--no-fetch"); code != 0 {
+		t.Fatalf("sync exit %d:\n%s", code, out)
 	}
 
-	// Working tree stays dirty — backup is non-destructive.
+	refs := gitCmd(t, remote, "for-each-ref", "--format=%(refname)", "refs/git-mgr/")
+	if !strings.Contains(refs, "/wip/") || !strings.Contains(refs, "/heads/main") {
+		t.Errorf("remote refs after sync:\n%s\nwant a WIP ref and the unpushed main", refs)
+	}
+	if heads := gitCmd(t, remote, "for-each-ref", "--format=%(refname)", "refs/heads/"); heads != "refs/heads/main" {
+		t.Errorf("sync pushed branches: %s", heads)
+	}
+	if got := gitCmd(t, remote, "rev-parse", "main"); got == gitCmd(t, app, "rev-parse", "HEAD") {
+		t.Error("the unpushed commit was pushed to main itself")
+	}
 	if st := gitCmd(t, app, "status", "--porcelain"); st == "" {
-		t.Error("backup should not have cleaned the working tree")
+		t.Error("sync should not have cleaned the working tree")
+	}
+
+	// The remote alone gives everything back: the unpushed commit, then the
+	// uncommitted work on top of it.
+	var wipRef, headRef string
+	for _, r := range strings.Split(refs, "\n") {
+		switch {
+		case strings.Contains(r, "/wip/"):
+			wipRef = r
+		case strings.HasSuffix(r, "/heads/main"):
+			headRef = r
+		}
+	}
+	gitCmd(t, tmp, "clone", "-q", "remote.git", "restore")
+	restore := filepath.Join(tmp, "restore")
+	gitCmd(t, restore, "fetch", "-q", "origin", headRef+":refs/heads/recovered")
+	gitCmd(t, restore, "checkout", "-q", "recovered")
+	gitCmd(t, restore, "fetch", "-q", "origin", wipRef)
+	gitCmd(t, restore, "stash", "apply", "-q", "--index", "FETCH_HEAD")
+	if got, _ := os.ReadFile(filepath.Join(restore, "file.txt")); string(got) != "v2\nwip\n" {
+		t.Errorf("restored file.txt = %q", got)
+	}
+
+	if out, code := env.run(t, "remote-sync", "--list"); code != 0 || !strings.Contains(out, "/wip/") {
+		t.Errorf("remote-sync --list exit %d:\n%s", code, out)
 	}
 }

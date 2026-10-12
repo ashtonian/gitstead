@@ -330,13 +330,35 @@ Stop tracking repos.
 
 #### `git-mgr remote-sync [flags]`
 
-Push backup refs to remotes.
+Back up each selected working copy and take it offsite now, under the
+`remote_sync` policy it resolves to (enabled or not); with no selection,
+workgroup members too.
 
 | Flag | Description |
 |---|---|
 | `--repos <glob>` | Filter |
 | `--tag <tag>` | Filter by tag |
-| `--dry-run` | Show what would be pushed |
+| `--set <name>` | Filter by named set |
+| `--dry-run` | Show what would be pushed and deleted, planned from the latest backups; writes nothing |
+| `--list` | List the offsite refs every machine and copy left for the selected repos, with restore commands |
+
+Algorithm, per copy (`gitops.PlanOffsite`/`PushOffsite`):
+
+```
+namespace = render(remote_sync.namespace, Machine, Copy)   # refs/git-mgr/<machine>/<copy>
+last      = state's offsite record (reset if remote or namespace changed)
+latest    = this run's backup (snapshot commit, backup ID); unknown if none ran
+wip: ref     push +<snapshot>:<ns>/wip/<id> unless already pushed;
+             delete <ns>/wip/<older id> past keep (never the current one)
+wip: branch  push +<commit of W's tree on HEAD>:refs/heads/git-mgr/wip/<machine>/<copy>;
+             delete it when the copy is clean
+unpushed     branches with commits no refs/remotes/* reach (a linked worktree:
+             only its own branch; a detached HEAD as "HEAD")
+  push       push +<tip>:<ns>/heads/<branch> when changed; delete when gone
+  bundle     git bundle create <archive_dir>/unpushed/<copy>.bundle <branches> --not --remotes
+one `git push` per copy with every refspec; deletions are checked with
+`ls-remote` first; a failed part keeps its old record and is retried next run
+```
 
 #### `git-mgr config [flags]`
 
@@ -675,29 +697,42 @@ backup:
   # Default: ~/.local/share/git-mgr/archive/
   archive_dir: ""
 
-  # Also force-push the uncommitted tracked changes, as one commit on top of
-  # HEAD, to a recoverable branch (refs/heads/git-mgr/wip/<branch>) on
-  # push_remote, in addition to the local backup. A normal, visible branch (not
-  # the hidden refs/git-mgr/* namespace), so dirty work is saved offsite.
-  # Equivalent to the --push-branch flag on `sync`/`backup`. Untracked files
-  # and the staged/unstaged split are not pushed. Recover with
-  # `git fetch <remote> git-mgr/wip/<branch> && git cherry-pick --no-commit FETCH_HEAD`.
-  push_branch: false
-  push_remote: "origin"
-
 # ============================================================================
 # Remote Sync Settings
 # ============================================================================
 
 remote_sync:
-  # Enable pushing backup refs to remotes.
+  # Take each working copy offsite during sync: uncommitted work and commits
+  # no remote has, pushed under a hidden namespace the copy owns. `git-mgr
+  # remote-sync` does it on demand either way. Any key below can be set per
+  # account (accounts[].remote_sync) or per repo (overrides[].remote_sync).
   enabled: false
 
-  # Remote name to push refs to. Must exist in each repo's git config.
-  remote_name: "origin"
+  # A remote name, or a URL template ({{.Host}}, {{.Owner}}, {{.Name}},
+  # {{.FullName}}) for a separate backup remote, e.g.
+  # "git@backup.example:{{.Host}}/{{.FullName}}.git". Hidden refs don't show
+  # in branch lists or trigger CI, but anyone who can read the remote can
+  # fetch them.
+  remote: "origin"
 
-  # Only push refs for repos matching this glob. Empty = all repos.
-  repos_glob: ""
+  # Uncommitted work: "ref" pushes each new backup to <namespace>/wip/<id>
+  # (untracked files and the staged/unstaged split included); "branch" pushes
+  # a visible branch git-mgr/wip/<machine>/<copy> (tracked changes only, on
+  # top of HEAD); "off" pushes none.
+  wip: "ref"
+
+  # Commits no remote has: "push" saves each such branch as
+  # <namespace>/heads/<branch> (your branches are never pushed); "bundle"
+  # writes them to backup.archive_dir/unpushed/<copy>.bundle (protects against
+  # a deleted branch, not a lost disk); "off" does neither.
+  unpushed: "push"
+
+  # The hidden ref prefix each copy owns on the remote. Must stay under refs/,
+  # outside branches and tags, and include {{.Copy}}.
+  namespace: "refs/git-mgr/{{.Machine}}/{{.Copy}}"
+
+  # How long a pushed WIP ref stays; the current one always stays.
+  keep: "720h"
 
 # ============================================================================
 # Notifications
@@ -987,8 +1022,6 @@ func Backup(copy, cfg) (result, error):
     stash-ref: update-ref refs/git-mgr/backups/<copyID>/<id> W "" (create only)
     patch:     build <patch_dir>/<copyID>/<id>.partial/, rename to <id>/
     prune each form that just succeeded, by retention
-    push_branch: push a commit of W's tree on B (no index, no untracked files)
-                 to refs/heads/git-mgr/wip/<branch>
     any requested form that failed -> error (the result still names what was saved)
 ```
 
@@ -1752,8 +1785,7 @@ The workgroup subsystem treats agent WIP as precious:
 
 - **`wg backup`** snapshots every member's uncommitted work (and the scheduled
   `sync` backs up workgroup members too, so the periodic agent protects them).
-  `--push-branch` also force-pushes the snapshot to a recoverable
-  `git-mgr/wip/<branch>` on the remote.
+  `--offsite` also takes each member offsite under `remote_sync`.
 - **`wg recover`** restores a member's latest backup (`--into <dir>` for safe
   inspection, `--apply` onto the worktree), completing the backup→recover loop.
 - **`wg rm`** only forgets the workgroup unless `--delete` is given. With

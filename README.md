@@ -110,10 +110,10 @@ writes a config without asking anything.
 | `git-mgr init` | Write a config with sensible defaults, without asking. |
 | `git-mgr bootstrap` | Set up a fresh machine in one command: setup → doctor → discover --apply → sync → install agent. `--profile`, `--no-agent`, `--dry-run`. |
 | `git-mgr discover` | Discover repos from providers and show the plan; `--apply` makes the changes that move and delete nothing (clone new repos, update URLs, managed git config, tags). `--rule`, `--tag` to scope. |
-| `git-mgr sync` | Discover, apply config changes as far as `reconcile.auto` allows, fetch all repos and back up uncommitted changes (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`, `--push-branch`. |
+| `git-mgr sync` | Discover, apply config changes as far as `reconcile.auto` allows, fetch all repos, back up uncommitted changes and, with `remote_sync.enabled`, take them offsite (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`. |
 | `git-mgr plan` | Show what config would change on disk and in state, without changing anything. `--json`. See [Config changes](#config-changes-plan-and-apply). |
 | `git-mgr apply` | Make repos and workgroups match config, including the moves and removals sync leaves for you. Asks first; `--yes`. |
-| `git-mgr backup` | Back up only (no fetch). `--list` to see backups, `--restore <id>` for instructions, `--push-branch` to also save WIP to a remote branch. |
+| `git-mgr backup` | Back up only (no fetch). `--list` to see backups, `--restore <id>` for instructions. |
 | `git-mgr restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` to clone+apply into a scratch dir, or `--apply` onto the tree (dirty-guarded). |
 | `git-mgr status` | Table of managed repos. `--live` inspects working trees now (dirty + ahead/behind, no network); `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
 | `git-mgr doctor` | Diagnose tooling, auth (tokens/SSH keys), config, and repo-on-disk health. Read-only; `plan`/`apply` fix what config can. |
@@ -122,7 +122,7 @@ writes a config without asking anything.
 | `git-mgr remove <pattern>` | Stop tracking repos. `--tag`/`--set`, `--yes`. `--delete` also removes the clone from disk after archiving its unique work (see [Deleting without losing work](#deleting-without-losing-work)). |
 | `git-mgr run -- <cmd>` | Run a command in each matching repo (parallel). `--repos`/`--tag`/`--set`, `--fail-fast`. |
 | `git-mgr manifest export\|import` | Portable `{url,tags,path}` manifest to rehydrate the repo set on a new machine. |
-| `git-mgr remote-sync` | Push backup refs to remotes. `--repos`, `--tag`, `--dry-run`. |
+| `git-mgr remote-sync` | Back up and take WIP and unpushed commits offsite now, under `remote_sync`. `--repos`, `--tag`, `--set`, `--dry-run`; `--list` shows what every machine left offsite and how to restore it. |
 | `git-mgr config` | Print resolved config. `--validate`, `--edit`, `--path`, `--for-repo <key>`, `--redact`. |
 | `git-mgr report` / `log` | Summarize / list recent activity (clones, backups, syncs…) from the operation log. `--since`, `-n`. |
 | `git-mgr workgroup` (`wg`) | Manage workgroups: parallel worktrees or multi-repo bundles. `wg create` builds one from flags or config; `--save`, `--sync`, `open`, `ensure`, `check`. |
@@ -506,16 +506,58 @@ git-mgr restore github.com/me/my-repo --into /tmp/look   # clone + restore into 
 git-mgr restore github.com/me/my-repo --apply            # onto the clean working tree
 ```
 
-**Save WIP offsite** — `--push-branch` (or `backup.push_branch: true`) also
-force-pushes your uncommitted tracked changes, as one commit on top of HEAD, to
-a branch `git-mgr/wip/<branch>` on the remote. It's a normal branch visible in
-the host's UI, so dirty work survives a lost laptop. Untracked files and the
-staged/unstaged split are not pushed. Recover with
-`git fetch origin git-mgr/wip/<branch> && git cherry-pick --no-commit FETCH_HEAD`.
+### Offsite: surviving a lost disk
+
+Local backups live in the repo; a lost or wiped disk takes them along, with
+every commit you never pushed. With `remote_sync.enabled: true`, each sync
+also takes two things offsite for every working copy, repos and workgroup
+members alike:
+
+- **Uncommitted work** (`wip: ref`, the default): each new backup, untracked
+  files and the staged/unstaged split included, is pushed to a hidden ref
+  `<namespace>/wip/<backup id>`. Unchanged work isn't pushed again; refs older
+  than `keep` (30 days) are deleted, the current one never.
+- **Commits no remote has** (`unpushed: push`, the default): each branch with
+  such commits is saved as `<namespace>/heads/<branch>`; your branches are
+  never pushed. Once a remote has the commits (you pushed for real), the
+  saved copy is deleted.
+
+`<namespace>` is `refs/git-mgr/<machine>/<copy>`: every machine and every copy
+-- each agent's clone or worktree -- owns its refs, so copies on one branch
+never overwrite each other, and git-mgr force-pushes nowhere else. Refs
+outside `refs/heads` and `refs/tags` don't show in the host's branch lists and
+don't trigger CI, but anyone who can read the remote can fetch them; point
+`remote` at a private backup remote to keep WIP off a shared one.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `remote_sync.enabled` | `false` | Sync takes copies offsite on its own. `git-mgr remote-sync` does it on demand either way. |
+| `remote_sync.remote` | `origin` | A remote name, or a URL template (`git@backup:{{.Host}}/{{.FullName}}.git`) for a separate backup remote. |
+| `remote_sync.wip` | `ref` | `ref` (hidden refs), `branch` (a visible branch per copy, `git-mgr/wip/<machine>/<copy>`: tracked changes only, on top of HEAD) or `off`. |
+| `remote_sync.unpushed` | `push` | `push` (hidden refs), `bundle` (a local bundle in `backup.archive_dir/unpushed/`, which protects against a deleted branch but not a lost disk) or `off`. |
+| `remote_sync.namespace` | `refs/git-mgr/{{.Machine}}/{{.Copy}}` | Must stay under `refs/`, outside branches and tags, and include `{{.Copy}}`. |
+| `remote_sync.keep` | `720h` | How long a pushed WIP ref stays. |
+
+Any of these can be set per account (`accounts[].remote_sync`) and per repo
+(`overrides[].remote_sync`); a workgroup member follows the repo it is a copy
+of. The machine name is chosen once (host name plus a random suffix) and kept
+in the state file. The push runs after the fetch, on `sync.timeout_per_repo`.
 
 ```bash
-git-mgr backup --push-branch --repos "*/my-repo"   # local backup + push WIP to git-mgr/wip/<branch>
-git-mgr sync --push-branch                          # same, as part of the periodic sync
+git-mgr remote-sync --dry-run          # what would go offsite, from the latest backups
+git-mgr remote-sync --repos "*/my-repo"
+git-mgr remote-sync --list             # what every machine left offsite, with restore commands
+git-mgr wg rm fleet --delete --offsite # take each member offsite before deleting it
+```
+
+Restoring on another machine needs only the remote:
+
+```bash
+git clone <remote> restored && cd restored
+git fetch origin refs/git-mgr/<machine>/<copy>/heads/main:refs/heads/recovered
+git checkout recovered
+git fetch origin refs/git-mgr/<machine>/<copy>/wip/<id>
+git stash apply --index FETCH_HEAD     # the uncommitted work, staged and unstaged as it was
 ```
 
 ### Deleting without losing work
@@ -602,11 +644,11 @@ and `wg backup` (plus the scheduled `sync`) keeps every member's WIP safe.
 | `ensure [name]` | Create what is missing of one workgroup or all of them; list removals and moves for `git-mgr apply`. Idempotent. |
 | `open <name>` | Build/attach a tmux session, one pane per member. `--cmd <command>` (or `--agent <name>` from config) runs it per pane; `--no-check`, `--print`, `--recreate`, `--no-attach`. |
 | `check <name>` | Assert health; non-zero exit on drift. |
-| `backup <name>` / `recover <name>` | Back up / restore each member's WIP (`--push-branch`; `recover --into`/`--apply`). |
+| `backup <name>` / `recover <name>` | Back up / restore each member's WIP (`--offsite` also takes them offsite; `recover --into`/`--apply`). |
 | `prune <name>` | Delete members with no unique work: clean, no stash, nothing unpushed, verified by a full inspection; anything it can't inspect is kept. `--dry-run`, `--all`. |
 | `ls` / `status <name>` | List workgroups / show member status (`--json`). |
 | `overview` | Member health across all workgroups — the fleet supervisor view (`--json`). |
-| `rm <name>` | Forget the workgroup and leave its files. `--delete` also removes each member after archiving its unique work; `--force` discards that work instead; `--push-branch` pushes WIP first. Members that can't be removed stay tracked and the command exits non-zero. |
+| `rm <name>` | Forget the workgroup and leave its files. `--delete` also removes each member after archiving its unique work; `--force` discards that work instead; `--offsite` takes each member offsite first and keeps any it can't. Members that can't be removed stay tracked and the command exits non-zero. |
 | `adopt <name>` | Import an existing directory of working trees. |
 
 ## Running on a schedule

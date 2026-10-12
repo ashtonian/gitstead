@@ -423,40 +423,6 @@ func TestBackup_UnbornRepo(t *testing.T) {
 	assertSameState(t, want, captureState(t, dir))
 }
 
-func TestBackup_PushBranch(t *testing.T) {
-	ctx := context.Background()
-	remote, clone := remoteAndClone(t)
-	writeFile(t, filepath.Join(clone, "a.txt"), []byte("wip\n"))
-	writeFile(t, filepath.Join(clone, "local-only.txt"), []byte("untracked\n"))
-	cfg := gitops.NewBackupConfig(gitops.WithStrategy("stash-ref"), gitops.WithPushBranch("origin", ""))
-
-	res, err := gitops.Backup(ctx, clone, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.PushedBranch != "refs/heads/git-mgr/wip/main" {
-		t.Fatalf("pushed %q", res.PushedBranch)
-	}
-	pushed := mustGit(t, remote, "rev-parse", "git-mgr/wip/main")
-	if got := mustGit(t, remote, "show", pushed+":a.txt"); got != "wip" {
-		t.Errorf("pushed a.txt = %q", got)
-	}
-	if _, err := gitops.Git(ctx, remote, "show", pushed+":local-only.txt"); err == nil {
-		t.Error("untracked files must not be pushed")
-	}
-	if parents := mustGit(t, remote, "rev-list", "--parents", "-n1", pushed); len(strings.Fields(parents)) != 2 {
-		t.Errorf("the WIP commit must have only the base as parent: %s", parents)
-	}
-
-	// An unchanged state pushes the same commit again.
-	if _, err := gitops.Backup(ctx, clone, cfg); err != nil {
-		t.Fatal(err)
-	}
-	if again := mustGit(t, remote, "rev-parse", "git-mgr/wip/main"); again != pushed {
-		t.Errorf("unchanged state pushed a new commit %s, had %s", again, pushed)
-	}
-}
-
 func TestBackup_RetentionPrunesOldBackups(t *testing.T) {
 	ctx := context.Background()
 	dir := setupTestRepo(t)

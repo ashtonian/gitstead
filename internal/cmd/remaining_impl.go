@@ -14,65 +14,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func (c *RemoteSyncCmd) Run(ctx *Context) error {
-	cfg, err := ctx.LoadConfig()
-	if err != nil {
-		return err
-	}
-	st, err := ctx.LoadState()
-	if err != nil {
-		return err
-	}
-
-	pass, err := selection{c.Repos, c.Tag, c.Set}.predicate(cfg)
-	if err != nil {
-		return err
-	}
-
-	pushed, failed := 0, 0
-	for key, repo := range st.Repos {
-		if !pass(key, repo) || !repo.Cloned {
-			continue
-		}
-
-		repoCfg := cfg.ResolveForRepo(key)
-		if !repoCfg.RemoteSync.Enabled {
-			continue
-		}
-		// Honor the configured repos_glob (intersected with the CLI filters).
-		if g := repoCfg.RemoteSync.ReposGlob; g != "" {
-			if matched, _ := filepath.Match(g, key); !matched {
-				continue
-			}
-		}
-
-		remoteName := repoCfg.RemoteSync.RemoteName
-		sshKey := cfg.ResolveSSHKey(key, repo.DiscoveredBy)
-
-		if c.DryRun {
-			fmt.Printf("  Would push refs for %s to %s\n", key, remoteName)
-			continue
-		}
-
-		refspec := "refs/git-mgr/*:refs/git-mgr/*"
-		_, err := gitops.GitWithSSHKey(ctx.GoCtx(), repo.LocalPath, sshKey, "push", remoteName, refspec)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %s: push failed: %v\n", key, err)
-			failed++
-			continue
-		}
-		pushed++
-		if !ctx.Quiet {
-			fmt.Printf("  %s: pushed refs\n", key)
-		}
-	}
-
-	if !ctx.Quiet {
-		fmt.Printf("Pushed backup refs for %d repos\n", pushed)
-	}
-	return outcome(failed, pushed+failed, "repos failed to push backup refs")
-}
-
 func (c *RemoveCmd) Run(ctx *Context) error {
 	cfg, err := ctx.LoadConfig()
 	if err != nil {

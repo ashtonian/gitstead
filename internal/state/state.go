@@ -25,8 +25,10 @@ var ErrNewerState = errors.New("state file is newer than this git-mgr")
 
 // State is the top-level state structure persisted to disk.
 type State struct {
-	Version    int                        `yaml:"version"`
-	LastSync   time.Time                  `yaml:"last_sync"`
+	Version  int       `yaml:"version"`
+	LastSync time.Time `yaml:"last_sync"`
+	// Machine names this machine in offsite refs; set on first use.
+	Machine    string                     `yaml:"machine,omitempty"`
 	Repos      map[string]*RepoState      `yaml:"repos"`
 	Workgroups map[string]*WorkgroupState `yaml:"workgroups,omitempty"`
 	Schedules  map[string]*ScheduleState  `yaml:"schedules,omitempty"`
@@ -80,6 +82,7 @@ type RepoState struct {
 	LastFetch      time.Time `yaml:"last_fetch" json:"last_fetch"`
 	LastFetchError string    `yaml:"last_fetch_error" json:"last_fetch_error"`
 	BackupStatus   `yaml:",inline"`
+	OffsiteStatus  `yaml:",inline"`
 	Status         string `yaml:"status" json:"status"` // clean, dirty, conflict, error, uncloned, missing, stale
 	Error          string `yaml:"error" json:"error"`
 
@@ -128,6 +131,26 @@ type WorkgroupMemberState struct {
 	// as RepoState.ManagedConfig does for a repo.
 	ManagedConfig map[string]string `yaml:"managed_config,omitempty" json:"managed_config,omitempty"`
 	BackupStatus  `yaml:",inline"`
+	OffsiteStatus `yaml:",inline"`
+}
+
+// OffsiteStatus is what git-mgr last left offsite for a working copy, so the
+// next run pushes only what changed and deletes only refs it made.
+type OffsiteStatus struct {
+	// OffsiteRemote and OffsiteNamespace are where the refs below are.
+	OffsiteRemote    string `yaml:"offsite_remote,omitempty"    json:"offsite_remote,omitempty"`
+	OffsiteNamespace string `yaml:"offsite_namespace,omitempty" json:"offsite_namespace,omitempty"`
+	// OffsiteWIP are the backup IDs pushed as <namespace>/wip/<id>.
+	OffsiteWIP []string `yaml:"offsite_wip,omitempty" json:"offsite_wip,omitempty"`
+	// OffsiteBranch is the commit pushed to the copy's visible WIP branch.
+	OffsiteBranch string `yaml:"offsite_branch,omitempty" json:"offsite_branch,omitempty"`
+	// OffsiteHeads are branches with commits no remote had, and the commit
+	// saved: pushed as <namespace>/heads/<branch>.
+	OffsiteHeads map[string]string `yaml:"offsite_heads,omitempty" json:"offsite_heads,omitempty"`
+	// OffsiteBundled are such branches written to the local bundle instead.
+	OffsiteBundled   map[string]string `yaml:"offsite_bundled,omitempty" json:"offsite_bundled,omitempty"`
+	LastOffsite      time.Time         `yaml:"last_offsite,omitempty"       json:"last_offsite,omitzero"`
+	LastOffsiteError string            `yaml:"last_offsite_error,omitempty" json:"last_offsite_error,omitempty"`
 }
 
 // ScheduleState is a background sync git-mgr installed, kept so it can be

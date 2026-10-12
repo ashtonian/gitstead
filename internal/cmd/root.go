@@ -37,7 +37,7 @@ type CLI struct {
 	Adopt      AdoptCmd      `cmd:"" help:"Import existing local repos into management."`
 	Remove     RemoveCmd     `cmd:"" help:"Stop tracking repos."`
 	Manifest   ManifestCmd   `cmd:"" help:"Export/import a portable manifest of the tracked repo set."`
-	RemoteSync RemoteSyncCmd `cmd:"" name:"remote-sync" help:"Push backup refs to remotes."`
+	RemoteSync RemoteSyncCmd `cmd:"" name:"remote-sync" help:"Back up and push WIP and unpushed commits offsite now (remote_sync); --list shows what is there."`
 	ConfigShow ConfigCmd     `cmd:"" name:"config" help:"Print resolved configuration."`
 	Report     ReportCmd     `cmd:"" help:"Summarize recent activity from the operation log."`
 	Log        LogCmd        `cmd:"" help:"Print recent operation-log events."`

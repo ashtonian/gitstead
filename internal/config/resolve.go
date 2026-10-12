@@ -93,27 +93,26 @@ func (c *Config) ResolveForRepo(repoKey string) *Config {
 			if o.Backup.PatchDir != nil {
 				resolved.Backup.PatchDir = *o.Backup.PatchDir
 			}
-			if o.Backup.PushBranch != nil {
-				resolved.Backup.PushBranch = *o.Backup.PushBranch
-			}
-			if o.Backup.PushRemote != nil {
-				resolved.Backup.PushRemote = *o.Backup.PushRemote
-			}
 		}
-		if o.RemoteSync != nil {
-			if o.RemoteSync.Enabled != nil {
-				resolved.RemoteSync.Enabled = *o.RemoteSync.Enabled
-			}
-			if o.RemoteSync.RemoteName != nil {
-				resolved.RemoteSync.RemoteName = *o.RemoteSync.RemoteName
-			}
-			if o.RemoteSync.ReposGlob != nil {
-				resolved.RemoteSync.ReposGlob = *o.RemoteSync.ReposGlob
-			}
-		}
+		o.RemoteSync.apply(&resolved.RemoteSync)
 	}
 
 	return &resolved
+}
+
+// RemoteSyncFor resolves remote_sync for a repo: the top-level settings, then
+// its account's, then any override's.
+func (c *Config) RemoteSyncFor(repoKey, ruleName string) RemoteSyncConfig {
+	r := c.RemoteSync
+	if a := c.AccountFor(repoKey, ruleName); a != nil {
+		a.RemoteSync.apply(&r)
+	}
+	for _, o := range c.Overrides {
+		if matchesOverride(repoKey, o.Repos) {
+			o.RemoteSync.apply(&r)
+		}
+	}
+	return r
 }
 
 // CloneProtocolFor resolves the clone transport for a repo, in order: a per-repo
