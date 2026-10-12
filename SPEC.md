@@ -288,7 +288,7 @@ Stop tracking repos.
 
 | Flag | Description |
 |---|---|
-| `--delete` | Also delete the repo from disk |
+| `--delete` | Also delete the clone from disk. Unique work is archived to `backup.archive_dir` first; a clone that can't be inspected or archived is kept and stays tracked, and the command exits non-zero. |
 | `--yes` | Skip confirmation prompt |
 
 #### `git-mgr remote-sync [flags]`
@@ -552,6 +552,8 @@ cleanup:
   # - mark_stale: set status to "stale" in state. No disk changes. Visible in `git-mgr status --stale`.
   # - remove: remove from state after grace_period. Keep files on disk.
   # - remove_and_delete: remove from state AND delete from disk after grace_period.
+  #   Unique work is archived to backup.archive_dir first; a repo that can't be
+  #   archived is kept, stays tracked and records the reason in its error.
   # - ignore: never mark stale, never remove. Manual cleanup only.
   policy: "mark_stale"
 
@@ -586,6 +588,11 @@ backup:
   # Directory for patch file storage. Supports ~ expansion.
   # Default: ~/.local/share/git-mgr/patches/
   patch_dir: ""
+
+  # Where git-mgr archives unique work (a verified git bundle plus a .json
+  # restore note) before deleting a clone or worktree.
+  # Default: ~/.local/share/git-mgr/archive/
+  archive_dir: ""
 
   # Also force-push a snapshot of uncommitted tracked changes to a recoverable
   # branch (refs/heads/git-mgr/wip/<branch>) on push_remote, in addition to the
@@ -1001,7 +1008,10 @@ func DetectStale(state, discovered, scope):
         for key, repo := range state.Repos:
             if repo.Status == "stale" && time.Since(repo.StaleSince) > config.Cleanup.GracePeriod:
                 if config.Cleanup.Policy == "remove_and_delete":
-                    os.RemoveAll(repo.LocalPath)
+                    // archive unique work, then delete; keep the repo on any failure
+                    if err := gitops.RemoveClone(repo.LocalPath, config.Backup.ArchiveDir); err != nil:
+                        repo.Error = err
+                        continue
                 delete(state.Repos, key)
 ```
 
@@ -1567,9 +1577,13 @@ The workgroup subsystem treats agent WIP as precious:
   `git-mgr/wip/<branch>` on the remote.
 - **`wg recover`** restores a member's latest backup (`--into <dir>` for safe
   inspection, `--apply` onto the worktree), completing the backup→recover loop.
-- **`wg rm`** backs up dirty members before tearing them down (unless `--force`),
-  and **`wg prune`** reaps only members with no unique work (clean and ahead==0
-  vs upstream), removing an empty workgroup from state. **`wg pull --backup-first`**
+- **`wg rm`** only forgets the workgroup unless `--delete` is given. With
+  `--delete` each member's unique work (changed and untracked files, detached
+  commits, and for clones also stashes and unpushed commits) is archived as a
+  verified git bundle in `backup.archive_dir` before the member is removed;
+  `--force` discards it instead. A member that can't be inspected, archived or
+  removed stays on disk and in state. **`wg prune`** deletes only members a full
+  inspection finds free of unique work, removing an empty workgroup from state. **`wg pull --backup-first`**
   (default on) snapshots dirty members before a possibly-rebasing pull.
 - A workgroup can be built over a **named set** (`wg create --from-set <name>`):
   an agent fleet across a tag/glob-selected set of tracked repos.

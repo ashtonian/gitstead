@@ -9,7 +9,6 @@ import (
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/pathutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -101,7 +100,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 			fmt.Printf("  %s\n", k)
 		}
 		if c.Delete {
-			fmt.Println("  (will also delete from disk)")
+			fmt.Printf("  (will also delete from disk; unique work is archived to %s first)\n", cfg.Backup.ArchiveDir)
 		}
 		fmt.Print("Continue? (y/n): ")
 		var answer string
@@ -112,21 +111,33 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 		}
 	}
 
+	var kept []string
 	for _, key := range toRemove {
 		repo := st.Repos[key]
 		if c.Delete && repo.LocalPath != "" {
-			if err := pathutil.SafeRemoveAll(repo.LocalPath); err != nil {
-				fmt.Printf("  Failed to delete %s: %v\n", repo.LocalPath, err)
-			} else {
-				fmt.Printf("  Deleted %s\n", repo.LocalPath)
+			archived, err := gitops.RemoveClone(ctx.GoCtx(), repo.LocalPath, cfg.Backup.ArchiveDir, key, false)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  %s: kept and still tracked: %v\n", key, err)
+				kept = append(kept, key)
+				continue
 			}
+			if archived != "" {
+				fmt.Printf("  Archived unique work of %s to %s\n", key, archived)
+			}
+			fmt.Printf("  Deleted %s\n", repo.LocalPath)
 		}
 		delete(st.Repos, key)
 		logEvent(ctx, "remove", key, "")
 		fmt.Printf("  Removed %s\n", key)
 	}
 
-	return st.Save()
+	if err := st.Save(); err != nil {
+		return err
+	}
+	if len(kept) > 0 {
+		return fmt.Errorf("%d of %d repos could not be deleted and are still tracked: %s", len(kept), len(toRemove), strings.Join(kept, ", "))
+	}
+	return nil
 }
 
 func (c *ConfigCmd) Run(ctx *Context) error {

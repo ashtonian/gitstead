@@ -79,7 +79,8 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 		for k := range discovered {
 			discoveredKeys[k] = true
 		}
-		outcome := discovery.DetectStale(st, discoveredKeys, discovery.StaleScopeOf(results, c.Rule, c.Tag), cfg.Cleanup, c.Apply)
+		outcome := discovery.DetectStale(st, discoveredKeys, discovery.StaleScopeOf(results, c.Rule, c.Tag), cfg.Cleanup, c.Apply,
+			archivingRemover(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir))
 		if outcome.NewlyStale > 0 {
 			fmt.Printf("\n%d newly stale repos\n", outcome.NewlyStale)
 		}
