@@ -98,6 +98,9 @@ func TestLoad_RejectsUnknownKeys(t *testing.T) {
 		{"sync:\n  timout_per_repo: 1m\n", `"sync.timout_per_repo" is not a setting (did you mean "timeout_per_repo"?)`},
 		{"remote_sync:\n  remote_name: backup\n", `"remote_sync.remote_name" is not a setting`},
 		{"accounts:\n  - name: work\n    ssh-key: ~/.ssh/id\n", `"accounts[0].ssh-key" is not a setting (did you mean "ssh_key"?)`},
+		{"backup:\n  max_per_repo: 10\n", `"backup.max_per_repo" is not a setting (did you mean "max_per_copy"?)`},
+		// Every unknown key is named, not just the first.
+		{"backup:\n  max_per_repo: 10\n  push_branch: false\n", `"backup.push_branch" is not a setting`},
 		{"agents:\n  claude: claude --resume\n", ""}, // a map takes any key
 		{"accounts:\n  - name: work\n    remote_sync:\n      wip: off\n", ""},
 	}
