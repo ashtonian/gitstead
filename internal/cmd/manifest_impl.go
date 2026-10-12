@@ -9,7 +9,6 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
 	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/state"
 	"gopkg.in/yaml.v3"
 )
 
@@ -80,17 +79,8 @@ func (c *ManifestImportCmd) Run(ctx *Context) error {
 		return fmt.Errorf("parsing manifest: %w", err)
 	}
 
-	// Read-only when --dry-run; otherwise mutate under the state lock.
-	var st *state.State
-	var unlock func()
-	if c.DryRun {
-		st, err = ctx.LoadState()
-	} else {
-		st, unlock, err = lockedState(ctx)
-		if err == nil {
-			defer unlock()
-		}
-	}
+	// Importing locks the state per change, so this reads it unlocked.
+	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}

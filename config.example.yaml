@@ -28,6 +28,11 @@ clone_protocol: "ssh"
 # Max concurrent git operations (clone, fetch, backup).
 concurrency: 8
 
+# How long a command waits for another run to finish writing the state file
+# before giving up with exit code 75. A write holds the lock for milliseconds:
+# clones, fetches, backups and archives all run without it.
+lock_timeout: "2m"
+
 # =============================================================================
 # Accounts
 # =============================================================================
@@ -249,8 +254,21 @@ sync:
   # Frequent cron runs skip recently-fetched repos.
   min_fetch_interval: "10m"
 
-  # Timeout for a single fetch operation.
+  # Deadlines. Each bounds one external call; when it passes, git and
+  # everything it started (ssh, credential helpers) is killed and the error
+  # names the setting. 0 means no deadline.
+  #
+  # One repo's fetch, retries included.
   timeout_per_repo: "5m"
+  # One working copy's backup. It runs before the fetch, on its own budget,
+  # so a slow remote can't starve it.
+  backup_timeout: "2m"
+  # One clone.
+  clone_timeout: "30m"
+  # One provider API request, retries included.
+  api_timeout: "60s"
+  # One discovery rule: listing plus language/topic lookups.
+  discovery_timeout: "5m"
 
   # Retries on transient network failures (per repo).
   retries: 2

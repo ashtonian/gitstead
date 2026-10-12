@@ -209,12 +209,26 @@ func memberState(ctx context.Context, m workgroup.Member, want map[string]string
 	return ms, nil
 }
 
-func workgroupState(env *Env, name string) (*state.WorkgroupState, error) {
-	ws := env.State.Workgroups[name]
+func workgroupState(st *state.State, name string) (*state.WorkgroupState, error) {
+	ws := st.Workgroups[name]
 	if ws == nil {
 		return nil, fmt.Errorf("workgroup %s is no longer recorded", name)
 	}
 	return ws, nil
+}
+
+// member finds a recorded member of a workgroup.
+func member(st *state.State, name, memberName string) (*state.WorkgroupMemberState, error) {
+	ws, err := workgroupState(st, name)
+	if err != nil {
+		return nil, err
+	}
+	for i := range ws.Members {
+		if ws.Members[i].Name == memberName {
+			return &ws.Members[i], nil
+		}
+	}
+	return nil, fmt.Errorf("%s/%s is no longer recorded", name, memberName)
 }
 
 func upsertMember(ws *state.WorkgroupState, ms state.WorkgroupMemberState) {
@@ -231,6 +245,8 @@ func dropMember(ws *state.WorkgroupState, member string) {
 	ws.Members = slices.DeleteFunc(ws.Members, func(m state.WorkgroupMemberState) bool { return m.Name == member })
 }
 
+// createWorkgroup creates every member, outside the state lock, then records
+// the workgroup with the members that were made.
 func createWorkgroup(w Workgroup) func(context.Context, *Env) (string, error) {
 	return func(ctx context.Context, env *Env) (string, error) {
 		spec := resolvedSpec(env, w.Spec)
@@ -254,23 +270,25 @@ func createWorkgroup(w Workgroup) func(context.Context, *Env) (string, error) {
 			}
 			ws.Members = append(ws.Members, ms)
 		}
-		env.State.Workgroups[spec.Name] = ws
 		info := ""
-		if w.Track {
-			added, skipped := workgroup.TrackRepos(ctx, env.State, spec)
-			info = fmt.Sprintf("tracking %d repo(s) for sync", added)
-			if len(skipped) > 0 {
-				info += "; not tracking " + strings.Join(skipped, ", ") + " (no parseable origin)"
+		err = env.Update(func(st *state.State) error {
+			st.Workgroups[spec.Name] = ws
+			if w.Track {
+				added, skipped := workgroup.TrackRepos(ctx, st, spec)
+				info = fmt.Sprintf("tracking %d repo(s) for sync", added)
+				if len(skipped) > 0 {
+					info += "; not tracking " + strings.Join(skipped, ", ") + " (no usable origin)"
+				}
 			}
-		}
-		return info, errors.Join(errs...)
+			return nil
+		})
+		return info, errors.Join(append(errs, err)...)
 	}
 }
 
 func createMember(w Workgroup, m workgroup.Member) func(context.Context, *Env) (string, error) {
 	return func(ctx context.Context, env *Env) (string, error) {
-		ws, err := workgroupState(env, w.Spec.Name)
-		if err != nil {
+		if _, err := workgroupState(env.State, w.Spec.Name); err != nil {
 			return "", err
 		}
 		statuses, err := workgroup.Ensure(ctx, resolvedSpec(env, w.Spec, m), sshKeyFor(w))
@@ -281,161 +299,188 @@ func createMember(w Workgroup, m workgroup.Member) func(context.Context, *Env) (
 			return "", statuses[0].Err
 		}
 		ms, err := memberState(ctx, m, w.Configs[m.Name])
-		upsertMember(ws, ms)
-		return "", err
+		return "", errors.Join(err, recordMemberState(env, w.Spec.Name, ms))
 	}
 }
 
 func recordMember(w Workgroup, m workgroup.Member) func(context.Context, *Env) (string, error) {
 	return func(ctx context.Context, env *Env) (string, error) {
-		ws, err := workgroupState(env, w.Spec.Name)
-		if err != nil {
-			return "", err
-		}
 		ms, err := memberState(ctx, m, w.Configs[m.Name])
-		upsertMember(ws, ms)
-		return "", err
+		return "", errors.Join(err, recordMemberState(env, w.Spec.Name, ms))
 	}
 }
 
-func setMemberConfig(name, member, key, value string, unset, recordOnly bool) func(context.Context, *Env) (string, error) {
+func recordMemberState(env *Env, name string, ms state.WorkgroupMemberState) error {
+	return env.Update(func(st *state.State) error {
+		ws, err := workgroupState(st, name)
+		if err == nil {
+			upsertMember(ws, ms)
+		}
+		return err
+	})
+}
+
+func setMemberConfig(name, memberName, key, value string, unset, recordOnly bool) func(context.Context, *Env) (string, error) {
 	return func(ctx context.Context, env *Env) (string, error) {
-		ws, err := workgroupState(env, name)
+		m, err := member(env.State, name, memberName)
 		if err != nil {
 			return "", err
 		}
-		for i := range ws.Members {
-			if ws.Members[i].Name == member {
-				return "", applyConfig(ctx, ws.Members[i].Path, &ws.Members[i].ManagedConfig, key, value, unset, recordOnly)
+		if !recordOnly {
+			if err := writeConfig(ctx, m.Path, key, value, unset); err != nil {
+				return "", err
 			}
 		}
-		return "", fmt.Errorf("%s/%s is no longer recorded", name, member)
+		return "", env.Update(func(st *state.State) error {
+			m, err := member(st, name, memberName)
+			if err == nil {
+				recordConfig(&m.ManagedConfig, key, value, unset)
+			}
+			return err
+		})
 	}
 }
 
 func moveMember(w Workgroup, am state.WorkgroupMemberState, m workgroup.Member) func(context.Context, *Env) (string, error) {
 	return func(ctx context.Context, env *Env) (string, error) {
-		ws, err := workgroupState(env, w.Spec.Name)
-		if err != nil {
-			return "", err
-		}
 		from := workgroup.Member{Name: am.Name, Path: am.Path, Branch: am.Branch, RepoURL: am.RepoURL, RepoKey: am.RepoKey}
-		if err := workgroup.MoveMember(ctx, resolvedSpec(env, w.Spec), from, m.Path); err != nil {
-			return "", err
+		err := env.Update(func(st *state.State) error {
+			rec, err := member(st, w.Spec.Name, am.Name)
+			if err != nil {
+				return err
+			}
+			if err := workgroup.MoveMember(ctx, resolvedSpec(env, w.Spec), from, m.Path); err != nil {
+				return err
+			}
+			rec.Path = m.Path
+			return nil
+		})
+		if err == nil {
+			_ = os.Remove(filepath.Dir(am.Path)) // the old root, once its last member has moved
 		}
-		_ = os.Remove(filepath.Dir(am.Path)) // the old root, once its last member has moved
-		moved := am
-		moved.Path = m.Path
-		upsertMember(ws, moved)
-		return "", nil
+		return "", err
 	}
 }
 
 func recordMemberMove(name string, m workgroup.Member) func(context.Context, *Env) (string, error) {
-	return func(ctx context.Context, env *Env) (string, error) {
-		ws, err := workgroupState(env, name)
-		if err != nil {
-			return "", err
-		}
-		for i := range ws.Members {
-			if ws.Members[i].Name == m.Name {
-				ws.Members[i].Path = m.Path
+	return func(_ context.Context, env *Env) (string, error) {
+		return "", env.Update(func(st *state.State) error {
+			rec, err := member(st, name, m.Name)
+			if err == nil {
+				rec.Path = m.Path
 			}
-		}
-		return "", nil
+			return err
+		})
 	}
 }
 
-func setMemberURL(name, member, url string) func(context.Context, *Env) (string, error) {
+func setMemberURL(name, memberName, url string) func(context.Context, *Env) (string, error) {
 	return func(ctx context.Context, env *Env) (string, error) {
-		ws, err := workgroupState(env, name)
+		m, err := member(env.State, name, memberName)
 		if err != nil {
 			return "", err
 		}
-		for i := range ws.Members {
-			if ws.Members[i].Name != member {
-				continue
-			}
-			if err := gitops.SetOriginURL(ctx, ws.Members[i].Path, url); err != nil {
-				return "", err
-			}
-			ws.Members[i].RepoURL = url
+		if err := gitops.SetOriginURL(ctx, m.Path, url); err != nil {
+			return "", err
 		}
-		return "", nil
+		return "", env.Update(func(st *state.State) error {
+			m, err := member(st, name, memberName)
+			if err == nil {
+				m.RepoURL = url
+			}
+			return err
+		})
 	}
 }
 
 func updateWorkgroup(name, root, baseRef string, declared bool) func(context.Context, *Env) (string, error) {
 	return func(_ context.Context, env *Env) (string, error) {
-		ws, err := workgroupState(env, name)
-		if err != nil {
-			return "", err
-		}
-		ws.Root, ws.BaseRef, ws.Declared = root, baseRef, declared
-		return "", nil
+		return "", env.Update(func(st *state.State) error {
+			ws, err := workgroupState(st, name)
+			if err == nil {
+				ws.Root, ws.BaseRef, ws.Declared = root, baseRef, declared
+			}
+			return err
+		})
 	}
 }
 
-func forgetMember(name, member string) func(context.Context, *Env) (string, error) {
+func forgetMember(name, memberName string) func(context.Context, *Env) (string, error) {
 	return func(_ context.Context, env *Env) (string, error) {
-		ws, err := workgroupState(env, name)
-		if err != nil {
-			return "", err
-		}
-		dropMember(ws, member)
-		return "", nil
+		return "", env.Update(func(st *state.State) error {
+			ws, err := workgroupState(st, name)
+			if err == nil {
+				dropMember(ws, memberName)
+			}
+			return err
+		})
 	}
 }
 
-// removeMember archives a member's unique work and removes it; on any
-// failure the member stays on disk and in state.
-func removeMember(name, member string) func(context.Context, *Env) (string, error) {
+// removeMember archives a member's unique work and removes it, outside the
+// state lock; on any failure the member stays on disk and in state.
+func removeMember(name, memberName string) func(context.Context, *Env) (string, error) {
 	return func(ctx context.Context, env *Env) (string, error) {
-		ws, err := workgroupState(env, name)
+		ws, err := workgroupState(env.State, name)
 		if err != nil {
 			return "", err
 		}
 		spec := resolvedSpec(env, workgroup.FromState(ws))
 		for _, m := range spec.Members {
-			if m.Name != member {
+			if m.Name != memberName {
 				continue
 			}
 			archived, err := workgroup.RemoveMember(ctx, spec, m, env.ArchiveDir, false)
 			if err != nil {
 				return "", err
 			}
-			dropMember(ws, member)
-			return archivedInfo(archived), nil
+			return archivedInfo(archived), forgetMemberNow(env, name, memberName)
 		}
 		return "", nil
 	}
 }
 
+func forgetMemberNow(env *Env, name, memberName string) error {
+	_, err := forgetMember(name, memberName)(context.Background(), env)
+	return err
+}
+
 func removeWorkgroup(name string) func(context.Context, *Env) (string, error) {
 	return func(ctx context.Context, env *Env) (string, error) {
-		ws, err := workgroupState(env, name)
+		ws, err := workgroupState(env.State, name)
 		if err != nil {
 			return "", err
 		}
 		spec := resolvedSpec(env, workgroup.FromState(ws))
 		var infos []string
 		var errs []error
+		var removed []string
 		for _, m := range spec.Members {
 			archived, err := workgroup.RemoveMember(ctx, spec, m, env.ArchiveDir, false)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s kept: %w", m.Name, err))
 				continue
 			}
-			dropMember(ws, m.Name)
+			removed = append(removed, m.Name)
 			if archived != "" {
 				infos = append(infos, m.Name+": "+archivedInfo(archived))
 			}
 		}
-		if len(ws.Members) == 0 {
-			workgroup.RemoveEmptyRoot(spec)
-			delete(env.State.Workgroups, name)
-		}
-		return strings.Join(infos, "; "), errors.Join(errs...)
+		err = env.Update(func(st *state.State) error {
+			ws, err := workgroupState(st, name)
+			if err != nil {
+				return err
+			}
+			for _, m := range removed {
+				dropMember(ws, m)
+			}
+			if len(ws.Members) == 0 {
+				workgroup.RemoveEmptyRoot(spec)
+				delete(st.Workgroups, name)
+			}
+			return nil
+		})
+		return strings.Join(infos, "; "), errors.Join(append(errs, err)...)
 	}
 }
 

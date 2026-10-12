@@ -50,12 +50,12 @@ func TestApplyFiltersLanguageEnrichment(t *testing.T) {
 		langs: map[string][]string{"o/go1": {"Go"}, "o/rust1": {"Rust"}},
 	}
 	rule := config.DiscoveryRule{Name: "r", Languages: []string{"go"}} // case-insensitive
-	got, warns := applyFilters(context.Background(), f, f.result, rule, nil, 4)
+	got, warns, incomplete := applyFilters(context.Background(), f, f.result, rule, nil, 4)
 	if len(got) != 1 || got[0].Name != "go1" {
 		t.Fatalf("expected only go1, got %+v", got)
 	}
-	if len(warns) != 0 {
-		t.Errorf("unexpected warnings: %v", warns)
+	if len(warns) != 0 || len(incomplete) != 0 {
+		t.Errorf("unexpected warnings %v, incomplete %v", warns, incomplete)
 	}
 	if f.enrichCalls != 1 {
 		t.Errorf("expected exactly one enrichment call, got %d", f.enrichCalls)
@@ -64,7 +64,8 @@ func TestApplyFiltersLanguageEnrichment(t *testing.T) {
 
 func TestApplyFiltersLanguageEnrichmentPartialFailure(t *testing.T) {
 	// One repo's language resolved, the batch reported a (joined) error: we still
-	// filter on what resolved and surface a warning rather than dropping the filter.
+	// filter on what resolved, and the result is incomplete -- the repo whose
+	// lookup failed may match.
 	f := &fakeProvider{
 		result: ProviderResult{
 			Repos:        []Repo{repo("go1"), repo("unknown")},
@@ -74,12 +75,12 @@ func TestApplyFiltersLanguageEnrichmentPartialFailure(t *testing.T) {
 		langErr: errors.New("o/unknown: boom"),
 	}
 	rule := config.DiscoveryRule{Name: "r", Languages: []string{"Go"}}
-	got, warns := applyFilters(context.Background(), f, f.result, rule, nil, 4)
+	got, _, incomplete := applyFilters(context.Background(), f, f.result, rule, nil, 4)
 	if len(got) != 1 || got[0].Name != "go1" {
 		t.Fatalf("expected go1 to survive, got %+v", got)
 	}
-	if len(warns) == 0 {
-		t.Error("expected a warning about partial language failure")
+	if len(incomplete) == 0 {
+		t.Error("a failed language lookup should leave the result incomplete")
 	}
 }
 
@@ -88,7 +89,7 @@ func TestApplyFiltersLanguageUnsupported(t *testing.T) {
 	// silent empty result.
 	f := &fakeProvider{result: ProviderResult{Repos: []Repo{repo("a")}}}
 	rule := config.DiscoveryRule{Name: "r", Languages: []string{"Go"}}
-	got, warns := applyFilters(context.Background(), f, f.result, rule, nil, 4)
+	got, warns, _ := applyFilters(context.Background(), f, f.result, rule, nil, 4)
 	if len(got) != 1 {
 		t.Fatalf("expected repo kept (filter ignored), got %d", len(got))
 	}
@@ -108,7 +109,7 @@ func TestApplyFiltersServerSideLanguageSkipsEnrichment(t *testing.T) {
 		},
 	}
 	rule := config.DiscoveryRule{Name: "r", Languages: []string{"Go"}}
-	got, _ := applyFilters(context.Background(), f, f.result, rule, nil, 4)
+	got, _, _ := applyFilters(context.Background(), f, f.result, rule, nil, 4)
 	if len(got) != 1 {
 		t.Fatalf("expected the server-filtered repo, got %d", len(got))
 	}
@@ -126,20 +127,20 @@ func TestApplyFiltersTopicEnrichment(t *testing.T) {
 		topics: map[string][]string{"o/a": {"backend", "svc"}, "o/b": {"frontend"}},
 	}
 	rule := config.DiscoveryRule{Name: "r", Topics: []string{"backend"}}
-	got, _ := applyFilters(context.Background(), f, f.result, rule, nil, 4)
+	got, _, _ := applyFilters(context.Background(), f, f.result, rule, nil, 4)
 	if len(got) != 1 || got[0].Name != "a" {
 		t.Fatalf("expected only a, got %+v", got)
 	}
 }
 
-func TestApplyFiltersCarriesProviderWarnings(t *testing.T) {
+func TestApplyFiltersCarriesProviderIncompleteness(t *testing.T) {
 	f := &fakeProvider{result: ProviderResult{
-		Repos:    []Repo{repo("a")},
-		Warnings: []string{"search truncated at 1000"},
+		Repos:      []Repo{repo("a")},
+		Incomplete: []string{"search truncated at 1000"},
 	}}
-	_, warns := applyFilters(context.Background(), f, f.result, config.DiscoveryRule{Name: "r"}, nil, 4)
-	if len(warns) != 1 || warns[0] != "search truncated at 1000" {
-		t.Errorf("provider warning not carried through: %v", warns)
+	_, _, incomplete := applyFilters(context.Background(), f, f.result, config.DiscoveryRule{Name: "r"}, nil, 4)
+	if len(incomplete) != 1 || incomplete[0] != "search truncated at 1000" {
+		t.Errorf("provider incompleteness not carried through: %v", incomplete)
 	}
 }
 

@@ -6,20 +6,23 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/git-mgr/internal/ctxutil"
 	"github.com/ashtonian/git-mgr/internal/repourl"
 )
 
 // ProviderForConfig creates the right Provider for a given provider config.
-func ProviderForConfig(cfg config.Provider) (Provider, error) {
+// apiTimeout bounds each API request, retries included; 0 means none.
+func ProviderForConfig(cfg config.Provider, apiTimeout time.Duration) (Provider, error) {
 	switch config.NormalizeProviderType(cfg.Type) {
 	case "github":
-		return NewGitHubProvider(cfg)
+		return NewGitHubProvider(cfg, apiTimeout)
 	case "gitlab":
-		return NewGitLabProvider(cfg)
+		return NewGitLabProvider(cfg, apiTimeout)
 	case "gitea":
-		return NewGiteaProvider(cfg)
+		return NewGiteaProvider(cfg, apiTimeout)
 	default:
 		return nil, fmt.Errorf("unknown provider type: %s", cfg.Type)
 	}
@@ -34,7 +37,11 @@ type DiscoverResult struct {
 	Existing   int
 	StaleCount int
 	Warnings   []string // filters that could not be honored, etc.
-	Err        error    // non-nil if this rule failed (others may still succeed)
+	// Incomplete says why repos the rule matches may be missing from this
+	// pass: a capped search, a failed filter lookup. Such a rule still adds
+	// what it found but judges nothing stale.
+	Incomplete []string
+	Err        error // non-nil if this rule failed (others may still succeed)
 }
 
 // AnyFailed reports whether any discovery rule errored. Callers use this to
@@ -80,7 +87,7 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 			continue
 		}
 
-		provider, err := ProviderForConfig(*provCfg)
+		provider, err := ProviderForConfig(*provCfg, cfg.Sync.APITimeout)
 		if err != nil {
 			results = append(results, DiscoverResult{
 				Rule: rule.Name, Provider: provCfg.Name,
@@ -89,7 +96,8 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 			continue
 		}
 
-		res, err := provider.Discover(ctx, rule)
+		ruleCtx, cancel := ctxutil.WithTimeout(ctx, cfg.Sync.DiscoveryTimeout)
+		res, err := provider.Discover(ruleCtx, rule)
 		if err != nil {
 			// A single failing rule must not abort discovery for the rest:
 			// otherwise one expired token wipes out the whole run (and, via
@@ -98,10 +106,12 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 				Rule: rule.Name, Provider: provCfg.Name,
 				Err: fmt.Errorf("discovering from %q rule %q: %w", provCfg.Name, rule.Name, err),
 			})
+			cancel()
 			continue
 		}
 
-		filtered, warnings := applyFilters(ctx, provider, res, rule, cfg.Exclude, cfg.Concurrency)
+		filtered, warnings, incomplete := applyFilters(ruleCtx, provider, res, rule, cfg.Exclude, cfg.Concurrency)
+		cancel()
 
 		for i := range filtered {
 			r := filtered[i]
@@ -117,10 +127,11 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 		}
 
 		results = append(results, DiscoverResult{
-			Rule:     rule.Name,
-			Provider: provCfg.Name,
-			Total:    len(filtered),
-			Warnings: warnings,
+			Rule:       rule.Name,
+			Provider:   provCfg.Name,
+			Total:      len(filtered),
+			Warnings:   warnings,
+			Incomplete: incomplete,
 		})
 	}
 
@@ -168,9 +179,8 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 // then handles language (and, where needed, topics) via per-repo enrichment on
 // the survivors only. It returns the matching repos plus any warnings about
 // filters that could not be honored.
-func applyFilters(ctx context.Context, provider Provider, res ProviderResult, rule config.DiscoveryRule, excludes []config.ExcludeRule, concurrency int) ([]Repo, []string) {
-	// Carry forward any provider-level warnings (e.g. search-result truncation).
-	warnings := append([]string(nil), res.Warnings...)
+func applyFilters(ctx context.Context, provider Provider, res ProviderResult, rule config.DiscoveryRule, excludes []config.ExcludeRule, concurrency int) (repos []Repo, warnings, incomplete []string) {
+	incomplete = append(incomplete, res.Incomplete...)
 	req := requestedFilters(rule)
 
 	// Filters to skip in the cheap client-side pass: those already applied
@@ -194,15 +204,15 @@ func applyFilters(ctx context.Context, provider Provider, res ProviderResult, ru
 		}
 	}
 
-	repos := FilterRepos(res.Repos, rule, excludes, skip)
+	repos = FilterRepos(res.Repos, rule, excludes, skip)
 
 	// Language: enrich the survivors, then match (any requested language).
-	// Enrichment is best-effort — on partial failure we still filter on what
-	// resolved (repos whose lookup failed have no languages and drop out).
+	// Enrichment is best-effort: repos whose lookup failed have no languages
+	// and drop out, which leaves the rule's result incomplete.
 	if req.Has(FilterLanguage) && !res.Applied.Has(FilterLanguage) {
 		if res.Capabilities.CanEnrichLanguages {
 			if err := provider.EnrichLanguages(ctx, repos, concurrency); err != nil {
-				warnings = append(warnings, fmt.Sprintf("rule %q: some language lookups failed (%v); filtering on what resolved", rule.Name, err))
+				incomplete = append(incomplete, fmt.Sprintf("rule %q: some language lookups failed (%v); repos whose lookup failed are left out", rule.Name, err))
 			}
 			repos = filterByLanguage(repos, rule.Languages)
 		} else {
@@ -213,12 +223,12 @@ func applyFilters(ctx context.Context, provider Provider, res ProviderResult, ru
 	// Topics via enrichment (providers that don't return them inline).
 	if deferTopics {
 		if err := provider.EnrichTopics(ctx, repos, concurrency); err != nil {
-			warnings = append(warnings, fmt.Sprintf("rule %q: some topic lookups failed (%v); filtering on what resolved", rule.Name, err))
+			incomplete = append(incomplete, fmt.Sprintf("rule %q: some topic lookups failed (%v); repos whose lookup failed are left out", rule.Name, err))
 		}
 		repos = filterByTopics(repos, rule.Topics)
 	}
 
-	return repos, warnings
+	return repos, warnings, incomplete
 }
 
 // parseManualRepo converts a ManualRepo config entry into a Repo. It accepts any

@@ -3,8 +3,10 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
@@ -18,7 +20,7 @@ type GitLabProvider struct {
 }
 
 // NewGitLabProvider creates a GitLab provider from config.
-func NewGitLabProvider(cfg config.Provider) (*GitLabProvider, error) {
+func NewGitLabProvider(cfg config.Provider, apiTimeout time.Duration) (*GitLabProvider, error) {
 	baseURL := cfg.URL
 	if baseURL == "" {
 		baseURL = "https://gitlab.com"
@@ -27,7 +29,7 @@ func NewGitLabProvider(cfg config.Provider) (*GitLabProvider, error) {
 	if err != nil {
 		return nil, err
 	}
-	client, err := gitlab.NewClient(tok, gitlab.WithBaseURL(baseURL))
+	client, err := gitlab.NewClient(tok, gitlab.WithBaseURL(baseURL), gitlab.WithHTTPClient(&http.Client{Timeout: apiTimeout}))
 	if err != nil {
 		return nil, fmt.Errorf("creating GitLab client: %w", err)
 	}

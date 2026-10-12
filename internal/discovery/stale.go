@@ -1,18 +1,20 @@
 package discovery
 
 import (
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
-// CleanupResult summarizes a DetectStale pass.
+// CleanupResult summarizes a stale pass.
 type CleanupResult struct {
 	NewlyStale int // repos that transitioned to stale on this pass
 	Reapable   int // stale repos past the grace period eligible for cleanup
-	Reaped     int // repos removed from tracking (apply only)
-	Failed     int // repos whose on-disk deletion failed (apply only); left tracked
+	Reaped     int // repos removed from tracking (Run only)
+	Failed     int // repos whose on-disk deletion failed (Run only); left tracked
 }
 
 // RemoveFunc deletes a stale repo's files. When it cannot do so without
@@ -28,18 +30,20 @@ type StaleScope struct {
 }
 
 // StaleScopeOf returns the scope of a pass that produced results under the given
-// rule and tag filters. An unfiltered pass in which every rule succeeded covers
-// every tracked repo, including repos whose rule has since been removed from
-// config. Otherwise it covers only repos first found by a rule that ran and
-// succeeded, so `sync --tag personal` cannot judge work repos, and a rule that
-// failed judges nothing.
+// rule and tag filters. An unfiltered pass in which every rule succeeded
+// completely covers every tracked repo, including repos whose rule has since
+// been removed from config. Otherwise it covers only repos first found by a
+// rule that ran and returned everything it matches, so `sync --tag personal`
+// cannot judge work repos, and a rule that failed or came back incomplete
+// judges nothing.
 func StaleScopeOf(results []DiscoverResult, ruleFilter, tagFilter string) StaleScope {
-	if ruleFilter == "" && tagFilter == "" && !AnyFailed(results) {
+	complete := func(r DiscoverResult) bool { return r.Err == nil && len(r.Incomplete) == 0 }
+	if ruleFilter == "" && tagFilter == "" && !slices.ContainsFunc(results, func(r DiscoverResult) bool { return !complete(r) }) {
 		return StaleScope{all: true}
 	}
 	rules := make(map[string]bool, len(results))
 	for _, r := range results {
-		if r.Err == nil {
+		if complete(r) {
 			rules[r.Rule] = true
 		}
 	}
@@ -51,30 +55,101 @@ func (s StaleScope) Covers(repo *state.RepoState) bool {
 	return s.all || s.rules[repo.DiscoveredBy]
 }
 
-// DetectStale marks repos within scope that this pass no longer found as stale.
-// Repos outside scope are left untouched. When apply is true it also enforces
-// cleanup.Policy on stale repos past the grace period: "remove" untracks them,
-// "remove_and_delete" deletes their files through remove first and untracks
+// Cleanup judges tracked repos against what a discovery pass found: repos in
+// scope it no longer found go stale, and under a reaping policy the ones
+// stale past the grace period are cleaned up -- "remove" untracks them,
+// "remove_and_delete" deletes their files through Remove first and untracks
 // only those it deleted.
-//
-// When apply is false it is strictly non-destructive: it marks repos stale
-// in-memory (the caller decides whether to persist) and only *counts* what would
-// be reaped (Reapable), never touching disk or tracking. This is what makes a
-// preview such as `discover` without --apply safe -- enforcement happens only on
-// the explicit, lock-held apply paths (`discover --apply`, scheduled `sync`).
-func DetectStale(st *state.State, discovered map[string]bool, scope StaleScope, cleanup config.CleanupConfig, apply bool, remove RemoveFunc) CleanupResult {
-	var res CleanupResult
-	now := time.Now()
-	reaps := cleanup.Policy == "remove" || cleanup.Policy == "remove_and_delete"
+type Cleanup struct {
+	Config config.CleanupConfig
+	// Remove deletes a repo's files under remove_and_delete.
+	Remove RemoveFunc
+	// Update runs a change to the state under the state lock and saves it.
+	Update func(change func(*state.State) error) error
+	Now    func() time.Time
+}
 
-	for key, repo := range st.Repos {
-		// Never mark manually-added repos as stale.
-		if cleanup.ProtectManual && repo.ManuallyAdded {
+// Preview marks stale in st, in memory, and counts what Run would clean up.
+// It never touches disk or tracking, which is what makes a preview such as
+// `discover` without --apply safe.
+func (c Cleanup) Preview(st *state.State, discovered map[string]bool, scope StaleScope) CleanupResult {
+	var res CleanupResult
+	var due []staleRepo
+	res.NewlyStale, due = c.mark(st, discovered, scope)
+	res.Reapable = len(due)
+	return res
+}
+
+// Run marks stale and cleans up. Files are deleted outside the state lock,
+// so a slow archive holds up no other command; a repo that changed meanwhile
+// (moved, found again) is left tracked.
+func (c Cleanup) Run(st *state.State, discovered map[string]bool, scope StaleScope) (CleanupResult, error) {
+	var res CleanupResult
+	var due []staleRepo
+	err := c.Update(func(st *state.State) error {
+		res.NewlyStale, due = c.mark(st, discovered, scope)
+		res.Reapable = len(due)
+		if c.Config.Policy == "remove" {
+			for _, d := range due {
+				delete(st.Repos, d.key)
+			}
+			res.Reaped = len(due)
+		}
+		return nil
+	})
+	if err != nil || c.Config.Policy != "remove_and_delete" || len(due) == 0 {
+		return res, err
+	}
+
+	failures := make(map[string]error)
+	for _, d := range due {
+		if err := c.Remove(d.key, &d.repo); err != nil {
+			failures[d.key] = err
+		}
+	}
+	err = c.Update(func(st *state.State) error {
+		for _, d := range due {
+			repo := st.Repos[d.key]
+			if repo == nil || repo.LocalPath != d.repo.LocalPath || repo.Status != "stale" {
+				continue
+			}
+			if ferr := failures[d.key]; ferr != nil {
+				// Left tracked so the failure stays visible and is retried
+				// next run rather than silently orphaning the directory.
+				repo.Error = "stale cleanup kept the files: " + ferr.Error()
+				res.Failed++
+				continue
+			}
+			delete(st.Repos, d.key)
+			res.Reaped++
+		}
+		return nil
+	})
+	return res, err
+}
+
+type staleRepo struct {
+	key  string
+	repo state.RepoState
+}
+
+// mark updates the stale state of every repo in scope and returns the ones
+// due for cleanup: stale past the grace period, under a reaping policy. The
+// grace period runs from the persisted StaleSince, so a repo that only just
+// went missing is never due.
+func (c Cleanup) mark(st *state.State, discovered map[string]bool, scope StaleScope) (newlyStale int, due []staleRepo) {
+	now := time.Now()
+	if c.Now != nil {
+		now = c.Now()
+	}
+	reaps := c.Config.Policy == "remove" || c.Config.Policy == "remove_and_delete"
+
+	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
+		repo := st.Repos[key]
+		if c.Config.ProtectManual && repo.ManuallyAdded {
 			continue
 		}
-
 		if discovered[key] {
-			// Found -- clear any stale state.
 			if repo.Status == "stale" {
 				repo.Status = "clean"
 			}
@@ -82,42 +157,18 @@ func DetectStale(st *state.State, discovered map[string]bool, scope StaleScope, 
 			repo.LastDiscovered = now
 			continue
 		}
-
 		if !scope.Covers(repo) {
 			continue
 		}
-
 		// Not found by any rule that could have found it.
 		if repo.StaleSince.IsZero() {
 			repo.StaleSince = now
-			res.NewlyStale++
+			newlyStale++
 		}
 		repo.Status = "stale"
-
-		// Cleanup only applies once the grace period (measured from the first
-		// time the repo went missing) has elapsed under a reaping policy.
-		if !reaps || now.Sub(repo.StaleSince) <= cleanup.GracePeriod {
-			continue
+		if reaps && now.Sub(repo.StaleSince) > c.Config.GracePeriod {
+			due = append(due, staleRepo{key, *repo})
 		}
-		res.Reapable++
-		if !apply {
-			// Preview: report what would be reaped, but never mutate disk or
-			// tracking. The grace check above used the persisted StaleSince, so
-			// repos that only just went stale this pass are correctly excluded.
-			continue
-		}
-
-		if cleanup.Policy == "remove_and_delete" {
-			if err := remove(key, repo); err != nil {
-				// Leave it tracked so the failure stays visible and is retried
-				// next run rather than silently orphaning the directory.
-				repo.Error = "stale cleanup kept the files: " + err.Error()
-				res.Failed++
-				continue
-			}
-		}
-		delete(st.Repos, key)
-		res.Reaped++
 	}
-	return res
+	return newlyStale, due
 }

@@ -141,7 +141,7 @@ func (c *SetupCmd) Run(ctx *Context) error {
 // afterSetup adopts the chosen clones and installs the background agent.
 func afterSetup(ctx *Context, cfg *config.Config, a setup.Answers) error {
 	if len(a.Adopt) > 0 {
-		st, unlock, err := lockedState(ctx)
+		st, err := ctx.LoadState()
 		if err != nil {
 			return err
 		}
@@ -152,7 +152,6 @@ func afterSetup(ctx *Context, cfg *config.Config, a setup.Answers) error {
 				failed++
 			}
 		}
-		unlock()
 		if err := outcome(failed, len(a.Adopt), "clones could not be adopted"); err != nil {
 			return err
 		}
@@ -471,7 +470,7 @@ func askTrack(ctx context.Context, acct *setup.Account, online bool) error {
 	if online {
 		pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		owners, _ = discovery.ListOwners(pctx, config.Provider{Name: acct.Name, Type: acct.Type, URL: acct.URL,
-			TokenCommand: acct.TokenCommand, TokenEnv: acct.TokenEnv})
+			TokenCommand: acct.TokenCommand, TokenEnv: acct.TokenEnv}, config.Defaults().Sync.APITimeout)
 		cancel()
 	}
 	if len(owners) == 0 {

@@ -18,18 +18,8 @@ func (c *AdoptCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	// The dry-run path is read-only; the real path mutates state, so take the
-	// lock and re-read under it.
-	var st *state.State
-	if c.DryRun {
-		st, err = ctx.LoadState()
-	} else {
-		var unlock func()
-		st, unlock, err = lockedState(ctx)
-		if err == nil {
-			defer unlock()
-		}
-	}
+	// Adopting locks the state per change, so this reads it unlocked.
+	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}
@@ -72,6 +62,9 @@ func (c *AdoptCmd) scanAndAdopt(ctx *Context, cfg *config.Config, st *state.Stat
 	err = filepath.WalkDir(absPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip errors
+		}
+		if d.IsDir() && gitops.IsStaging(d.Name()) {
+			return filepath.SkipDir // a clone in progress
 		}
 		if d.IsDir() && d.Name() == ".git" {
 			found = append(found, filepath.Dir(path))

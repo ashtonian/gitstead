@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
@@ -16,6 +17,10 @@ import (
 // It is offline (no provider API calls), changes nothing, and exits non-zero
 // if any check fails. `git-mgr plan` and `apply` fix what config can.
 type DoctorCmd struct{}
+
+// stuckLockAfter is how long doctor waits for the state lock before calling
+// its holder stuck; a write holds it for milliseconds.
+const stuckLockAfter = 5 * time.Second
 
 type doctorReport struct{ warns, fails int }
 
@@ -94,9 +99,16 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 		}
 	}
 
-	// --- State lock ---
-	if lerr := st.AcquireLock(); lerr != nil {
-		d.warn("state lock is held (another git-mgr running?)")
+	// --- Locks ---
+	if release, lerr := st.RunLock("sync"); lerr != nil {
+		d.info("a sync is running")
+	} else {
+		release()
+	}
+	// A write holds the state lock for milliseconds; held longer, a run is
+	// stuck and every command will wait lock_timeout and fail.
+	if lerr := st.Lock(stuckLockAfter); lerr != nil {
+		d.warn(fmt.Sprintf("state lock: %v -- a git-mgr process may be stuck; find it with lsof", lerr))
 	} else {
 		st.ReleaseLock()
 		d.ok("state lock free")

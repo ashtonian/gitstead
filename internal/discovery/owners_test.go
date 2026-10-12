@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 )
@@ -24,7 +25,7 @@ func TestListOwners_GitHub(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	owners, err := ListOwners(context.Background(), config.Provider{Name: "gh", Type: "github", URL: srv.URL + "/api/v3/", Token: "t"})
+	owners, err := ListOwners(context.Background(), config.Provider{Name: "gh", Type: "github", URL: srv.URL + "/api/v3/", Token: "t"}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

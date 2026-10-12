@@ -258,8 +258,8 @@ discovery:
 ```
 
 GitHub's Search API caps results at 1000 per query; when a query matches more,
-`discover` warns that results were truncated (list-based `org:`/`user:` rules
-have no such cap). GitLab and Gitea route `query:` to their own project/repo
+`discover` reports the rule as incomplete and none of its repos are judged
+stale that run (list-based `org:`/`user:` rules have no such cap). GitLab and Gitea route `query:` to their own project/repo
 search.
 
 ### Authentication
@@ -611,10 +611,39 @@ and `wg backup` (plus the scheduled `sync`) keeps every member's WIP safe.
 
 ## Running on a schedule
 
-`git-mgr sync` is cron-safe: flock prevents overlapping runs, `min_fetch_interval`
-skips recently-fetched repos, and `auto_discover` picks up new repos. It never
-pulls or merges, and it moves or deletes a repo only if you configure it to
-(`reconcile.auto: all`, `cleanup.policy: remove_and_delete`).
+`git-mgr sync` is built to run unattended. Only one sync runs at a time; a
+second one exits 0 at once. Clones, fetches and backups run without the state
+lock, which a run takes only for the milliseconds it needs to record a result,
+so `git-mgr wg create` or `git-mgr clone` work normally while a long sync is
+running. `min_fetch_interval` skips recently-fetched repos, and `auto_discover`
+picks up new repos. It never pulls or merges, and it moves or deletes a repo
+only if you configure it to (`reconcile.auto: all`,
+`cleanup.policy: remove_and_delete`).
+
+Nothing waits on a person or hangs forever:
+
+- git runs with no terminal: `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`,
+  `SSH_ASKPASS_REQUIRE=never`, and in a session of its own, so ssh can't ask
+  for a passphrase or to trust a host key. A credential that needs typing
+  fails with git's own message instead. Load keys into an agent, or use a
+  credential helper.
+- Every external call has a deadline, and the error names the setting that
+  ran out. When one passes, git is killed along with everything it started.
+
+| Setting | Default | Bounds |
+| --- | --- | --- |
+| `sync.backup_timeout` | `2m` | One working copy's backup (taken before its fetch, on its own budget) and status read. |
+| `sync.timeout_per_repo` | `5m` | One repo's fetch, retries included. |
+| `sync.clone_timeout` | `30m` | One clone. |
+| `sync.api_timeout` | `60s` | One provider API request, retries included. |
+| `sync.discovery_timeout` | `5m` | One discovery rule: listing plus language/topic lookups. |
+| `lock_timeout` | `2m` | How long a command waits for another run's state write before exiting 75. |
+| `token_command` | `30s` (fixed) | Running a provider's `token_command`. |
+
+A clone is made in a hidden `.git-mgr-clone-*` directory beside its
+destination and renamed into place when complete. A failed or killed clone
+never leaves half a repository where the repo belongs, and the next clone of
+the same repo removes what a killed run left behind.
 
 ```bash
 git-mgr install-agent          # launchd (macOS) / systemd timer (Linux) / cron
@@ -634,7 +663,7 @@ broken setup. With `--quiet`, only failures are printed, to stderr.
 | 0 | Everything succeeded. `sync` also exits 0 when another run holds the lock, since overlapping scheduled runs are routine. |
 | 1 | The command failed: bad config, unreadable state, or every target failed. |
 | 3 | Partial failure: some repos, members or changes failed and the rest succeeded. Each failure is printed to stderr. |
-| 75 | Another git-mgr run holds the lock; try again (EX_TEMPFAIL). |
+| 75 | Another git-mgr run held the state lock for longer than `lock_timeout`; try again (EX_TEMPFAIL). `git-mgr doctor` reports a stuck holder. |
 | 80 | Usage error: unknown command or flag. |
 
 ## Resilience
@@ -646,6 +675,9 @@ still run, and stale detection is skipped for that run so a transient outage
 can't mark healthy repos stale. A run filtered with `--tag` or `--rule` only
 judges repos first found by the rules it ran, so `sync --tag personal` never
 marks work repos stale; repos from a failed rule are left exactly as they are.
+A rule whose result may be missing repos -- a search capped at 1000, a
+language or topic lookup that failed or timed out -- still adds what it found,
+but judges none of its repos stale that run.
 An interrupted run is safe to repeat (see
 [Config changes](#config-changes-plan-and-apply)). SIGINT/SIGTERM cancels
 in-flight git and API operations cleanly.
@@ -706,7 +738,7 @@ go build -ldflags="-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD)" .
 | `internal/gitops` | Everything that runs git: clone, fetch, status, snapshots, backups, restore, archives, copy IDs, worktrees. |
 | `internal/workgroup` | Workgroup specs, member creation, health, removal. |
 | `internal/repourl` | Parsing remote URLs into host/owner/name keys. |
-| `internal/pathtemplate`, `internal/pathutil`, `internal/shellutil` | Path templates, deletion guards, shell quoting. |
+| `internal/pathtemplate`, `internal/pathutil`, `internal/shellutil`, `internal/ctxutil` | Path templates, deletion guards, shell quoting, optional deadlines. |
 | `internal/scheduler` | launchd, systemd and cron installation. |
 | `internal/oplog`, `internal/notify` | The operation log and desktop notifications. |
 

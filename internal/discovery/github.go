@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/google/go-github/v88/github"
@@ -27,8 +28,8 @@ type ghCore struct {
 // Gitea/Forgejo shim — new configs should use type: gitea). The client is built
 // on our retrying http.Client so GitHub/GHES get the rate-limit resilience the
 // GitLab SDK has built in; WithAuthToken layers Bearer auth over that transport.
-func newGHClient(token, rawURL string) (*github.Client, error) {
-	opts := []github.ClientOptionsFunc{github.WithHTTPClient(newRetryClient(nil))}
+func newGHClient(token, rawURL string, apiTimeout time.Duration) (*github.Client, error) {
+	opts := []github.ClientOptionsFunc{github.WithHTTPClient(newRetryClient(apiTimeout))}
 	if token != "" {
 		opts = append(opts, github.WithAuthToken(token))
 	}
@@ -62,10 +63,10 @@ func hostFromURL(rawURL, fallback string) string {
 }
 
 // discover lists repos for the rule's scope and maps them to Repo, reporting any
-// filters it applied server-side plus any non-fatal warnings.
+// filters it applied server-side and why the list may be incomplete.
 func (c *ghCore) discover(ctx context.Context, rule config.DiscoveryRule) ([]Repo, FilterSet, []string, error) {
 	scope := ruleScope(rule)
-	ghRepos, applied, warnings, err := c.list(ctx, scope, rule)
+	ghRepos, applied, incomplete, err := c.list(ctx, scope, rule)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -73,15 +74,15 @@ func (c *ghCore) discover(ctx context.Context, rule config.DiscoveryRule) ([]Rep
 	for _, r := range ghRepos {
 		repos = append(repos, c.toRepo(r))
 	}
-	return repos, applied, warnings, nil
+	return repos, applied, incomplete, nil
 }
 
 func (c *ghCore) list(ctx context.Context, scope Scope, rule config.DiscoveryRule) ([]*github.Repository, FilterSet, []string, error) {
 	applied := FilterSet{}
 	switch scope.Kind {
 	case ScopeQuery:
-		repos, warnings, err := c.searchRepos(ctx, scope.Value)
-		return repos, allFiltersApplied(), warnings, err
+		repos, incomplete, err := c.searchRepos(ctx, scope.Value)
+		return repos, allFiltersApplied(), incomplete, err
 	case ScopeOrg:
 		repos, err := c.listByOrg(ctx, scope.Value)
 		return repos, applied, nil, err
@@ -104,7 +105,7 @@ func (c *ghCore) list(ctx context.Context, scope Scope, rule config.DiscoveryRul
 
 // searchRepos runs a raw GitHub repository-search query. GitHub caps search
 // results at 1000 and stops paginating there; when the reported total exceeds
-// what we retrieved (or results are flagged incomplete), we return a warning.
+// what we retrieved (or results are flagged incomplete), it says so.
 func (c *ghCore) searchRepos(ctx context.Context, query string) ([]*github.Repository, []string, error) {
 	var all []*github.Repository
 	opts := &github.SearchOptions{ListOptions: github.ListOptions{PerPage: 100}}
@@ -125,15 +126,15 @@ func (c *ghCore) searchRepos(ctx context.Context, query string) ([]*github.Repos
 		}
 		opts.Page = resp.NextPage
 	}
-	var warnings []string
+	var missing []string
 	if total > len(all) {
-		warnings = append(warnings, fmt.Sprintf(
+		missing = append(missing, fmt.Sprintf(
 			"GitHub search matched %d repos but the API caps results at %d; %d repos were not retrieved",
 			total, len(all), total-len(all)))
 	} else if incomplete {
-		warnings = append(warnings, "GitHub reported incomplete search results (query timed out); some repos may be missing")
+		missing = append(missing, "GitHub reported incomplete search results (query timed out); some repos may be missing")
 	}
-	return all, warnings, nil
+	return all, missing, nil
 }
 
 func (c *ghCore) listByOrg(ctx context.Context, org string) ([]*github.Repository, error) {
@@ -246,12 +247,12 @@ type GitHubProvider struct {
 }
 
 // NewGitHubProvider creates a GitHub provider from config.
-func NewGitHubProvider(cfg config.Provider) (*GitHubProvider, error) {
+func NewGitHubProvider(cfg config.Provider, apiTimeout time.Duration) (*GitHubProvider, error) {
 	tok, err := ResolveToken(cfg)
 	if err != nil {
 		return nil, err
 	}
-	client, err := newGHClient(tok, cfg.URL)
+	client, err := newGHClient(tok, cfg.URL, apiTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +268,7 @@ func NewGitHubProvider(cfg config.Provider) (*GitHubProvider, error) {
 func (g *GitHubProvider) Name() string { return g.core.name }
 
 func (g *GitHubProvider) Discover(ctx context.Context, rule config.DiscoveryRule) (ProviderResult, error) {
-	repos, applied, warnings, err := g.core.discover(ctx, rule)
+	repos, applied, incomplete, err := g.core.discover(ctx, rule)
 	if err != nil {
 		return ProviderResult{}, err
 	}
@@ -275,7 +276,7 @@ func (g *GitHubProvider) Discover(ctx context.Context, rule config.DiscoveryRule
 		Repos:        repos,
 		Applied:      applied,
 		Capabilities: Capabilities{CanEnrichLanguages: true},
-		Warnings:     warnings,
+		Incomplete:   incomplete,
 	}, nil
 }
 

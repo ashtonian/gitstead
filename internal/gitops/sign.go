@@ -41,7 +41,7 @@ func TestSign(ctx context.Context, settings map[string]string) error {
 		args = append(args, "-c", k+"="+settings[k])
 	}
 	args = append(args, "commit-tree", "-S", tree, "-m", "git-mgr signing test")
-	cmd := gitCommand(ctx, dir, []string{"GIT_TERMINAL_PROMPT=0"}, args...)
+	cmd := gitCommand(ctx, dir, nil, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

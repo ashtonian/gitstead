@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 
@@ -104,7 +105,7 @@ func TestGitHubSelfScopeSendsAffiliation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := NewGitHubProvider(config.Provider{Name: "gh", Type: "github", URL: srv.URL + "/api/v3/", Token: "t"})
+	p, err := NewGitHubProvider(config.Provider{Name: "gh", Type: "github", URL: srv.URL + "/api/v3/", Token: "t"}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

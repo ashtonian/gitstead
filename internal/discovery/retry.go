@@ -25,17 +25,10 @@ type retryTransport struct {
 	sleep func(ctx context.Context, d time.Duration) error
 }
 
-// newRetryClient wraps an existing *http.Client (or http.DefaultTransport) with
-// retry behavior, preserving the original transport (e.g. oauth2's).
-func newRetryClient(base *http.Client) *http.Client {
+// newRetryClient returns an HTTP client that retries transient failures, and
+// gives up on a request, retries included, after timeout (0 means never).
+func newRetryClient(timeout time.Duration) *http.Client {
 	var rt http.RoundTripper = http.DefaultTransport
-	timeout := time.Duration(0)
-	if base != nil {
-		if base.Transport != nil {
-			rt = base.Transport
-		}
-		timeout = base.Timeout
-	}
 	return &http.Client{
 		Transport: &retryTransport{
 			base:       rt,

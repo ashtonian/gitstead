@@ -363,7 +363,7 @@ func ScanAdopt(name, dir string) (*Spec, error) {
 	}
 	spec := &Spec{Name: name, Kind: "clone", Root: abs}
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() || gitops.IsStaging(e.Name()) {
 			continue
 		}
 		p := filepath.Join(abs, e.Name())

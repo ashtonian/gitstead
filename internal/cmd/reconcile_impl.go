@@ -54,11 +54,12 @@ func (c *ApplyCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	st, unlock, err := lockedState(ctx)
+	// Each change takes the state lock for itself, so nothing is held while
+	// you read the plan.
+	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}
-	defer unlock()
 
 	plan, scope, err := fullPlan(ctx, cfg, st)
 	if err != nil {
@@ -97,7 +98,9 @@ func fullPlan(ctx *Context, cfg *config.Config, st *state.State) (*reconcile.Pla
 	return reconcile.Compute(ctx.GoCtx(), cfg, st, scope), scope, nil
 }
 
-// reconcileEnv is what plans apply to: st, saved after every change.
+// reconcileEnv is what plans apply to: st, changed one action at a time under
+// the state lock, so other git-mgr runs keep working while a plan applies.
+// The caller must not hold the state lock itself.
 func reconcileEnv(cfg *config.Config, st *state.State) *reconcile.Env {
 	keep := []string{config.ExpandHome(cfg.BaseDir), config.ExpandHome(cfg.WorkgroupBaseDir)}
 	for _, o := range cfg.Overrides {
@@ -105,7 +108,13 @@ func reconcileEnv(cfg *config.Config, st *state.State) *reconcile.Env {
 			keep = append(keep, config.ExpandHome(o.BaseDir))
 		}
 	}
-	return &reconcile.Env{State: st, Save: st.Save, ArchiveDir: cfg.Backup.ArchiveDir, KeepDirs: keep}
+	return &reconcile.Env{
+		State:        st,
+		Update:       stateUpdater(cfg, st),
+		ArchiveDir:   cfg.Backup.ArchiveDir,
+		KeepDirs:     keep,
+		CloneTimeout: cfg.Sync.CloneTimeout,
+	}
 }
 
 // applyAuto applies what reconcile.auto allows, prints what happened and

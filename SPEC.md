@@ -214,7 +214,9 @@ Syncing 83 repos (concurrency: 8)...
 ```
 
 **Cron safety:**
-- Acquires exclusive flock on state file -- if another instance is running, exits immediately with code 0
+- Takes the sync run lock (`<state_file>.sync.lock`) -- if another sync is running, exits immediately with code 0
+- Holds the state lock only to record each change and, at the end, every repo's outcome in one write; clones, fetches and backups run without it
+- Backs up each working copy first on `sync.backup_timeout`, then fetches on `sync.timeout_per_repo`; tracked repos and workgroup members share the `concurrency` pool, and each working copy is visited once
 - Respects `min_fetch_interval` -- skips repos fetched within the window
 - All errors are collected, not fatal -- partial success is fine
 
@@ -367,7 +369,7 @@ config).
 | `bootstrap` | One-command machine setup: init (if missing) → doctor → discover --apply → sync → install-agent. `--profile` (tag scope), `--no-agent`, `--dry-run`. |
 | `plan [--json]` | Discover and show every change config asks for -- repos and workgroups -- with drift and blocked changes. Changes nothing. |
 | `apply [--yes]` | Discover and make every change, including moves and removals; asks before those unless `--yes` (refuses without a terminal). Saves state after each change; non-zero exit if any change failed or was blocked. |
-| `doctor` | Offline, read-only preflight: git present, config valid, base_dir writable, provider tokens resolve, configured SSH keys exist, state lock free, tracked repos on disk with matching origin. Non-zero exit on failure. |
+| `doctor` | Offline, read-only preflight: git present, config valid, base_dir writable, provider tokens resolve, configured SSH keys exist, whether a sync is running, state lock free within 5s (held longer, its holder is reported as stuck), tracked repos on disk with matching origin. Non-zero exit on failure. |
 | `run [--set/--tag/--repos] -- <cmd>` | Run a command in each matching repo (parallel, bounded by concurrency). `--fail-fast`; non-zero exit if any failed. |
 | `manifest export [--out]` / `import <file>` | Portable `{url,tags,path}` manifest of the tracked set, to rehydrate a new machine (captures manual adoptions). import is idempotent and clones over the url's transport. |
 | `restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` (clone+apply to a scratch dir), or `--apply` onto the tree (refuses dirty without `--force`). id defaults to `latest`. |
@@ -421,6 +423,9 @@ clone_protocol: "ssh"
 
 # Max concurrent git operations (clone, fetch, backup).
 concurrency: 8
+
+# How long a command waits for another run's state write before exiting 75.
+lock_timeout: "2m"
 
 # Named, reusable repo selections for `--set <name>` on status/sync/backup/run/
 # remove/remote-sync. In a set: repos globs OR tags (both empty = all), then
@@ -584,8 +589,13 @@ sync:
   # frequent cron runs. Duration string (e.g., "10m", "1h").
   min_fetch_interval: "10m"
 
-  # Timeout for a single repo's fetch operation.
-  timeout_per_repo: "5m"
+  # Deadlines; 0 means none. When one passes, git and everything it started
+  # is killed, and the error names the setting.
+  timeout_per_repo: "5m"    # one repo's fetch, retries included
+  backup_timeout: "2m"      # one working copy's backup and status read
+  clone_timeout: "30m"      # one clone
+  api_timeout: "60s"        # one provider API request, retries included
+  discovery_timeout: "5m"   # one discovery rule, lookups included
 
   # Number of retries on transient network failures (per repo).
   retries: 2
@@ -856,18 +866,34 @@ workgroup actions. `apply` applies everything.
 ### State File Locking
 
 ```
-Lock file: <state_file>.lock (e.g., ~/.local/share/git-mgr/state.yaml.lock)
-Mechanism: flock(fd, LOCK_EX | LOCK_NB)
-On conflict: exit 0 with message "Another git-mgr instance is running, skipping."
+State lock:    <state_file>.lock       (e.g. ~/.local/share/git-mgr/state.yaml.lock)
+Sync run lock: <state_file>.sync.lock
+Mechanism:     flock(fd, LOCK_EX | LOCK_NB), retried every 100ms
 ```
 
-**Write protocol:**
-1. Acquire flock
-2. Read current state
-3. Perform operations
-4. Write state to `<state_file>.tmp`
-5. `os.Rename` tmp to state file (atomic on POSIX)
-6. Release flock
+The state lock guards one write. Every command that changes state does its slow
+work -- clones, fetches, backups, archives, prompts -- without it, then records
+the outcome with an update:
+
+1. Acquire the state lock, waiting up to `lock_timeout` (default 2m); past
+   that, fail with exit code 75
+2. Re-read the state file
+3. Apply the change to what was read, skipping anything that changed meanwhile
+   (a repo moved or untracked by another run keeps its new record)
+4. Write state to `<state_file>.tmp` and `os.Rename` it over the state file
+   (atomic on POSIX)
+5. Release the lock
+
+Commands that apply a plan (`sync`, `apply`, `clone`, `adopt`, `discover
+--apply`, `manifest import`, `wg create`, `wg ensure`, `setup`) read state
+without the lock and update it once per change, so two runs' changes never
+overwrite each other. The sync run lock keeps syncs from overlapping; it never
+waits, and a sync that finds it held exits 0. Locks are per open file
+description, so a process never holds the state lock while asking for it again.
+
+Stale cleanup under `remove_and_delete` follows the same protocol: repos are
+marked stale under the lock, their files archived and deleted without it, and
+untracked under the lock only if still stale at the same path.
 
 ---
 
