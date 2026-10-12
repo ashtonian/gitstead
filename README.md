@@ -25,7 +25,7 @@ agents — keeping their WIP safe.
   stash list; `restore`
   recovers them (into a scratch dir or in place).
 - **Workgroups / agent fleets** — spin up N isolated worktrees or clones and run
-  an agent in each pane (`wg create … --open --agent claude`); per-member backup,
+  an agent in each pane (`wg create … --open --cmd claude`); per-member backup,
   safe teardown, recover, and prune keep agent WIP from ever being lost.
 - **Cron-safe sync** — flock-guarded, fetch-only, with per-repo fetch intervals
   and retry/back-off; an **operation log** (`report`/`log`) records what ran.
@@ -49,37 +49,66 @@ git-mgr shells out to `git`, so git must be on `PATH`.
 
 ## Quick start
 
-**No config needed** — if git and your auth (SSH agent/keys, or a git credential
-helper like `gh auth setup-git`) already work on your machine, git-mgr does too.
-It uses your existing transport and a default layout (`~/repos`):
+```bash
+git-mgr setup     # a few questions, a review of the config it will write, then it writes it
+git-mgr plan      # what will be cloned and changed
+git-mgr apply     # do it
+```
+
+`setup` starts every answer at what it finds on your machine, so on a typical
+machine you mostly press Enter:
+
+1. **Layout** — where repos live and how they're arranged (`owner/name`,
+   `host/owner/name` or `name`), guessed from where your own repos already sit.
+2. **Accounts** — every account `gh` is logged in to, plus any you add by hand
+   (GitLab, Gitea/Forgejo, another GitHub). For each: whose repos to track
+   (your own, including private ones, and your organizations, listed from the
+   provider), how git reaches the host (an SSH key — setup asks each host which
+   account your keys sign in as — or HTTPS), the commit identity (from your
+   global git config or `includeIf` files), signing, and optionally a separate
+   base dir.
+3. **Features** — backups (on), background sync every 15 minutes (on), offsite
+   backup refs (off), what `sync` may change by itself, what happens when a repo
+   disappears upstream.
+4. **Existing clones** — those discovery won't find where they are can be
+   tracked in place.
+5. **Review** — the diff of your config file and checks: each token works, each
+   key signs in as the right account, signing works without a terminal. Nothing
+   is written until you confirm.
+
+Re-run `setup` any time to change your answers; it edits the config in place,
+keeps your comments and touches only what it manages. Scripted:
+
+| Flag | Effect |
+| --- | --- |
+| `--yes` | Take the detected and recommended answers without asking. |
+| `--answers <file>` | Take the answers from a YAML file. |
+| `--save-answers <file>` | Also write the answers used, to repeat this setup on another machine. |
+| `--dry-run` | Show the diff and checks; change nothing. |
+| `--offline` | Skip `ssh -T` probes and provider API calls. |
+
+No config is needed for the basics either — if git and your auth already work,
+git-mgr does too, with `~/repos` as the base dir:
 
 ```bash
 git-mgr adopt ~/code/myrepo            # track a clone you already have
 git-mgr clone git@github.com:me/app    # clone + track by URL (your SSH/HTTPS auth)
 git-mgr sync                           # fetch all tracked repos + back up WIP
 git-mgr status                         # table of what you're managing
-git-mgr wg create scratch --source ~/code/app --count 4 --open --agent claude
+git-mgr wg create scratch --source ~/code/app --count 4 --open --cmd claude
 ```
 
-To **auto-discover** repos from a provider (the one thing that needs to know
-*what* to fetch): if you're logged into the `gh` CLI, `init` detects it and
-writes a ready GitHub provider + rule — so this is zero-edit:
-
-```bash
-git-mgr init                 # logged into gh? auto-configures GitHub. else: uncomment a stub
-git-mgr discover --apply     # clone everything the rules match
-git-mgr install-agent        # optional: periodic background sync
-```
-
-`git-mgr bootstrap` runs all of that in one command (init → doctor → discover →
-sync → agent), so on a gh-authed machine it's a true one-liner.
+`git-mgr bootstrap` runs `setup` (if there's no config yet), `doctor`,
+`discover --apply`, `sync` and installs the agent, in one command. `git-mgr init`
+writes a config without asking anything.
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `git-mgr init` | Create a config file with sensible defaults. |
-| `git-mgr bootstrap` | Set up a fresh machine in one command: init → doctor → discover --apply → sync → install agent. `--profile`, `--no-agent`, `--dry-run`. |
+| `git-mgr setup` | Set up git-mgr, or change your setup: layout, accounts, what to track, features. `--yes`, `--answers`, `--save-answers`, `--dry-run`, `--offline`. |
+| `git-mgr init` | Write a config with sensible defaults, without asking. |
+| `git-mgr bootstrap` | Set up a fresh machine in one command: setup → doctor → discover --apply → sync → install agent. `--profile`, `--no-agent`, `--dry-run`. |
 | `git-mgr discover` | Discover repos from providers and show the plan; `--apply` makes the changes that move and delete nothing (clone new repos, update URLs, managed git config, tags). `--rule`, `--tag` to scope. |
 | `git-mgr sync` | Discover, apply config changes as far as `reconcile.auto` allows, fetch all repos and back up uncommitted changes (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`, `--push-branch`. |
 | `git-mgr plan` | Show what config would change on disk and in state, without changing anything. `--json`. See [Config changes](#config-changes-plan-and-apply). |
@@ -128,7 +157,22 @@ Config lives at `~/.config/git-mgr/config.yaml`. See
 [`config.example.yaml`](config.example.yaml) for a fully annotated reference.
 
 If that default file doesn't exist, git-mgr runs on defaults and `GIT_MGR_*`
-environment variables. A path you choose with `--config` or `GIT_MGR_CONFIG`
+environment variables. Only what's switched on runs: discovery needs providers
+and rules, workgroups exist once declared, background sync once the agent is
+installed, offsite backup refs once `remote_sync` is enabled. Backups of
+uncommitted work are on by default. A flat tree with one account and nothing
+else is a complete setup:
+
+```yaml
+base_dir: ~/projects
+layout: owner/name            # owner/name | host/owner/name (default) | name
+accounts:
+  - name: personal
+    hosts: [github.com]
+```
+
+`layout` names a common `path_template`; set one or the other. With `name`,
+two repos with the same name can't both be placed and are reported as blocked. A path you choose with `--config` or `GIT_MGR_CONFIG`
 must exist and parse: a missing, unreadable or malformed file is an error rather
 than a silent fall back to defaults, which would otherwise run with no discovery
 rules and mark every discovered repo stale.

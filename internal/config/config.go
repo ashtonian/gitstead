@@ -7,8 +7,10 @@ import (
 
 // Config is the top-level configuration.
 type Config struct {
-	BaseDir       string           `koanf:"base_dir"       yaml:"base_dir"       default:"~/repos"                        validate:"required"`
-	PathTemplate  string           `koanf:"path_template"  yaml:"path_template"  default:"{{.Host}}/{{.Owner}}/{{.Name}}"  validate:"required"`
+	BaseDir      string `koanf:"base_dir"       yaml:"base_dir"       default:"~/repos"                        validate:"required"`
+	PathTemplate string `koanf:"path_template"  yaml:"path_template"  default:"{{.Host}}/{{.Owner}}/{{.Name}}"  validate:"required"`
+	// Layout names a common path_template: owner/name, host/owner/name or name.
+	Layout        string           `koanf:"layout" yaml:"layout,omitempty" validate:"omitempty,oneof=owner/name host/owner/name name"`
 	CloneProtocol string           `koanf:"clone_protocol" yaml:"clone_protocol" default:"ssh"                            validate:"oneof=ssh https"`
 	Concurrency   int              `koanf:"concurrency"   yaml:"concurrency"   default:"8"                                    validate:"min=1,max=128"`
 	Accounts      []Account        `koanf:"accounts"      yaml:"accounts,omitempty" validate:"dive"`
@@ -86,6 +88,16 @@ type GitIdentity struct {
 	Email string `koanf:"email" yaml:"email,omitempty"`
 }
 
+// DefaultPathTemplate is path_template's default.
+const DefaultPathTemplate = "{{.Host}}/{{.Owner}}/{{.Name}}"
+
+// Layouts maps each layout preset to its path_template.
+var Layouts = map[string]string{
+	"owner/name":      "{{.Owner}}/{{.Name}}",
+	"host/owner/name": DefaultPathTemplate,
+	"name":            "{{.Name}}",
+}
+
 // ManualRepo allows specifying individual repos to manage without discovery rules.
 type ManualRepo struct {
 	URL     string   `koanf:"url"     yaml:"url"              validate:"required"`
@@ -117,8 +129,8 @@ type DiscoveryRule struct {
 	Org             string   `koanf:"org"              yaml:"org,omitempty"`
 	Group           string   `koanf:"group"            yaml:"group,omitempty"`
 	Query           string   `koanf:"query"            yaml:"query,omitempty"`
-	IncludeForks    bool     `koanf:"include_forks"    yaml:"include_forks"`
-	IncludeArchived bool     `koanf:"include_archived" yaml:"include_archived"`
+	IncludeForks    bool     `koanf:"include_forks"    yaml:"include_forks,omitempty"`
+	IncludeArchived bool     `koanf:"include_archived" yaml:"include_archived,omitempty"`
 	Visibility      string   `koanf:"visibility"       yaml:"visibility,omitempty"    validate:"omitempty,oneof=all public private internal"`
 	Languages       []string `koanf:"languages"        yaml:"languages,omitempty"`
 	Topics          []string `koanf:"topics"           yaml:"topics,omitempty"`

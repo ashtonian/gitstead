@@ -33,6 +33,9 @@ func Validate(cfg *Config) error {
 	}
 
 	// Cross-field validation
+	if t, ok := Layouts[cfg.Layout]; ok && cfg.PathTemplate != DefaultPathTemplate && cfg.PathTemplate != t {
+		return fmt.Errorf("set layout or path_template, not both (layout %q, path_template %q)", cfg.Layout, cfg.PathTemplate)
+	}
 	if _, err := template.New("test").Parse(cfg.PathTemplate); err != nil {
 		return fmt.Errorf("invalid path_template %q: %w", cfg.PathTemplate, err)
 	}

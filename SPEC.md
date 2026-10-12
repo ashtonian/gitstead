@@ -101,6 +101,36 @@ git-mgr [global flags] <command> [command flags] [args]
 
 ### Commands
 
+#### `git-mgr setup [flags]`
+
+Guided, re-runnable setup. Detection (package `internal/setup`) reads `gh auth
+status --json hosts`, `~/.ssh/config` (with `Include`), the keys in `~/.ssh`,
+the global git identity and `includeIf` files, and clones under `~/src`,
+`~/code`, `~/projects`, `~/repos`, `~/work`, `~/dev`, `~/git`, `~/go/src` and the
+ghq root; with network access it asks each host which account each key signs in
+as (`ssh -T`, `BatchMode`, strict known_hosts, never adding to it). Defaults come
+from the existing config when there is one, otherwise from detection: the base
+dir and layout that place your own repos where they are (deeper layouts weigh
+more), one account per gh login with its token pinned
+(`gh auth token --hostname H --user U`), its key, and the recommended features.
+
+Answers render into the config with `config.Document`: a YAML tree edit that
+keeps comments and order, sets `base_dir`, `layout` (dropping `path_template`)
+and the feature keys, and upserts by name each account, its provider (same
+name, `account:` set) and one rule per tracked owner (`<account>` for its own
+repos, `<account>/<org>` per organization), removing that provider's rules for
+owners no longer tracked. Before writing it shows the diff and runs the checks
+(`setup.Checker`: tokens, keys, `ssh -T`, a test signature), which `doctor` also
+uses offline. After writing it adopts the chosen clones and installs the agent.
+
+| Flag | Description |
+|---|---|
+| `--yes` | Take the detected and recommended answers without asking |
+| `--answers <file>` | Take the answers from a YAML file (`setup.Answers`) |
+| `--save-answers <file>` | Also write the answers used |
+| `--dry-run` | Show the diff and checks; change nothing |
+| `--offline` | No `ssh -T` or provider API calls |
+
 #### `git-mgr init`
 
 Create a config file with sensible defaults. Interactive prompts for base_dir, provider instances, first discovery rule.

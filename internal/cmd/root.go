@@ -21,7 +21,8 @@ type CLI struct {
 
 	// Commands
 	Version    VersionCmd    `cmd:"" help:"Print version information."`
-	Init       InitCmd       `cmd:"" help:"Create a config file with sensible defaults."`
+	Setup      SetupCmd      `cmd:"" help:"Set up git-mgr, or change your setup: accounts, layout, what to track, features."`
+	Init       InitCmd       `cmd:"" help:"Create a config file with sensible defaults, without asking."`
 	Bootstrap  BootstrapCmd  `cmd:"" help:"Set up a fresh machine: init, doctor, discover, sync, install agent."`
 	Discover   DiscoverCmd   `cmd:"" help:"Discover repos from configured providers."`
 	Sync       SyncCmd       `cmd:"" help:"Fetch all tracked repos and backup uncommitted changes."`

@@ -4,6 +4,10 @@
 # Where to clone repos. Supports ~ expansion.
 base_dir: "~/repos"
 
+# Layout under base_dir, by name: owner/name, host/owner/name or name.
+# Set this or path_template, not both.
+# layout: "owner/name"
+
 # Directory template under base_dir. Available fields:
 #   {{.Host}}     - github.com, gitlab.com, ghes.company.com
 #   {{.Owner}}    - user or org name

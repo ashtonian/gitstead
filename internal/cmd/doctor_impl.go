@@ -7,9 +7,8 @@ import (
 	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
+	"github.com/ashtonian/git-mgr/internal/setup"
 )
 
 // DoctorCmd diagnoses the health of the git-mgr setup: tooling, auth, config,
@@ -61,27 +60,18 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 		d.info("base_dir will be created on first clone: " + cfg.BaseDir)
 	}
 
-	// --- Auth: provider API tokens and configured SSH keys ---
-	for _, p := range cfg.Providers {
-		switch tok, terr := discovery.ResolveToken(p); {
-		case terr != nil:
-			d.fail(terr.Error())
-		case tok == "":
-			d.warn(fmt.Sprintf("provider %q: no API token (set token_command, token_env, or token); only public repos are visible", p.Name))
+	// --- Auth: provider tokens, SSH keys, signing (offline) ---
+	for _, c := range (setup.Checker{}).Check(ctx.GoCtx(), cfg) {
+		switch c.Status {
+		case setup.Pass:
+			d.ok(c.Message)
+		case setup.Info:
+			d.info(c.Message)
+		case setup.Warn:
+			d.warn(c.Message)
 		default:
-			d.ok(fmt.Sprintf("provider %q: API token resolved", p.Name))
+			d.fail(c.Message)
 		}
-	}
-	keys := configuredSSHKeys(cfg)
-	for _, k := range keys {
-		if fileExists(k.path) {
-			d.ok(fmt.Sprintf("%s: ssh_key present (%s)", k.where, k.path))
-		} else {
-			d.fail(fmt.Sprintf("%s: ssh_key not found (%s)", k.where, k.path))
-		}
-	}
-	if len(keys) == 0 {
-		d.info("no ssh_key configured; SSH clones use your default agent/keys (~/.ssh)")
 	}
 
 	// --- Accounts: identity and what each covers ---
@@ -101,16 +91,6 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 			d.warn(msg + " -- check its hosts and owners")
 		} else {
 			d.ok(msg)
-		}
-		switch a.Signing.Mode {
-		case "required":
-			if serr := gitops.TestSign(ctx.GoCtx(), reconcile.AccountConfig(&a)); serr != nil {
-				d.fail(fmt.Sprintf("account %q: signing is required but a test signature failed: %v", a.Name, serr))
-			} else {
-				d.ok(fmt.Sprintf("account %q: signs commits and tags (%s) without a terminal", a.Name, a.Signing.SigningFormat()))
-			}
-		case "off":
-			d.ok(fmt.Sprintf("account %q: signing turned off in its repos", a.Name))
 		}
 	}
 
@@ -161,34 +141,6 @@ func dirWritable(dir string) bool {
 	f.Close()
 	os.Remove(name)
 	return true
-}
-
-type sshKeyRef struct{ where, path string }
-
-// configuredSSHKeys lists every ssh_key config sets, once per place.
-func configuredSSHKeys(cfg *config.Config) []sshKeyRef {
-	var keys []sshKeyRef
-	add := func(where, key string) {
-		if key != "" {
-			keys = append(keys, sshKeyRef{where, config.ExpandHome(key)})
-		}
-	}
-	for _, a := range cfg.Accounts {
-		add(fmt.Sprintf("account %q", a.Name), a.SSHKey)
-	}
-	for _, p := range cfg.Providers {
-		add(fmt.Sprintf("provider %q", p.Name), p.SSHKey)
-	}
-	for _, r := range cfg.Discovery {
-		add(fmt.Sprintf("rule %q", r.Name), r.SSHKey)
-	}
-	for _, mr := range cfg.Repos {
-		add("repos entry "+mr.URL, mr.SSHKey)
-	}
-	for _, o := range cfg.Overrides {
-		add(fmt.Sprintf("override %v", o.Repos), o.SSHKey)
-	}
-	return keys
 }
 
 func orInherited(v string) string {

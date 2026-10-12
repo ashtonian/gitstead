@@ -151,6 +151,9 @@ func Load(path string, opts ...Option) (*Config, error) {
 // normalize applies git-mgr's post-load fixups: ~ expansion, BaseDir cleaning,
 // trailing-slash trimming on provider URLs, and the PatchDir default.
 func normalize(cfg *Config) {
+	if t, ok := Layouts[cfg.Layout]; ok {
+		cfg.PathTemplate = t
+	}
 	expandPaths(cfg)
 	cfg.BaseDir = filepath.Clean(cfg.BaseDir)
 	for i := range cfg.Providers {
