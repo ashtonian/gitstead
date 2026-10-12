@@ -74,10 +74,13 @@ func TestConfigDrivenLifecycle(t *testing.T) {
 		t.Errorf("expected exactly 1 member to commit, got %d", committed)
 	}
 
-	workgroup.Remove(ctx, spec, true)
+	archiveDir := t.TempDir()
 	for _, m := range spec.Members {
+		if _, err := workgroup.RemoveMember(ctx, spec, m, archiveDir, false); err != nil {
+			t.Fatalf("RemoveMember(%s): %v", m.Name, err)
+		}
 		if gitops.HasGitDir(m.Path) {
-			t.Errorf("member %s should be gone after Remove", m.Name)
+			t.Errorf("member %s should be gone after RemoveMember", m.Name)
 		}
 	}
 }

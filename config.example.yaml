@@ -255,6 +255,14 @@ backup:
   # Default: ~/.local/share/git-mgr/patches/
   patch_dir: ""
 
+  # Before git-mgr deletes a clone or worktree (wg rm --delete, wg prune,
+  # remove --delete, stale cleanup), any unique work -- uncommitted changes,
+  # untracked files, stashes, unpushed commits -- is saved here as a verified
+  # git bundle with a .json file describing how to restore it. If that fails,
+  # nothing is deleted.
+  # Default: ~/.local/share/git-mgr/archive/
+  archive_dir: ""
+
   # Also push uncommitted tracked changes to a recoverable branch
   # (refs/heads/git-mgr/wip/<branch>) on push_remote. Unlike the hidden
   # stash-ref backup, this is a normal branch visible in the remote's UI, so

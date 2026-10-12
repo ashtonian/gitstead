@@ -537,28 +537,15 @@ func (c *WGRemoveCmd) Run(ctx *Context) error {
 		spec = s
 	}
 
-	// Safety: never silently destroy uncommitted work. Unless --force, find any
-	// dirty/untracked/mid-operation member (read-only) so the prompt warns, and
-	// back each one up before the worktree is torn down.
-	var unsafe []workgroup.MemberHealth
-	if !c.Force {
-		for _, m := range workgroup.ComputeHealth(ctx.GoCtx(), spec).Members {
-			if m.Dirty || m.Untracked || m.Stuck != "" {
-				unsafe = append(unsafe, m)
+	if !c.Yes {
+		action := "forget"
+		if c.Delete {
+			action = "delete"
+			if c.Force {
+				action = "delete, discarding unique work in,"
 			}
 		}
-	}
-
-	if !c.Yes {
-		extra := ""
-		if c.Delete {
-			extra = " and delete files"
-		}
-		warn := ""
-		if len(unsafe) > 0 {
-			warn = fmt.Sprintf(" [%d member(s) have uncommitted work, will be backed up first]", len(unsafe))
-		}
-		fmt.Printf("Remove workgroup %q (%d members)%s%s? (y/n): ", c.Name, len(spec.Members), extra, warn)
+		fmt.Printf("Remove workgroup %q: %s %d members? (y/n): ", c.Name, action, len(spec.Members))
 		var answer string
 		fmt.Scanln(&answer)
 		if answer != "y" && answer != "Y" {
@@ -567,36 +554,50 @@ func (c *WGRemoveCmd) Run(ctx *Context) error {
 		}
 	}
 
-	// Capture WIP before anything is removed; abort if a backup fails so work is
-	// never lost (the user can pass --force to discard deliberately).
-	if len(unsafe) > 0 {
-		cfg, cerr := ctx.LoadConfig()
-		if cerr != nil {
-			return cerr
-		}
-		for _, m := range unsafe {
-			repoCfg := cfg.ResolveForRepo(m.RepoKey)
-			bcfg := backupConfigFor(cfg, repoCfg, m.RepoKey, "", c.PushBranch, "")
-			br, berr := gitops.Backup(ctx.GoCtx(), m.Path, bcfg)
-			if berr != nil {
-				return fmt.Errorf("refusing to remove %q: backup of member %q failed (use --force to discard): %w", c.Name, m.Name, berr)
-			}
-			if !ctx.Quiet {
-				where := br.RefName
-				if where == "" {
-					where = "patch"
-				}
-				if br.PushedBranch != "" {
-					where += " + " + br.PushedBranch
-				}
-				fmt.Printf("  safety backup: %s (%s)\n", m.Name, where)
-			}
-		}
+	if !c.Delete {
+		delete(st.Workgroups, c.Name)
+		logEvent(ctx, "wg_remove", c.Name, "forgot; files kept")
+		return st.Save()
 	}
 
-	for _, a := range workgroup.Remove(ctx.GoCtx(), spec, c.Delete) {
-		fmt.Printf("  %s\n", a)
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return err
 	}
+	var removed []workgroup.Member
+	for _, m := range spec.Members {
+		if c.PushBranch && !c.Force {
+			repoCfg := cfg.ResolveForRepo(m.RepoKey)
+			bcfg := backupConfigFor(cfg, repoCfg, m.RepoKey, "", c.PushBranch, "")
+			if _, berr := gitops.Backup(ctx.GoCtx(), m.Path, bcfg); berr != nil {
+				fmt.Fprintf(os.Stderr, "  %s: kept, pushing backup branch failed: %v\n", m.Name, berr)
+				continue
+			}
+		}
+		archived, rerr := workgroup.RemoveMember(ctx.GoCtx(), spec, m, cfg.Backup.ArchiveDir, c.Force)
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "  %s: kept: %v\n", m.Name, rerr)
+			continue
+		}
+		removed = append(removed, m)
+		if !ctx.Quiet {
+			if archived != "" {
+				fmt.Printf("  %s: removed, unique work archived to %s\n", m.Name, archived)
+			} else {
+				fmt.Printf("  %s: removed\n", m.Name)
+			}
+		}
+	}
+	if kept := len(spec.Members) - len(removed); kept > 0 {
+		if ws, ok := st.Workgroups[c.Name]; ok {
+			ws.Members = dropMembers(ws.Members, removed)
+		}
+		if serr := st.Save(); serr != nil {
+			return serr
+		}
+		return fmt.Errorf("workgroup %q: %d of %d members could not be removed and are still tracked", c.Name, kept, len(spec.Members))
+	}
+	workgroup.RemoveEmptyRoot(spec)
 	delete(st.Workgroups, c.Name)
 	logEvent(ctx, "wg_remove", c.Name, "")
 	return st.Save()

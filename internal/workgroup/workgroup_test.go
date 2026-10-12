@@ -62,9 +62,14 @@ func TestEnsureWorktreeSpec(t *testing.T) {
 		}
 	}
 
-	workgroup.Remove(context.Background(), spec, true)
+	archiveDir := t.TempDir()
+	for _, m := range spec.Members {
+		if _, err := workgroup.RemoveMember(context.Background(), spec, m, archiveDir, false); err != nil {
+			t.Fatalf("RemoveMember(%s): %v", m.Name, err)
+		}
+	}
 	if _, err := os.Stat(spec.Members[0].Path); !os.IsNotExist(err) {
-		t.Errorf("member dir should be gone after Remove")
+		t.Errorf("member dir should be gone after RemoveMember")
 	}
 }
 
