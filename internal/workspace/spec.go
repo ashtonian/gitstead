@@ -117,7 +117,7 @@ func Resolve(cfg *config.Config, st *state.State, decl config.Workspace) (*Spec,
 	spec := &Spec{Name: w.Name, Dir: w.Dir(), Isolation: w.Isolation, BaseRef: w.BaseRef, Declared: true}
 
 	if w.Path != "" {
-		spec.Folder = w.Path
+		spec.Folder, spec.Dir = w.Path, w.Path
 		for _, a := range agents {
 			spec.Replicas = append(spec.Replicas, Replica{Agent: a, Path: w.Path})
 		}
@@ -128,8 +128,9 @@ func Resolve(cfg *config.Config, st *state.State, decl config.Workspace) (*Spec,
 		return nil, err
 	}
 	if spec.Shared() {
+		spec.Dir = st.Repos[keys[0]].LocalPath
 		for _, a := range agents {
-			spec.Replicas = append(spec.Replicas, Replica{Agent: a, Path: st.Repos[keys[0]].LocalPath})
+			spec.Replicas = append(spec.Replicas, Replica{Agent: a, Path: spec.Dir})
 		}
 		return spec, nil
 	}

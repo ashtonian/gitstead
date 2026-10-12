@@ -13,8 +13,8 @@ import (
 // field's json tag mirrors its yaml tag.
 type WorkspaceState struct {
 	Name string `yaml:"name" json:"name"`
-	// Dir is the workspace's directory; replicas are made inside it, except
-	// with shared isolation, where every agent works in the shared folder.
+	// Dir is the workspace's directory, which replicas are made in; with
+	// shared isolation, the folder every agent works in.
 	Dir string `yaml:"dir" json:"dir"`
 	// Isolation is how replicas were made: worktree, clone, reference-clone
 	// or shared.
@@ -38,6 +38,23 @@ type ReplicaState struct {
 	// several, the shared folder with shared isolation.
 	Path   string      `yaml:"path" json:"path"`
 	Copies []CopyState `yaml:"copies,omitempty" json:"copies,omitempty"`
+	// Run is the agent's latest run here; nil before its first. Whether it
+	// is running now is its lease's to say, not this record's.
+	Run *RunState `yaml:"run,omitempty" json:"run,omitempty"`
+}
+
+// RunState is an agent's latest run in its replica.
+type RunState struct {
+	Profile  string    `yaml:"profile,omitempty"  json:"profile,omitempty"`
+	Command  string    `yaml:"command"            json:"command"`
+	PID      int       `yaml:"pid"                json:"pid"`
+	Launcher string    `yaml:"launcher,omitempty" json:"launcher,omitempty"`
+	Session  string    `yaml:"session,omitempty"  json:"session,omitempty"`
+	Started  time.Time `yaml:"started"            json:"started"`
+	// StopRequested is when `ws stop` asked it to end.
+	StopRequested time.Time `yaml:"stop_requested,omitempty" json:"stop_requested,omitzero"`
+	Ended         time.Time `yaml:"ended,omitempty"          json:"ended,omitzero"`
+	ExitCode      int       `yaml:"exit_code"                json:"exit_code"`
 }
 
 // CopyState is one checkout of a repo in a replica.

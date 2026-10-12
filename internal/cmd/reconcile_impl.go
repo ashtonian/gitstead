@@ -120,6 +120,7 @@ func reconcileEnv(cfg *config.Config, st *state.State) *reconcile.Env {
 		Update:       stateUpdater(cfg, st),
 		Concurrency:  cfg.Concurrency,
 		ArchiveDir:   cfg.Backup.ArchiveDir,
+		StateDir:     st.Dir(),
 		KeepDirs:     keep,
 		CloneTimeout: cfg.Sync.CloneTimeout,
 	}

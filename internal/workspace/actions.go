@@ -291,6 +291,9 @@ func removeCopy(name, agent, path string) reconcile.RunFunc {
 			if l.Agent != agent || l.Path != path {
 				continue
 			}
+			if err := CheckStopped(env.StateDir, name, agent); err != nil {
+				return reconcile.Outcome{}, err
+			}
 			archived, err := RemoveCopy(ctx, spec.Isolation, l.Copy, env.ArchiveDir, ArchiveName(l), false)
 			if err != nil {
 				return reconcile.Outcome{}, err
@@ -300,6 +303,9 @@ func removeCopy(name, agent, path string) reconcile.RunFunc {
 				Record: dropCopy(name, agent, path),
 				After: func(context.Context) (string, error) {
 					reconcile.RemoveEmptyParents(env, path)
+					if r := env.State.Workspaces[name]; r == nil || r.Replica(agent) == nil {
+						ForgetRuns(env.StateDir, name, agent)
+					}
 					return "", nil
 				},
 			}, nil
@@ -319,6 +325,10 @@ func removeWorkspace(name string) reconcile.RunFunc {
 		var errs []error
 		removed := map[string][]string{}
 		for _, l := range spec.Copies() {
+			if err := CheckStopped(env.StateDir, name, l.Agent); err != nil {
+				errs = append(errs, fmt.Errorf("%s kept: %w", l.Label(spec), err))
+				continue
+			}
 			archived, err := RemoveCopy(ctx, spec.Isolation, l.Copy, env.ArchiveDir, ArchiveName(l), false)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s kept: %w", l.Label(spec), err))
@@ -345,10 +355,11 @@ func removeWorkspace(name string) reconcile.RunFunc {
 				return nil
 			},
 			After: func(context.Context) (string, error) {
-				for _, paths := range removed {
+				for agent, paths := range removed {
 					for _, p := range paths {
 						reconcile.RemoveEmptyParents(env, p)
 					}
+					ForgetRuns(env.StateDir, name, agent)
 				}
 				return "", nil
 			},

@@ -457,7 +457,8 @@ log:
 # --save writes a workspace made from flags back here.
 
 # Agent commands. Each is typed into an interactive shell in the agent's
-# replica, so shell functions and aliases work.
+# replica, so shell functions and aliases work. With none declared, claude and
+# codex are offered when they are on PATH.
 agents: []
   # - name: claude
   #   command: "claude"
@@ -485,6 +486,7 @@ workspace_defaults:
   # existing copies keep theirs.
   branch: "agents/{{.Workspace}}/{{.Agent}}"
   base_ref: ""                      # new branches start here; "" = upstream's default branch
+  agent: ""                         # the profile agents run; "" = the first one
 
 workspaces: []
   # One repo, four agents: ~/workspaces/app/agent-1 .. agent-4.

@@ -33,6 +33,8 @@ type WorkspaceCmd struct {
 	Push     WSPushCmd     `cmd:"" help:"Push every copy."`
 	Exec     WSExecCmd     `cmd:"" help:"Run a command in each copy (after --)."`
 	Open     WSOpenCmd     `cmd:"" help:"Open a tmux session with one pane per agent."`
+	Run      WSRunCmd      `cmd:"" help:"Run an agent in its replica, in this terminal: what each pane of 'ws open' runs."`
+	Stop     WSStopCmd     `cmd:"" help:"End agents' runs, as closing their terminals would."`
 	Backup   WSBackupCmd   `cmd:"" help:"Back up every copy's uncommitted work."`
 	Recover  WSRecoverCmd  `cmd:"" help:"Recover a copy's backed-up work (print, --into or --apply)."`
 	Prune    WSPruneCmd    `cmd:"" help:"Remove copies with no unique work (clean, nothing unpushed); never touches work in progress."`
@@ -57,7 +59,7 @@ type WSCreateCmd struct {
 	Open      bool     `help:"After creating, open a tmux session with one pane per agent."`
 	Agent     string   `help:"With --open, the agent profile each pane runs."`
 	Cmd       string   `help:"With --open, a command each pane runs instead of an agent profile."`
-	NoCheck   bool     `name:"no-check" help:"With --open, skip each pane's 'ws check'."`
+	NoCheck   bool     `name:"no-check" help:"With --open, skip each pane's check of its copies."`
 }
 
 func (c *WSCreateCmd) flags() bool {
@@ -355,6 +357,9 @@ func (c *WSRemoveCmd) Run(ctx *Context) error {
 			return nil
 		})
 		if err == nil {
+			for _, r := range ws.Replicas {
+				workspace.ForgetRuns(st.Dir(), c.Name, r.Agent)
+			}
 			logEvent(ctx, "ws_remove", c.Name, "forgot; files kept")
 		}
 		return err
@@ -370,6 +375,11 @@ func (c *WSRemoveCmd) Run(ctx *Context) error {
 	kept := 0
 	for _, l := range copies {
 		label := l.Label(spec)
+		if err := workspace.CheckStopped(st.Dir(), c.Name, l.Agent); err != nil {
+			kept++
+			fmt.Fprintf(os.Stderr, "  %s: kept: %v\n", label, err)
+			continue
+		}
 		if c.Offsite && !c.Force && gitops.HasGitDir(l.Path) {
 			if cs := st.CopyAt(c.Name, l.Agent, l.Path); cs != nil {
 				job := copyJobFor(cfg, st, ws, l.Agent, *cs, true)
@@ -412,10 +422,11 @@ func (c *WSRemoveCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	for _, paths := range removed {
+	for agent, paths := range removed {
 		for _, p := range paths {
 			reconcile.RemoveEmptyParents(reconcileEnv(cfg, st), p)
 		}
+		workspace.ForgetRuns(st.Dir(), c.Name, agent)
 	}
 	if kept > 0 {
 		return outcome(kept, len(copies), "copies of %q could not be removed and are still recorded", c.Name)
