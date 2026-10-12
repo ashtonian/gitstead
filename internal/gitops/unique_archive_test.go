@@ -239,6 +239,20 @@ func TestRemoveClone_UninspectableIsKept(t *testing.T) {
 
 // Removing a worktree keeps its branch in the source repo and archives only
 // the working tree.
+func TestRemoveClone_AlreadyGoneIsRemoved(t *testing.T) {
+	gone := filepath.Join(t.TempDir(), "a", "b", "gone")
+	bundle, err := gitops.RemoveClone(context.Background(), gone, t.TempDir(), "x", false)
+	if err != nil || bundle != "" {
+		t.Fatalf("a clone already gone counts as removed: bundle=%q err=%v", bundle, err)
+	}
+}
+
+func TestRemoveClone_RefusesRelativePath(t *testing.T) {
+	if _, err := gitops.RemoveClone(context.Background(), "repo", t.TempDir(), "x", false); err == nil {
+		t.Fatal("RemoveClone must refuse a relative path")
+	}
+}
+
 func TestRemoveWorktree_KeepsBranchAndArchivesWorkingTree(t *testing.T) {
 	ctx := context.Background()
 	_, source := remoteAndClone(t)

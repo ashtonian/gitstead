@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"context"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/discovery"
+	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/oplog"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
@@ -75,5 +78,22 @@ func addRepoToState(st *state.State, repo discovery.Repo, localPath, cloneURL st
 		Status:         "clean",
 		FirstSeen:      now,
 		LastDiscovered: now,
+	}
+}
+
+// archivingRemover deletes stale clones through gitops.RemoveClone: unique work
+// is bundled into archiveDir first, and a clone that can't be inspected or
+// archived is kept.
+func archivingRemover(ctx context.Context, log *slog.Logger, archiveDir string) discovery.RemoveFunc {
+	return func(key string, repo *state.RepoState) error {
+		archived, err := gitops.RemoveClone(ctx, repo.LocalPath, archiveDir, key, false)
+		if err != nil {
+			log.Warn("stale repo kept", "repo", key, "path", repo.LocalPath, "error", err)
+			return err
+		}
+		if archived != "" {
+			log.Info("archived stale repo's unique work before deleting it", "repo", key, "archive", archived)
+		}
+		return nil
 	}
 }

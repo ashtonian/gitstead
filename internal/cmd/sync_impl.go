@@ -102,7 +102,8 @@ func (c *SyncCmd) Run(ctx *Context) error {
 				for k := range discovered {
 					discoveredKeys[k] = true
 				}
-				outcome := discovery.DetectStale(st, discoveredKeys, discovery.StaleScopeOf(results, "", c.Tag), cfg.Cleanup, true)
+				outcome := discovery.DetectStale(st, discoveredKeys, discovery.StaleScopeOf(results, "", c.Tag), cfg.Cleanup, true,
+					archivingRemover(ctx.GoCtx(), log, cfg.Backup.ArchiveDir))
 				if outcome.Reaped > 0 {
 					log.Info("cleaned up stale repos", "count", outcome.Reaped, "policy", cfg.Cleanup.Policy)
 				}

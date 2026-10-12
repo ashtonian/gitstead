@@ -222,6 +222,8 @@ cleanup:
   #   mark_stale       - Set status to "stale" (visible in `git-mgr status --stale`)
   #   remove           - Remove from state after grace_period (keep files on disk)
   #   remove_and_delete - Remove from state AND delete from disk after grace_period
+  #                       (unique work is archived to backup.archive_dir first;
+  #                       a repo that can't be archived is kept and stays tracked)
   #   ignore           - Never mark stale. Manual cleanup only.
   policy: "mark_stale"
 

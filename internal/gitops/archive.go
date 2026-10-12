@@ -1,9 +1,12 @@
 package gitops
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -120,11 +123,14 @@ func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope
 		Restore: fmt.Sprintf("git clone <remote> restored && cd restored && git fetch %s '+refs/*:refs/restored/*'", bundle),
 	}
 	meta.Branch, _ = Git(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
-	data, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
+	var data bytes.Buffer
+	enc := json.NewEncoder(&data)
+	enc.SetEscapeHTML(false) // keep the restore command copy-pasteable
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(meta); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(strings.TrimSuffix(bundle, ".bundle")+".json", data, 0o600); err != nil {
+	if err := os.WriteFile(strings.TrimSuffix(bundle, ".bundle")+".json", data.Bytes(), 0o600); err != nil {
 		return "", fmt.Errorf("writing archive metadata: %w", err)
 	}
 	return bundle, nil
@@ -133,8 +139,15 @@ func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope
 // RemoveClone deletes the clone at repoPath. Unless discard is set it first
 // archives the clone's unique work into archiveDir; if that work cannot be
 // inspected or archived the clone is left in place and an error is returned.
-// It returns the archive path, or "" when there was nothing to save.
+// A clone already gone from disk counts as removed. It returns the archive
+// path, or "" when there was nothing to save.
 func RemoveClone(ctx context.Context, repoPath, archiveDir, name string, discard bool) (string, error) {
+	if !filepath.IsAbs(repoPath) {
+		return "", fmt.Errorf("refusing to remove clone at non-absolute path %q", repoPath)
+	}
+	if _, err := os.Lstat(repoPath); errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
 	var archived string
 	if !discard {
 		var err error

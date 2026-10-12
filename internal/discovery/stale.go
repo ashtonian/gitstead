@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/pathutil"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
@@ -15,6 +14,10 @@ type CleanupResult struct {
 	Reaped     int // repos removed from tracking (apply only)
 	Failed     int // repos whose on-disk deletion failed (apply only); left tracked
 }
+
+// RemoveFunc deletes a stale repo's files. When it cannot do so without
+// losing work it must leave them in place and return an error.
+type RemoveFunc func(key string, repo *state.RepoState) error
 
 // StaleScope is the set of tracked repos a discovery pass is entitled to judge. A
 // repo absent from a pass's results only means something if the pass ran the
@@ -48,15 +51,15 @@ func (s StaleScope) Covers(repo *state.RepoState) bool {
 // DetectStale marks repos within scope that this pass no longer found as stale.
 // Repos outside scope are left untouched. When apply is true it also enforces
 // cleanup.Policy on stale repos past the grace period: "remove" untracks them,
-// "remove_and_delete" additionally deletes the working tree via the shared
-// pathutil.SafeRemoveAll guard.
+// "remove_and_delete" deletes their files through remove first and untracks
+// only those it deleted.
 //
 // When apply is false it is strictly non-destructive: it marks repos stale
 // in-memory (the caller decides whether to persist) and only *counts* what would
 // be reaped (Reapable), never touching disk or tracking. This is what makes a
 // preview such as `discover` without --apply safe -- enforcement happens only on
 // the explicit, lock-held apply paths (`discover --apply`, scheduled `sync`).
-func DetectStale(st *state.State, discovered map[string]bool, scope StaleScope, cleanup config.CleanupConfig, apply bool) CleanupResult {
+func DetectStale(st *state.State, discovered map[string]bool, scope StaleScope, cleanup config.CleanupConfig, apply bool, remove RemoveFunc) CleanupResult {
 	var res CleanupResult
 	now := time.Now()
 	reaps := cleanup.Policy == "remove" || cleanup.Policy == "remove_and_delete"
@@ -102,9 +105,10 @@ func DetectStale(st *state.State, discovered map[string]bool, scope StaleScope, 
 		}
 
 		if cleanup.Policy == "remove_and_delete" {
-			if err := pathutil.SafeRemoveAll(repo.LocalPath); err != nil {
+			if err := remove(key, repo); err != nil {
 				// Leave it tracked so the failure stays visible and is retried
 				// next run rather than silently orphaning the directory.
+				repo.Error = "stale cleanup kept the files: " + err.Error()
 				res.Failed++
 				continue
 			}

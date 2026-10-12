@@ -87,7 +87,7 @@ sync → agent), so on a gh-authed machine it's a true one-liner.
 | `git-mgr doctor` | Diagnose tooling, auth (tokens/SSH keys), config, and repo-on-disk health. `--fix` for safe repairs. |
 | `git-mgr clone <url>` | Clone and track a single repo by SSH URL. `--tag`, `--path`. |
 | `git-mgr adopt <path>` | Import an existing clone. `--scan` for batch, `--dry-run`, `--tag`. |
-| `git-mgr remove <pattern>` | Stop tracking repos. `--tag`/`--set`, `--delete` to also remove from disk, `--yes`. |
+| `git-mgr remove <pattern>` | Stop tracking repos. `--tag`/`--set`, `--yes`. `--delete` also removes the clone from disk after archiving its unique work (see [Deleting without losing work](#deleting-without-losing-work)). |
 | `git-mgr run -- <cmd>` | Run a command in each matching repo (parallel). `--repos`/`--tag`/`--set`, `--fail-fast`. |
 | `git-mgr manifest export\|import` | Portable `{url,tags,path}` manifest to rehydrate the repo set on a new machine. |
 | `git-mgr remote-sync` | Push backup refs to remotes. `--repos`, `--tag`, `--dry-run`. |
@@ -319,6 +319,32 @@ git-mgr backup --push-branch --repos "*/my-repo"   # local backup + push WIP to 
 git-mgr sync --push-branch                          # same, as part of the periodic sync
 ```
 
+### Deleting without losing work
+
+Every command that deletes a clone or worktree — `remove --delete`,
+`wg rm --delete`, `wg prune` and the `remove_and_delete` stale-cleanup policy —
+first inspects it for work that exists nowhere else: changed or untracked files,
+stashes, commits no remote has, commits on a detached HEAD and an unfinished
+rebase or merge. If there is any, it is written to one git bundle in
+`backup.archive_dir` (default `~/.local/share/git-mgr/archive/`) and verified with
+`git bundle verify` before anything is deleted. For a worktree, its branches stay
+in the source repo, so only the working tree and detached commits are archived.
+If git-mgr can't inspect the repo or write the bundle, nothing is deleted and the
+repo stays tracked.
+
+Each bundle has a `.json` file beside it recording the source path, remotes,
+branch, what was saved and the restore command:
+
+```bash
+git clone <remote> restored && cd restored
+git fetch ~/.local/share/git-mgr/archive/<name>-<time>.bundle '+refs/*:refs/restored/*'
+git for-each-ref refs/restored   # heads/*, git-mgr/archive/<id>/{head,worktree,stash-N}
+```
+
+The `worktree` ref is a commit of the working tree including untracked files;
+`git checkout <ref> -- .` brings them back. Archives are never pruned
+automatically.
+
 ## Workgroups
 
 A *workgroup* is a parent directory of N working directories operated on as a
@@ -375,10 +401,10 @@ and `wg backup` (plus the scheduled `sync`) keeps every member's WIP safe.
 | `open <name>` | Build/attach a tmux session, one pane per member. `--cmd <command>` (or `--agent <name>` from config) runs it per pane; `--no-check`, `--print`, `--recreate`, `--no-attach`. |
 | `check <name>` | Assert health; non-zero exit on drift. |
 | `backup <name>` / `recover <name>` | Back up / restore each member's WIP (`--push-branch`; `recover --into`/`--apply`). |
-| `prune <name>` | Reap members with no unique work (clean + merged); never touches dirty WIP. `--dry-run`, `--all`. |
+| `prune <name>` | Delete members with no unique work: clean, no stash, nothing unpushed, verified by a full inspection; anything it can't inspect is kept. `--dry-run`, `--all`. |
 | `ls` / `status <name>` | List workgroups / show member status (`--json`). |
 | `overview` | Member health across all workgroups — the fleet supervisor view (`--json`). |
-| `rm <name>` | Tear down (backs up dirty members first unless `--force`). |
+| `rm <name>` | Forget the workgroup and leave its files. `--delete` also removes each member after archiving its unique work; `--force` discards that work instead; `--push-branch` pushes WIP first. Members that can't be removed stay tracked and the command exits non-zero. |
 | `adopt <name>` | Import an existing directory of working trees. |
 
 ## Running on a schedule
