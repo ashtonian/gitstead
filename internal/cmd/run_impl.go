@@ -11,7 +11,7 @@ import (
 
 // Run executes the given command in each matching tracked repo's directory,
 // concurrently (bounded by concurrency), and prints per-repo output. It is the
-// managed-repo counterpart to `wg exec`. Output is buffered per repo and printed
+// managed-repo counterpart to `ws exec`. Output is buffered per repo and printed
 // in a stable order so concurrent runs stay readable.
 func (c *RunCmd) Run(ctx *Context) error {
 	if len(c.Command) == 0 {

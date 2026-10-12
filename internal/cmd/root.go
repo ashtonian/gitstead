@@ -27,7 +27,7 @@ type CLI struct {
 	Discover   DiscoverCmd   `cmd:"" help:"Discover repos from configured providers."`
 	Sync       SyncCmd       `cmd:"" help:"Fetch all tracked repos and backup uncommitted changes."`
 	Plan       PlanCmd       `cmd:"" help:"Show what applying config would change, without changing anything."`
-	Apply      ApplyCmd      `cmd:"" help:"Make repos and workgroups match config, including moves and removals."`
+	Apply      ApplyCmd      `cmd:"" help:"Make repos and workspaces match config, including moves and removals."`
 	Backup     BackupCmd     `cmd:"" help:"Backup uncommitted changes."`
 	Restore    RestoreCmd    `cmd:"" help:"Restore a backup (print steps, apply, or --into a scratch dir)."`
 	Status     StatusCmd     `cmd:"" help:"Show state of all managed repos."`
@@ -41,7 +41,7 @@ type CLI struct {
 	ConfigShow ConfigCmd     `cmd:"" name:"config" help:"Print resolved configuration."`
 	Report     ReportCmd     `cmd:"" help:"Summarize recent activity from the operation log."`
 	Log        LogCmd        `cmd:"" help:"Print recent operation-log events."`
-	Workgroup  WorkgroupCmd  `cmd:"" aliases:"wg" help:"Manage workgroups: parallel worktrees or multi-repo bundles."`
+	Workspace  WorkspaceCmd  `cmd:"" aliases:"ws,wg" help:"Manage workspaces: repos worked on by several agents, each in a copy of its own."`
 
 	InstallAgent       InstallAgentCmd              `cmd:"" name:"install-agent" help:"Install/remove a periodic sync agent (launchd/systemd/cron)."`
 	InstallCompletions kongplete.InstallCompletions `cmd:"" name:"install-completions" help:"Output a shell completion script (bash/zsh/fish)."`
@@ -94,6 +94,12 @@ func (c *Context) LoadConfig() (*config.Config, error) {
 	}
 	c.cfg = cfg
 	return cfg, nil
+}
+
+// ReloadConfig loads the config file again, after a command changed it.
+func (c *Context) ReloadConfig() (*config.Config, error) {
+	c.cfg = nil
+	return c.LoadConfig()
 }
 
 // LoadState loads the state file, creating it if it doesn't exist.

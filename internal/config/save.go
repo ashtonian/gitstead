@@ -8,31 +8,31 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ErrWorkgroupExists is returned by SaveWorkgroup when the named workgroup is
-// already present in the config file and overwrite was not requested.
-var ErrWorkgroupExists = errors.New("workgroup already declared in config")
+// ErrWorkspaceExists is returned by SaveWorkspace when the named workspace is
+// already declared in the config file and overwrite was not requested.
+var ErrWorkspaceExists = errors.New("workspace already declared in config")
 
-// SaveWorkgroup appends wg to the `workgroups:` sequence in the config file at
+// SaveWorkspace appends w to the `workspaces:` sequence in the config file at
 // path, preserving existing content and comments via a yaml.Node round-trip. If
-// a workgroup with the same name already exists it returns ErrWorkgroupExists
+// a workspace with the same name already exists it returns ErrWorkspaceExists
 // unless overwrite is true, in which case the existing entry is replaced.
 //
 // When the config file does not exist it is created holding just the
-// workgroup. The written file is re-loaded and validated before returning, so
+// workspace. The written file is re-loaded and validated before returning, so
 // a successful call never leaves an invalid config.
-func SaveWorkgroup(path string, wg Workgroup, overwrite bool) error {
+func SaveWorkspace(path string, w Workspace, overwrite bool) error {
 	doc, err := OpenDocument(path)
 	if err != nil {
 		return err
 	}
-	if doc.Has("workgroups", Named(wg.Name)) && !overwrite {
-		return fmt.Errorf("%w: %q (use --force to overwrite)", ErrWorkgroupExists, wg.Name)
+	if doc.Has("workspaces", Named(w.Name)) && !overwrite {
+		return fmt.Errorf("%w: %q (use --force to overwrite)", ErrWorkspaceExists, w.Name)
 	}
-	if err := doc.Upsert("workgroups", Named(wg.Name), wg); err != nil {
+	if err := doc.Upsert("workspaces", Named(w.Name), w); err != nil {
 		return err
 	}
 	if err := doc.Save(); err != nil {
-		return fmt.Errorf("saving workgroup: %w", err)
+		return fmt.Errorf("saving workspace: %w", err)
 	}
 	return nil
 }

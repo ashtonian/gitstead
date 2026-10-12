@@ -2,6 +2,7 @@ package gitops_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -63,5 +64,29 @@ func TestUpstream_None(t *testing.T) {
 	repo := setupTestRepo(t)
 	if up := gitops.Upstream(context.Background(), repo); up != "" {
 		t.Errorf("expected no upstream for a fresh repo, got %q", up)
+	}
+}
+
+func TestRemoveClone_KeepsAcloneWithWorktrees(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	wt := filepath.Join(t.TempDir(), "agent-1")
+	if err := gitops.WorktreeAdd(ctx, repo, wt, "agent-1", ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err := gitops.RemoveClone(ctx, repo, t.TempDir(), "repo", true)
+	if !errors.Is(err, gitops.ErrHasWorktrees) {
+		t.Fatalf("RemoveClone = %v, want ErrHasWorktrees even when discarding", err)
+	}
+	if !gitops.HasGitDir(repo) || !gitops.HasGitDir(wt) {
+		t.Fatal("the clone or its worktree was removed")
+	}
+
+	// Once its worktree is gone, it can be removed.
+	if err := gitops.WorktreeRemove(ctx, repo, wt, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitops.RemoveClone(ctx, repo, t.TempDir(), "repo", true); err != nil {
+		t.Fatalf("RemoveClone without worktrees = %v", err)
 	}
 }

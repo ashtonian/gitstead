@@ -101,7 +101,8 @@ func TestLoad_RejectsUnknownKeys(t *testing.T) {
 		{"backup:\n  max_per_repo: 10\n", `"backup.max_per_repo" is not a setting (did you mean "max_per_copy"?)`},
 		// Every unknown key is named, not just the first.
 		{"backup:\n  max_per_repo: 10\n  push_branch: false\n", `"backup.push_branch" is not a setting`},
-		{"agents:\n  claude: claude --resume\n", ""}, // a map takes any key
+		{"agents:\n  - name: claude\n    command: claude\n    env: {ANTHROPIC_MODEL: opus}\n", ""}, // a map takes any key
+		{"workgroups: []\n", `"workgroups" is now "workspaces"`},
 		{"accounts:\n  - name: work\n    remote_sync:\n      wip: off\n", ""},
 	}
 	for _, tt := range tests {

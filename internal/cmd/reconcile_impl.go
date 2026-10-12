@@ -13,6 +13,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/reconcile"
 	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/git-mgr/internal/workspace"
 	"golang.org/x/term"
 )
 
@@ -21,7 +22,7 @@ type PlanCmd struct {
 	JSON bool `help:"Print the plan as JSON."`
 }
 
-// ApplyCmd makes repos and workgroups match config, including moves and
+// ApplyCmd makes repos and workspaces match config, including moves and
 // removals that sync leaves for an explicit run.
 type ApplyCmd struct {
 	Yes bool `help:"Don't ask before moving or removing directories."`
@@ -75,37 +76,43 @@ func (c *ApplyCmd) Run(ctx *Context) error {
 			return nil
 		}
 	}
-	results := reconcile.ApplyPlan(ctx.GoCtx(), cfg, reconcileEnv(cfg, st), plan, scope, reconcile.All)
+	results := workspace.Apply(ctx.GoCtx(), cfg, reconcileEnv(cfg, st), plan, scope, reconcile.All)
 	logResults(ctx, results)
 	printResults(results, resultsSummary)
 	return changesOutcome(results, plan)
 }
 
-// fullPlan discovers and plans every repo and workgroup.
-func fullPlan(ctx *Context, cfg *config.Config, st *state.State) (*reconcile.Plan, reconcile.Scope, error) {
+// fullPlan discovers and plans every repo and workspace.
+func fullPlan(ctx *Context, cfg *config.Config, st *state.State) (*reconcile.Plan, workspace.Scope, error) {
 	results, discovered, err := discovery.RunDiscovery(ctx.GoCtx(), cfg, "", "")
 	if err != nil {
-		return nil, reconcile.Scope{}, err
+		return nil, workspace.Scope{}, err
 	}
 	for _, r := range results {
 		if r.Err != nil {
 			fmt.Fprintf(os.Stderr, "warning: rule %s failed, its repos are left as they are: %v\n", r.Rule, r.Err)
 		}
 	}
-	scope := reconcile.Scope{
-		Discovered: discovered, Rules: discovery.StaleScopeOf(results, "", ""), Repos: true, Workgroups: true,
+	scope := workspace.Scope{
+		Repos:     true,
+		Discovery: reconcile.Scope{Discovered: discovered, Rules: discovery.StaleScopeOf(results, "", "")},
 	}
-	return reconcile.Compute(ctx.GoCtx(), cfg, st, scope), scope, nil
+	return workspace.Compute(ctx.GoCtx(), cfg, st, scope), scope, nil
 }
 
 // reconcileEnv is what plans apply to: st, changed one action at a time under
 // the state lock, so other git-mgr runs keep working while a plan applies.
 // The caller must not hold the state lock itself.
 func reconcileEnv(cfg *config.Config, st *state.State) *reconcile.Env {
-	keep := []string{config.ExpandHome(cfg.BaseDir), config.ExpandHome(cfg.WorkgroupBaseDir)}
+	keep := []string{config.ExpandHome(cfg.BaseDir), cfg.WorkspaceDefaults.Root}
 	for _, o := range cfg.Overrides {
 		if o.BaseDir != "" {
 			keep = append(keep, config.ExpandHome(o.BaseDir))
+		}
+	}
+	for _, w := range cfg.Workspaces {
+		if w.Root != "" {
+			keep = append(keep, w.Root)
 		}
 	}
 	return &reconcile.Env{
@@ -122,14 +129,20 @@ func reconcileEnv(cfg *config.Config, st *state.State) *reconcile.Env {
 // what is left, and returns the failures.
 func applyAuto(ctx *Context, cfg *config.Config, st *state.State, plan *reconcile.Plan, include func(reconcile.Action) bool) []reconcile.Result {
 	results := plan.Apply(ctx.GoCtx(), reconcileEnv(cfg, st), include)
+	reportApplied(ctx, plan, results, include)
+	return results
+}
+
+// reportApplied logs and prints the results of applying what include
+// selects of plan, and what is left.
+func reportApplied(ctx *Context, plan *reconcile.Plan, results []reconcile.Result, include func(reconcile.Action) bool) {
 	logResults(ctx, results)
 	if ctx.Quiet {
 		printResults(results, resultsQuiet)
-		return results
+		return
 	}
 	printResults(results, resultsEach)
 	printPending(plan, include)
-	return results
 }
 
 // changesOutcome is the outcome of applying a plan: each failed or blocked
@@ -176,8 +189,8 @@ func printPlan(p *reconcile.Plan, auto string) {
 			case auto == "all":
 			case a.Disruptive:
 				line += "   [needs git-mgr apply]"
-			case a.Workgroup():
-				line += "   [git-mgr apply or wg ensure]"
+			case a.Serial:
+				line += "   [git-mgr apply or ws ensure]"
 			case bySync(a):
 				automatic++
 			default:
@@ -285,11 +298,11 @@ func logResults(ctx *Context, results []reconcile.Result) {
 func describeAction(a reconcile.Action) string {
 	symbol := "~"
 	switch a.Kind {
-	case reconcile.KindClone, reconcile.KindAdopt, reconcile.KindCreateWorkgroup, reconcile.KindCreateMember:
+	case reconcile.KindClone, reconcile.KindAdopt, workspace.KindCreateWorkspace, workspace.KindCreateCopy:
 		symbol = "+"
-	case reconcile.KindRemoveMember, reconcile.KindRemoveWorkgroup, reconcile.KindForgetMember:
+	case workspace.KindRemoveCopy, workspace.KindRemoveWorkspace, workspace.KindForgetCopy:
 		symbol = "-"
-	case reconcile.KindMove, reconcile.KindMoveMember:
+	case reconcile.KindMove, workspace.KindMoveCopy:
 		symbol = ">"
 	}
 	line := fmt.Sprintf("  %s %-16s %s", symbol, a.Kind, a.Target)

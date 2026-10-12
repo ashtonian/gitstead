@@ -10,7 +10,7 @@ import (
 )
 
 // Run summarizes operation-log activity over a window: how many clones, backups,
-// removes, and workgroup ops happened, plus aggregate sync totals.
+// removes, and workspace ops happened, plus aggregate sync totals.
 func (c *ReportCmd) Run(ctx *Context) error {
 	since := time.Now().Add(-c.Since)
 	evs, err := oplog.Read(eventsPath(ctx), since)
@@ -48,7 +48,7 @@ func (c *ReportCmd) Run(ctx *Context) error {
 	fmt.Printf("  adopts:           %d\n", counts["adopt"])
 	fmt.Printf("  backups:          %d\n", counts["backup"])
 	fmt.Printf("  removes:          %d\n", counts["remove"])
-	fmt.Printf("  workgroup +/-:    %d / %d\n", counts["wg_create"], counts["wg_remove"])
+	fmt.Printf("  workspaces +/-:   %d / %d\n", counts["ws_create"]+counts["create-workspace"], counts["ws_remove"]+counts["remove-workspace"])
 	fmt.Printf("  sync runs:        %d (fetched %d, backed up %d, failed %d)\n", syncRuns, fetched, backedUp, failed)
 	return nil
 }

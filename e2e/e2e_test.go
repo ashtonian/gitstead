@@ -537,20 +537,19 @@ func gitCmd(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// TestE2E_WGCreateFromFlags drives `wg create` as a one-off from CLI flags (no
-// workgroup declared in config), asserting it materialises N worktrees on
-// namespaced branches without touching config, then that --save persists the
-// synthesized declaration.
-func TestE2E_WGCreateFromFlags(t *testing.T) {
+// TestE2E_WorkspaceFromFlags drives `ws create` as a one-off from CLI flags:
+// it adopts the local repo it names, makes a worktree per agent on the
+// agent's own branch without touching config, --save writes it to config,
+// and `ws rm --delete` removes the copies and leaves the repo.
+func TestE2E_WorkspaceFromFlags(t *testing.T) {
 	env := newLocalEnv(t)
 	tmp := t.TempDir()
 
-	// A local source repo with one commit.
-	src := filepath.Join(tmp, "app")
-	if err := os.MkdirAll(src, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	gitCmd(t, src, "init", "-q")
+	// A local clone of a bare remote, with one commit.
+	remote := filepath.Join(tmp, "remotes", "app.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	src := filepath.Join(tmp, "src", "app")
+	gitCmd(t, tmp, "clone", "-q", remote, src)
 	gitCmd(t, src, "config", "user.email", "e2e@test.local")
 	gitCmd(t, src, "config", "user.name", "e2e")
 	if err := os.WriteFile(filepath.Join(src, "README.md"), []byte("# app"), 0o644); err != nil {
@@ -558,49 +557,50 @@ func TestE2E_WGCreateFromFlags(t *testing.T) {
 	}
 	gitCmd(t, src, "add", ".")
 	gitCmd(t, src, "commit", "-qm", "init")
-	branch := gitCmd(t, src, "rev-parse", "--abbrev-ref", "HEAD")
+	gitCmd(t, src, "push", "-q", "origin", "HEAD:main")
 
-	// Minimal config so workgroup_base_dir is isolated to the temp dir.
-	wgBase := filepath.Join(tmp, "wg")
-	cfg := fmt.Sprintf("base_dir: %s\nworkgroup_base_dir: %s\n", env.baseDir, wgBase)
+	root := filepath.Join(tmp, "workspaces")
+	cfg := fmt.Sprintf("base_dir: %s\nworkspace_defaults:\n  root: %s\n", env.baseDir, root)
 	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	// One-off create: 2 worktrees, nothing in config.
-	out, code := env.run(t, "wg", "create", "scratch", "--source", src, "--count", "2", "--base-ref", branch)
+	out, code := env.run(t, "ws", "create", "scratch", "--repo", src, "--agents", "2")
 	if code != 0 {
-		t.Fatalf("wg create exit %d:\n%s", code, out)
+		t.Fatalf("ws create exit %d:\n%s", code, out)
 	}
-
-	// Two worktrees on namespaced branches (<name>/agent-N) must exist.
 	for i := 1; i <= 2; i++ {
-		member := filepath.Join(wgBase, "scratch", fmt.Sprintf("agent-%d", i))
-		if _, err := os.Stat(filepath.Join(member, ".git")); err != nil {
-			t.Fatalf("expected worktree at %s: %v\n%s", member, err, out)
-		}
-		if got, want := gitCmd(t, member, "rev-parse", "--abbrev-ref", "HEAD"), fmt.Sprintf("scratch/agent-%d", i); got != want {
-			t.Errorf("member %d branch = %q, want %q", i, got, want)
+		copyPath := filepath.Join(root, "scratch", fmt.Sprintf("agent-%d", i))
+		if got, want := gitCmd(t, copyPath, "rev-parse", "--abbrev-ref", "HEAD"), fmt.Sprintf("agents/scratch/agent-%d", i); got != want {
+			t.Errorf("agent-%d is on %q, want %q", i, got, want)
 		}
 	}
-
-	// The one-off must not have modified config.
-	if b, _ := os.ReadFile(env.configFile); strings.Contains(string(b), "name: scratch") {
-		t.Error("one-off create should not modify config without --save")
+	if b, _ := os.ReadFile(env.configFile); strings.Contains(string(b), "scratch") {
+		t.Error("a one-off create should not change config without --save")
+	}
+	if out, code := env.run(t, "ws", "check", "scratch"); code != 0 {
+		t.Errorf("ws check exit %d:\n%s", code, out)
 	}
 
-	// --save persists the synthesized workgroup (create is idempotent, so this
-	// exercises the save-after-materialise path).
-	out, code = env.run(t, "wg", "create", "scratch", "--source", src, "--count", "2", "--base-ref", branch, "--save")
+	// --save writes the workspace to config, which then declares it.
+	out, code = env.run(t, "ws", "create", "scratch", "--repo", src, "--agents", "2", "--save")
 	if code != 0 {
-		t.Fatalf("wg create --save exit %d:\n%s", code, out)
+		t.Fatalf("ws create --save exit %d:\n%s", code, out)
 	}
-	b, err := os.ReadFile(env.configFile)
-	if err != nil {
-		t.Fatal(err)
+	if b, _ := os.ReadFile(env.configFile); !strings.Contains(string(b), "name: scratch") || !strings.Contains(string(b), src) {
+		t.Errorf("--save did not write the workspace:\n%s", b)
 	}
-	if !strings.Contains(string(b), "name: scratch") || !strings.Contains(string(b), "kind: worktree") {
-		t.Errorf("--save did not persist workgroup:\n%s", b)
+
+	// wg stays an alias.
+	out, code = env.run(t, "wg", "rm", "scratch", "--delete", "--yes")
+	if code != 0 {
+		t.Fatalf("ws rm exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "scratch")); !os.IsNotExist(err) {
+		t.Errorf("the workspace's copies should be gone:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(src, ".git")); err != nil {
+		t.Errorf("the repo itself must stay: %v", err)
 	}
 }
 

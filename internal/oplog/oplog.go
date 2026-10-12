@@ -1,5 +1,6 @@
 // Package oplog is a tiny append-only operation log: one JSON line per git-mgr
-// mutation (clone, sync, backup, remove, workgroup create/remove). It exists so
+// mutation (clone, sync, backup, remove, workspace create/remove, each applied
+// config change). It exists so
 // `git-mgr report`/`log` can answer "what did the (often scheduled) tool do
 // lately?" without scraping terminal output. Writing is best-effort and never
 // fails the command that emitted the event.
@@ -25,7 +26,7 @@ const (
 // Event is one logged action.
 type Event struct {
 	Time   time.Time `json:"time"`
-	Action string    `json:"action"` // clone|sync|backup|remove|wg_create|wg_remove
+	Action string    `json:"action"` // clone|sync|backup|remove|ws_create|ws_remove, or an applied change's kind
 	Repo   string    `json:"repo,omitempty"`
 	Detail string    `json:"detail,omitempty"`
 }

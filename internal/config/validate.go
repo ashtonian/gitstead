@@ -82,31 +82,8 @@ func Validate(cfg *Config) error {
 			return fmt.Errorf("repos entry: %w", err)
 		}
 	}
-	for _, wg := range cfg.Workgroups {
-		for _, m := range wg.Members {
-			if err := repourl.CheckNoCredentials(m.Repo); err != nil {
-				return fmt.Errorf("workgroup %q: %w", wg.Name, err)
-			}
-		}
-	}
-
-	// Workgroup cross-field validation
-	wgNames := make(map[string]bool)
-	for _, wg := range cfg.Workgroups {
-		if wgNames[wg.Name] {
-			return fmt.Errorf("duplicate workgroup name: %q", wg.Name)
-		}
-		wgNames[wg.Name] = true
-		switch wg.Kind {
-		case "worktree":
-			if wg.Source == "" {
-				return fmt.Errorf("workgroup %q (worktree) requires 'source'", wg.Name)
-			}
-		case "clone":
-			if wg.FromTag == "" && len(wg.Members) == 0 {
-				return fmt.Errorf("workgroup %q (clone) requires 'members' or 'from_tag'", wg.Name)
-			}
-		}
+	if err := validateWorkspaces(cfg); err != nil {
+		return err
 	}
 
 	return nil

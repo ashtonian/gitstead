@@ -34,7 +34,7 @@ func (sel selection) predicate(cfg *config.Config) (func(key string, repo *state
 		set = s
 	}
 	return func(key string, repo *state.RepoState) bool {
-		if set != nil && !matchesSet(set, key, repo) {
+		if set != nil && !set.Matches(key, repo.HasTag, repo.IsArchived) {
 			return false
 		}
 		if sel.repos != "" {
@@ -63,26 +63,4 @@ func selectRepos(cfg *config.Config, st *state.State, sel selection) ([]string, 
 	}
 	sort.Strings(keys)
 	return keys, nil
-}
-
-// matchesSet reports whether a repo belongs to a set: it must survive
-// ExcludeArchived, then match any Repos glob or any Tag (both empty = all).
-func matchesSet(set *config.RepoSet, key string, repo *state.RepoState) bool {
-	if set.ExcludeArchived && repo.IsArchived {
-		return false
-	}
-	if len(set.Repos) == 0 && len(set.Tags) == 0 {
-		return true
-	}
-	for _, g := range set.Repos {
-		if m, _ := filepath.Match(g, key); m {
-			return true
-		}
-	}
-	for _, t := range set.Tags {
-		if repo.HasTag(t) {
-			return true
-		}
-	}
-	return false
 }

@@ -25,13 +25,25 @@ func IsStaging(name string) bool {
 	return strings.HasPrefix(name, stagingPrefix)
 }
 
-// Clone clones url into destPath, creating parent directories. The clone is
-// made in a staging directory beside destPath and renamed into place when
-// complete, so destPath never holds a partial clone, a failed or killed clone
-// leaves nothing there, and whatever already is at destPath -- files, or
-// another run's clone -- is never touched. An empty sshKeyPath uses the
-// default SSH configuration.
+// Clone clones url into destPath, creating parent directories. An empty
+// sshKeyPath uses the default SSH configuration. See staged for how destPath
+// is protected.
 func Clone(ctx context.Context, url, destPath, sshKeyPath string) error {
+	return staged(destPath, func(staging string) error {
+		var env []string
+		if sshKeyPath != "" {
+			env = []string{gitSSHCommandEnv(sshKeyPath)}
+		}
+		return runClone(ctx, env, url, "clone", "--quiet", url, staging)
+	})
+}
+
+// staged makes a repository at destPath with make, which builds it in an
+// empty staging directory beside destPath; it is renamed into place when
+// complete, so destPath never holds a partial repository, a failed or killed
+// one leaves nothing there, and whatever already is at destPath -- files, or
+// another run's clone -- is never touched.
+func staged(destPath string, make func(staging string) error) error {
 	parent, base := filepath.Dir(destPath), filepath.Base(destPath)
 	if err := checkFree(destPath); err != nil {
 		return err
@@ -54,15 +66,8 @@ func Clone(ctx context.Context, url, destPath, sshKeyPath string) error {
 		return fmt.Errorf("locking staging dir: %w", err)
 	}
 
-	var env []string
-	if sshKeyPath != "" {
-		env = []string{gitSSHCommandEnv(sshKeyPath)}
-	}
-	cmd := newGit(ctx, env, "clone", "--quiet", url, staging)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git clone %s: %w\n%s", repourl.Redact(url), err, repourl.Redact(strings.TrimSpace(stderr.String())))
+	if err := make(staging); err != nil {
+		return err
 	}
 	// os.Remove takes only an empty directory, and rename(2) won't replace a
 	// non-empty one, so anything that appeared at destPath meanwhile -- say,
@@ -72,6 +77,17 @@ func Clone(ctx context.Context, url, destPath, sshKeyPath string) error {
 	}
 	if err := os.Rename(staging, destPath); err != nil {
 		return fmt.Errorf("moving the clone into %s: %w", destPath, err)
+	}
+	return nil
+}
+
+// runClone runs a git clone of url with args, outside any repository.
+func runClone(ctx context.Context, env []string, url string, args ...string) error {
+	cmd := newGit(ctx, env, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git clone %s: %w\n%s", repourl.Redact(url), err, repourl.Redact(strings.TrimSpace(stderr.String())))
 	}
 	return nil
 }

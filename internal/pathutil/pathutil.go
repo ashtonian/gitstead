@@ -11,7 +11,7 @@ import (
 // SafeRemoveAll removes path (via os.RemoveAll) after refusing obviously
 // dangerous targets: the filesystem root, $HOME, or any path with fewer than
 // three components. It is the single guard shared by the repo-removal and
-// workgroup-teardown commands.
+// workspace-teardown commands.
 func SafeRemoveAll(path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {

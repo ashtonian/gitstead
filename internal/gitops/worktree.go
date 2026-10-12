@@ -3,6 +3,7 @@ package gitops
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -79,6 +80,25 @@ func WorktreeList(ctx context.Context, repoPath string) ([]WorktreeInfo, error) 
 	}
 	flush()
 	return list, nil
+}
+
+// LinkedWorktrees lists the paths of the repo's linked worktrees that are on
+// disk; the main worktree isn't one.
+func LinkedWorktrees(ctx context.Context, repoPath string) ([]string, error) {
+	list, err := WorktreeList(ctx, repoPath)
+	if err != nil {
+		return nil, err
+	}
+	var linked []string
+	for i, w := range list {
+		if i == 0 || w.Bare {
+			continue // the main worktree comes first
+		}
+		if _, err := os.Stat(w.Path); err == nil {
+			linked = append(linked, w.Path)
+		}
+	}
+	return linked, nil
 }
 
 // WorktreeRemove removes a worktree. force discards a dirty or locked worktree.

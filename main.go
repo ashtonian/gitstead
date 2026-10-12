@@ -31,7 +31,7 @@ func main() {
 
 	// Shell completion: handles `install-completions` and, when the shell sets
 	// COMP_LINE, prints candidates and exits. Predictors complete repo keys,
-	// tags, sets, and workgroup names for fields tagged `predictor:"..."`.
+	// tags, sets, and workspace names for fields tagged `predictor:"..."`.
 	kongplete.Complete(parser, cmd.CompletionPredictors()...)
 
 	ctx, err := parser.Parse(os.Args[1:])

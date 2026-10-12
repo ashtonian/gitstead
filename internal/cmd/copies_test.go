@@ -107,24 +107,27 @@ func TestRecordCopies(t *testing.T) {
 	}
 }
 
-func TestRecordCopies_Member(t *testing.T) {
+func TestRecordCopies_WorkspaceCopy(t *testing.T) {
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	st := &state.State{Workgroups: map[string]*state.WorkgroupState{
-		"fleet": {Members: []state.WorkgroupMemberState{{Name: "a1", Path: "/w/a1"}, {Name: "a2", Path: "/w/a2"}}},
+	st := &state.State{Workspaces: map[string]*state.WorkspaceState{
+		"app": {Name: "app", Replicas: []state.ReplicaState{
+			{Agent: "a1", Path: "/w/a1", Copies: []state.CopyState{{Path: "/w/a1"}}},
+			{Agent: "a2", Path: "/w/a2", Copies: []state.CopyState{{Path: "/w/a2"}}},
+		}},
 	}}
-	job := func(name, path string) copyJob {
-		return copyJob{workgroup: "fleet", member: name, path: path, backup: &gitops.BackupConfig{}}
+	job := func(agent, path string) copyJob {
+		return copyJob{workspace: "app", agent: agent, path: path, backup: &gitops.BackupConfig{}}
 	}
 	recordCopies(st, []copyOutcome{
 		{job: job("a1", "/w/a1"), backup: &gitops.BackupResult{ID: "b1"}, at: now},
 		{job: job("a2", "/w/elsewhere"), backup: &gitops.BackupResult{ID: "b2"}, at: now},
 	})
-	m := st.Workgroups["fleet"].Members
-	if !m[0].LastBackup.Equal(now) {
-		t.Errorf("member a1 = %+v", m[0])
+	rs := st.Workspaces["app"].Replicas
+	if !rs[0].Copies[0].LastBackup.Equal(now) {
+		t.Errorf("a1's copy = %+v", rs[0].Copies[0])
 	}
-	if !m[1].LastBackup.IsZero() {
-		t.Errorf("a member moved meanwhile was recorded: %+v", m[1])
+	if !rs[1].Copies[0].LastBackup.IsZero() {
+		t.Errorf("a copy moved meanwhile was recorded: %+v", rs[1].Copies[0])
 	}
 }
 
@@ -145,9 +148,9 @@ func TestSyncJobs(t *testing.T) {
 			"h/o/lib": {LocalPath: lib, Cloned: true},
 			"h/o/old": {LocalPath: dir("old"), Cloned: true, Status: "stale"},
 		},
-		Workgroups: map[string]*state.WorkgroupState{"fleet": {Members: []state.WorkgroupMemberState{
-			{Name: "agent", Path: agent, RepoKey: "h/o/lib"},
-			{Name: "app", Path: app, RepoKey: "h/o/app"}, // adopted from the tracked clone
+		Workspaces: map[string]*state.WorkspaceState{"fleet": {Name: "fleet", Replicas: []state.ReplicaState{
+			{Agent: "agent", Path: agent, Copies: []state.CopyState{{Repo: "h/o/lib", Path: agent}}},
+			{Agent: "app", Path: app, Copies: []state.CopyState{{Repo: "h/o/app", Path: app}}}, // adopted from the tracked clone
 		}}},
 	}
 	labels := func(c *SyncCmd) []string {
@@ -174,18 +177,24 @@ func TestSyncJobs(t *testing.T) {
 		t.Errorf("jobs = %s; want each working copy once, the stale repo backed up but not fetched", got)
 	}
 	if got := strings.Join(labels(&SyncCmd{Tag: "work"}), " "); got != "h/o/app+fetch" {
-		t.Errorf("jobs for --tag work = %s; members of unselected repos should be left out", got)
+		t.Errorf("jobs for --tag work = %s; copies of unselected repos should be left out", got)
 	}
 	if got := strings.Join(labels(&SyncCmd{NoBackup: true}), " "); got != "h/o/app+fetch h/o/lib+fetch h/o/old" {
-		t.Errorf("jobs for --no-backup = %s; members are only backed up", got)
+		t.Errorf("jobs for --no-backup = %s; copies are only backed up", got)
 	}
 
-	// remote_sync applies to members by the repo they copy: an override that
-	// turns it off for lib keeps lib's member local too.
+	// remote_sync applies to copies by the repo they copy: an override that
+	// turns it off for lib keeps lib's copy local too, unless its workspace
+	// turns it on.
 	off := false
 	cfg.RemoteSync.Enabled = true
 	cfg.Overrides = []config.Override{{Repos: []string{"h/o/lib"}, RemoteSync: &config.RemoteSyncOverride{Enabled: &off}}}
 	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+fetch+offsite h/o/lib+fetch h/o/old fleet/agent" {
 		t.Errorf("jobs with remote_sync = %s", got)
+	}
+	on := true
+	cfg.Workspaces = []config.Workspace{{Name: "fleet", Repos: []string{"h/o/lib"}, RemoteSync: &config.RemoteSyncOverride{Enabled: &on}}}
+	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+fetch+offsite h/o/lib+fetch h/o/old fleet/agent+offsite" {
+		t.Errorf("jobs with the workspace's remote_sync = %s", got)
 	}
 }

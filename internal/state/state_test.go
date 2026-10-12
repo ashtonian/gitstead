@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,6 +124,87 @@ repos:
 	}
 	if got := st.Repos["github.com/acme/found"].UserTags; len(got) != 0 {
 		t.Errorf("a discovered repo's tags came from rules, got user tags %v", got)
+	}
+}
+
+func TestLoad_MigratesWorkgroupsToWorkspaces(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.yaml")
+	v2 := `version: 2
+repos:
+  github.com/me/app:
+    local_path: /src/app
+workgroups:
+  app:
+    kind: worktree
+    root: /wg/app
+    source: /src/app
+    base_ref: origin/main
+    declared: true
+    members:
+      - {name: agent-1, path: /wg/app/agent-1, branch: app/agent-1, copy_id: 0123456789abcdef, last_backup_error: boom}
+  scratch:
+    kind: worktree
+    root: /wg/scratch
+    source: /elsewhere/untracked
+    members:
+      - {name: agent-1, path: /wg/scratch/agent-1, branch: scratch/agent-1}
+  review:
+    kind: clone
+    root: /wg/review
+    members:
+      - {name: api, path: /wg/review/api, repo_url: "git@github.com:me/api.git", repo_key: github.com/me/api}
+`
+	if err := os.WriteFile(path, []byte(v2), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := state.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	app := st.Workspaces["app"]
+	if app == nil || app.Dir != "/wg/app" || app.Isolation != "worktree" || app.BaseRef != "origin/main" || !app.Declared {
+		t.Fatalf("app = %+v", app)
+	}
+	r := app.Replica("agent-1")
+	if r == nil || r.Path != "/wg/app/agent-1" || len(r.Copies) != 1 {
+		t.Fatalf("app's replica = %+v", r)
+	}
+	if c := r.Copies[0]; c.Repo != "github.com/me/app" || c.Path != r.Path || c.Branch != "app/agent-1" ||
+		c.CopyID != "0123456789abcdef" || c.LastBackupError != "boom" {
+		t.Errorf("app's copy = %+v; want the tracked source's copy, with its branch, ID and backup status", c)
+	}
+	if c := st.Workspaces["scratch"].Replica("agent-1").Copies[0]; c.Repo != "" {
+		t.Errorf("a copy of an untracked source names repo %q", c.Repo)
+	}
+	review := st.Workspaces["review"]
+	if c := review.Replica("api").Copies[0]; review.Isolation != "clone" || c.Repo != "github.com/me/api" || c.URL != "git@github.com:me/api.git" {
+		t.Errorf("review = %+v, copy %+v", review, c)
+	}
+
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "workgroups") {
+		t.Errorf("saved state still has workgroups:\n%s", data)
+	}
+}
+
+func TestRenameRepo_MovesItsCopies(t *testing.T) {
+	st := &state.State{
+		Repos: map[string]*state.RepoState{"github.com/me/old": {Name: "old"}},
+		Workspaces: map[string]*state.WorkspaceState{"w": {Replicas: []state.ReplicaState{
+			{Agent: "agent-1", Copies: []state.CopyState{{Repo: "github.com/me/old"}, {Repo: "github.com/me/other"}}},
+		}}},
+	}
+	st.RenameRepo("github.com/me/old", "github.com/me/new")
+	if st.Repos["github.com/me/new"] == nil || st.Repos["github.com/me/old"] != nil {
+		t.Errorf("repos = %v", st.Repos)
+	}
+	copies := st.Workspaces["w"].Replicas[0].Copies
+	if copies[0].Repo != "github.com/me/new" || copies[1].Repo != "github.com/me/other" {
+		t.Errorf("copies = %+v", copies)
 	}
 }
 

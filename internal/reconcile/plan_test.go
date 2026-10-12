@@ -11,7 +11,6 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/workgroup"
 )
 
 const (
@@ -37,11 +36,11 @@ func tracked(mods ...func(*state.RepoState)) *state.State {
 	for _, m := range mods {
 		m(a)
 	}
-	return &state.State{Repos: map[string]*state.RepoState{key: a}, Workgroups: map[string]*state.WorkgroupState{}}
+	return &state.State{Repos: map[string]*state.RepoState{key: a}}
 }
 
 func untracked() *state.State {
-	return &state.State{Repos: map[string]*state.RepoState{}, Workgroups: map[string]*state.WorkgroupState{}}
+	return &state.State{Repos: map[string]*state.RepoState{}}
 }
 
 func clone(at, origin string, cfg ...string) Copy {
@@ -225,111 +224,6 @@ func managing(v string) func(*state.RepoState) {
 	return func(a *state.RepoState) { a.ManagedConfig = map[string]string{keySSHCommand: v} }
 }
 
-func TestPlanWorkgroups(t *testing.T) {
-	const src = "/repos/app"
-	member := func(name string) workgroup.Member {
-		return workgroup.Member{Name: name, Path: "/wg/fleet/" + name, Branch: name}
-	}
-	declared := func(members ...workgroup.Member) map[string]Workgroup {
-		spec := &workgroup.Spec{Name: "fleet", Kind: "worktree", Root: "/wg/fleet", Source: src, Members: members}
-		return map[string]Workgroup{"fleet": {Spec: spec, Declared: true}}
-	}
-	recorded := func(declared bool, members ...workgroup.Member) *state.State {
-		ws := &state.WorkgroupState{Name: "fleet", Kind: "worktree", Root: "/wg/fleet", Source: src, Declared: declared}
-		for _, m := range members {
-			ws.Members = append(ws.Members, state.WorkgroupMemberState{Name: m.Name, Path: m.Path, Branch: m.Branch})
-		}
-		return &state.State{Repos: map[string]*state.RepoState{}, Workgroups: map[string]*state.WorkgroupState{"fleet": ws}}
-	}
-	worktree := func(at string) Copy { return Copy{Path: at, Exists: true, IsRepo: true, CommonDir: src + "/.git"} }
-	source := worktree(src)
-
-	tests := []struct {
-		name    string
-		desired map[string]Workgroup
-		st      *state.State
-		seen    Seen
-		want    []string
-	}{
-		{
-			name:    "a declared workgroup is created",
-			desired: declared(member("a1"), member("a2")), st: untracked(), seen: seenAt(source),
-			want: []string{"create-workgroup fleet  -> /wg/fleet (worktree, 2 member(s))"},
-		},
-		{
-			name:    "a declared member is added",
-			desired: declared(member("a1"), member("a2")), st: recorded(true, member("a1")),
-			seen: seenAt(source, worktree("/wg/fleet/a1")),
-			want: []string{"create-member fleet/a2  -> /wg/fleet/a2"},
-		},
-		{
-			name:    "a member gone from disk is created again",
-			desired: declared(member("a1")), st: recorded(true, member("a1")), seen: seenAt(source),
-			want: []string{"create-member fleet/a1  -> /wg/fleet/a1 (gone from disk; creating it again)"},
-		},
-		{
-			name:    "a member no longer declared is archived and removed",
-			desired: declared(member("a1")), st: recorded(true, member("a1"), member("a2")),
-			seen: seenAt(source, worktree("/wg/fleet/a1"), worktree("/wg/fleet/a2")),
-			want: []string{"remove-member fleet/a2 /wg/fleet/a2 ->  [disruptive] (no longer declared; unique work archived first)"},
-		},
-		{
-			name:    "a member no longer declared and gone is forgotten",
-			desired: declared(member("a1")), st: recorded(true, member("a1"), member("a2")),
-			seen: seenAt(source, worktree("/wg/fleet/a1")),
-			want: []string{"forget-member fleet/a2 /wg/fleet/a2 ->  (no longer declared and gone from disk)"},
-		},
-		{
-			name:    "a workgroup no longer declared is removed",
-			desired: map[string]Workgroup{}, st: recorded(true, member("a1")), seen: seenAt(source, worktree("/wg/fleet/a1")),
-			want: []string{"remove-workgroup fleet /wg/fleet ->  [disruptive] (no longer declared; 1 member(s) archived and removed)"},
-		},
-		{
-			name:    "a workgroup created from flags is kept",
-			desired: map[string]Workgroup{}, st: recorded(false, member("a1")), seen: seenAt(source, worktree("/wg/fleet/a1")),
-		},
-		{
-			name:    "a member created before an interruption is recorded",
-			desired: declared(member("a1"), member("a2")), st: recorded(true, member("a1")),
-			seen: seenAt(source, worktree("/wg/fleet/a1"), worktree("/wg/fleet/a2")),
-			want: []string{"create-member fleet/a2  -> /wg/fleet/a2 (already there; recording it)"},
-		},
-		{
-			name: "a new root moves members, disruptively",
-			desired: func() map[string]Workgroup {
-				d := declared(workgroup.Member{Name: "a1", Path: "/agents/fleet/a1", Branch: "a1"})
-				d["fleet"].Spec.Root = "/agents/fleet"
-				return d
-			}(),
-			st: recorded(true, member("a1")), seen: seenAt(source, worktree("/wg/fleet/a1")),
-			want: []string{
-				"workgroup fleet /wg/fleet -> /agents/fleet",
-				"move-member fleet/a1 /wg/fleet/a1 -> /agents/fleet/a1 [disruptive]",
-			},
-		},
-		{
-			name: "a kind change is blocked",
-			desired: func() map[string]Workgroup {
-				d := declared(member("a1"))
-				d["fleet"].Spec.Kind = "clone"
-				return d
-			}(),
-			st: recorded(true, member("a1")), seen: seenAt(source, worktree("/wg/fleet/a1")),
-			want: []string{"blocked fleet: kind changed from worktree to clone; remove it (git-mgr wg rm fleet --delete) to recreate it"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := lines(PlanWorkgroups(tt.desired, tt.st, tt.seen, nil, false))
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("plan:\n  %s\nwant:\n  %s", strings.Join(got, "\n  "), strings.Join(tt.want, "\n  "))
-			}
-		})
-	}
-}
-
-// A hand-added repo loses a rule's tags only when that rule ran, succeeded
-// and didn't find it.
 func TestRepos_HandAddedKeepsRuleTagsUnlessItsRuleMissedIt(t *testing.T) {
 	st := tracked(func(a *state.RepoState) {
 		a.ManuallyAdded, a.DiscoveredBy = true, "work"

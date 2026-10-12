@@ -71,7 +71,7 @@ func Defaults() *Config {
 
 // configValidator adapts git-mgr's domain Validate(*Config) to the
 // pkgconfig.Validator seam (Struct(any) error) so cross-field validation
-// -- duplicate provider names, selector-vs-type, query exclusivity, workgroup
+// -- duplicate provider names, selector-vs-type, query exclusivity, workspace
 // rules, path-template parsing -- runs inside GetConfig's pipeline. These rules
 // are not expressible as struct tags, so go-playground/validator alone cannot
 // cover them. Validation is normalization-independent (it inspects raw config
@@ -168,11 +168,10 @@ func normalize(cfg *Config) {
 
 func expandPaths(cfg *Config) {
 	cfg.BaseDir = ExpandHome(cfg.BaseDir)
-	cfg.WorkgroupBaseDir = ExpandHome(cfg.WorkgroupBaseDir)
-	for i := range cfg.Workgroups {
-		if cfg.Workgroups[i].BaseDir != "" {
-			cfg.Workgroups[i].BaseDir = ExpandHome(cfg.Workgroups[i].BaseDir)
-		}
+	cfg.WorkspaceDefaults.Root = ExpandHome(cfg.WorkspaceDefaults.Root)
+	for i := range cfg.Workspaces {
+		cfg.Workspaces[i].Root = ExpandHome(cfg.Workspaces[i].Root)
+		cfg.Workspaces[i].Path = ExpandHome(cfg.Workspaces[i].Path)
 	}
 	if cfg.Backup.PatchDir == "" {
 		cfg.Backup.PatchDir = ExpandHome("~/.local/share/git-mgr/patches")

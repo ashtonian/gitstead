@@ -17,6 +17,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/git-mgr/internal/workspace"
 )
 
 // offsiteSpec is how one copy goes offsite. The copy's ID completes it when
@@ -117,7 +118,7 @@ func offsiteRecord(s state.OffsiteStatus) gitops.OffsiteRecord {
 }
 
 // offsiteWanted reports whether remote_sync is enabled anywhere: at the top,
-// for an account or by an override.
+// for an account, by an override or for a workspace.
 func offsiteWanted(cfg *config.Config) bool {
 	if cfg.RemoteSync.Enabled {
 		return true
@@ -129,6 +130,11 @@ func offsiteWanted(cfg *config.Config) bool {
 	}
 	for _, o := range cfg.Overrides {
 		if o.RemoteSync != nil && o.RemoteSync.Enabled != nil && *o.RemoteSync.Enabled {
+			return true
+		}
+	}
+	for _, w := range cfg.Workspaces {
+		if w.RemoteSync != nil && w.RemoteSync.Enabled != nil && *w.RemoteSync.Enabled {
 			return true
 		}
 	}
@@ -181,70 +187,78 @@ func identityOf(r *state.RepoState) repourl.Identity {
 	return repourl.Identity{Host: r.Host, Owner: r.Owner, Name: r.Name, FullName: r.FullName}
 }
 
-// addMemberJobs appends build's job for each workgroup member the selection
-// covers -- members of selected repos, or every member when nothing is
-// selected -- skipping a working copy jobs already has: a member adopted
-// from a tracked repo's directory is that repo, and two jobs on one copy at
-// once would race on its refs. build returns nil to leave a member out.
-func addMemberJobs(jobs []copyJob, st *state.State, sel selection, pass func(string, *state.RepoState) bool, build func(wgName string, m state.WorkgroupMemberState) *copyJob) []copyJob {
+// addCopyJobs appends build's job for each workspace copy the selection
+// covers -- copies of selected repos, or every copy when nothing is selected
+// -- skipping a working copy jobs already has: a copy adopted from a tracked
+// repo's directory is that repo, and two jobs on one copy at once would race
+// on its refs. build returns nil to leave a copy out.
+func addCopyJobs(jobs []copyJob, st *state.State, sel selection, pass func(string, *state.RepoState) bool, build func(ws *state.WorkspaceState, agent string, c state.CopyState) *copyJob) []copyJob {
 	queued := make(map[string]bool, len(jobs))
 	for _, j := range jobs {
 		queued[j.path] = true
 	}
 	all := sel.empty()
-	for _, wgName := range slices.Sorted(maps.Keys(st.Workgroups)) {
-		for _, m := range st.Workgroups[wgName].Members {
-			if repo := st.Repos[m.RepoKey]; !all && (repo == nil || !pass(m.RepoKey, repo)) {
-				continue
-			}
-			if queued[m.Path] || !gitops.HasGitDir(m.Path) {
-				continue
-			}
-			if job := build(wgName, m); job != nil {
-				queued[m.Path] = true
-				jobs = append(jobs, *job)
+	for _, name := range slices.Sorted(maps.Keys(st.Workspaces)) {
+		ws := st.Workspaces[name]
+		for _, r := range ws.Replicas {
+			for _, c := range r.Copies {
+				if repo := st.Repos[c.Repo]; !all && (repo == nil || !pass(c.Repo, repo)) {
+					continue
+				}
+				if queued[c.Path] || !gitops.HasGitDir(c.Path) {
+					continue
+				}
+				if job := build(ws, r.Agent, c); job != nil {
+					queued[c.Path] = true
+					jobs = append(jobs, *job)
+				}
 			}
 		}
 	}
 	return jobs
 }
 
-// memberRemoteSync is remote_sync for a member: its repo's.
-func memberRemoteSync(cfg *config.Config, st *state.State, m state.WorkgroupMemberState) config.RemoteSyncConfig {
+// copyRemoteSync is remote_sync for a workspace copy: its repo's, then its
+// workspace's.
+func copyRemoteSync(cfg *config.Config, st *state.State, workspace string, c state.CopyState) config.RemoteSyncConfig {
 	rule := ""
-	if repo := st.Repos[m.RepoKey]; repo != nil {
+	if repo := st.Repos[c.Repo]; repo != nil {
 		rule = repo.DiscoveredBy
 	}
-	return cfg.RemoteSyncFor(m.RepoKey, rule)
+	return cfg.RemoteSyncInWorkspace(c.Repo, rule, workspace)
 }
 
-// memberJob is the job for a workgroup member, under the policy of the repo
-// it is a copy of, so overrides and accounts apply to members as to repos.
-func memberJob(cfg *config.Config, st *state.State, wgName string, m state.WorkgroupMemberState, backup bool) copyJob {
-	repo := st.Repos[m.RepoKey]
+// copyJobFor is the job for a workspace copy, under the policy of the repo
+// it is a copy of, so overrides and accounts apply to copies as to repos.
+func copyJobFor(cfg *config.Config, st *state.State, ws *state.WorkspaceState, agent string, c state.CopyState, backup bool) copyJob {
 	rule := ""
-	if repo != nil {
+	if repo := st.Repos[c.Repo]; repo != nil {
 		rule = repo.DiscoveredBy
 	}
-	memberCfg := cfg.ResolveForRepo(m.RepoKey)
+	copyCfg := cfg.ResolveForRepo(c.Repo)
 	job := copyJob{
-		label: wgName + "/" + m.Name, workgroup: wgName, member: m.Name, path: m.Path,
-		backupTimeout: memberCfg.Sync.BackupTimeout, sync: memberCfg.Sync,
-		sshKey: cfg.ResolveSSHKey(m.RepoKey, rule),
+		label: workspace.LabelOf(ws, agent, c.Path), workspace: ws.Name, agent: agent, path: c.Path,
+		backupTimeout: copyCfg.Sync.BackupTimeout, sync: copyCfg.Sync,
+		sshKey: cfg.ResolveSSHKey(c.Repo, rule),
 	}
-	if backup && memberCfg.Backup.Enabled {
-		b := backupConfigFor(memberCfg)
+	if backup && copyCfg.Backup.Enabled {
+		b := backupConfigFor(copyCfg)
 		job.backup = &b
 	}
 	return job
 }
 
-// memberIdentity is the identity of the repo a member is a copy of.
-func memberIdentity(st *state.State, m state.WorkgroupMemberState) repourl.Identity {
-	if repo := st.Repos[m.RepoKey]; repo != nil {
+// copyOffsite is a workspace copy's offsite spec, enabled or not.
+func copyOffsite(cfg *config.Config, st *state.State, machine, workspace string, c state.CopyState, sshKey string) *offsiteSpec {
+	return offsiteFor(cfg, copyRemoteSync(cfg, st, workspace, c), machine, copyIdentity(st, c), sshKey, c.OffsiteStatus)
+}
+
+// copyIdentity is the identity of the repo a copy is of.
+func copyIdentity(st *state.State, c state.CopyState) repourl.Identity {
+	if repo := st.Repos[c.Repo]; repo != nil {
 		return identityOf(repo)
 	}
-	if id, err := repourl.Parse(m.RepoURL); err == nil {
+	if id, err := repourl.Parse(c.URL); err == nil {
 		return *id
 	}
 	return repourl.Identity{}
@@ -290,9 +304,9 @@ func (c *RemoteSyncCmd) Run(ctx *Context) error {
 		job.offsite = offsiteFor(cfg, cfg.RemoteSyncFor(key, repo.DiscoveredBy), machine, identityOf(repo), job.sshKey, repo.OffsiteStatus)
 		jobs = append(jobs, job)
 	}
-	jobs = addMemberJobs(jobs, st, sel, pass, func(wgName string, m state.WorkgroupMemberState) *copyJob {
-		job := memberJob(cfg, st, wgName, m, true)
-		job.offsite = memberOffsite(cfg, st, machine, m, job.sshKey)
+	jobs = addCopyJobs(jobs, st, sel, pass, func(ws *state.WorkspaceState, agent string, c state.CopyState) *copyJob {
+		job := copyJobFor(cfg, st, ws, agent, c, true)
+		job.offsite = copyOffsite(cfg, st, machine, ws.Name, c, job.sshKey)
 		return &job
 	})
 	jobs = slices.DeleteFunc(jobs, func(j copyJob) bool { return j.offsite == nil })

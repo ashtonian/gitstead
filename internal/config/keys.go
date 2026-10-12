@@ -66,7 +66,7 @@ func walkKeys(v any, t reflect.Type, at string, unknown *[]error) {
 			walkKeys(item, t.Elem(), fmt.Sprintf("%s[%d]", at, i), unknown)
 		}
 	}
-	// Maps (agents) take any key; scalars have none.
+	// Maps (an agent's env) take any key; scalars have none.
 }
 
 // settings maps a struct's koanf keys to its fields, embedded structs
@@ -89,7 +89,16 @@ func settings(t reflect.Type) map[string]reflect.StructField {
 	return out
 }
 
+// renamedKeys maps settings that were renamed to their new names.
+var renamedKeys = map[string]string{
+	"workgroups":         "workspaces",
+	"workgroup_base_dir": "workspace_defaults.root",
+}
+
 func unknownKey(path, key string, fields map[string]reflect.StructField) error {
+	if to, ok := renamedKeys[path]; ok {
+		return fmt.Errorf("%q is now %q; see config.example.yaml", path, to)
+	}
 	// Suggest only close matches: within a third of the key's length, so a
 	// renamed max_per_repo finds max_per_copy but remote_name finds nothing.
 	best, bestDist := "", max(2, len(key)/3)+1

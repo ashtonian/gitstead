@@ -63,7 +63,6 @@ type world struct {
 func newWorld(t *testing.T, root string) *world {
 	cfg := config.Defaults()
 	cfg.BaseDir = filepath.Join(root, "repos")
-	cfg.WorkgroupBaseDir = filepath.Join(root, "workgroups")
 	cfg.Backup.ArchiveDir = filepath.Join(root, "archive")
 	st, err := state.Load(filepath.Join(root, "state.yaml"))
 	if err != nil {
@@ -84,7 +83,7 @@ func (w *world) plan() *reconcile.Plan {
 		}
 	}
 	p := reconcile.Compute(ctx, w.cfg, w.st, reconcile.Scope{
-		Discovered: discovered, Rules: discovery.StaleScopeOf(results, "", ""), Repos: true, Workgroups: true,
+		Discovered: discovered, Rules: discovery.StaleScopeOf(results, "", ""),
 	})
 	if len(p.Blocked) > 0 {
 		w.t.Fatalf("blocked: %+v", p.Blocked)
@@ -99,9 +98,9 @@ func (w *world) apply(p *reconcile.Plan, include func(reconcile.Action) bool) []
 		Update:      func(change func(*state.State) error) error { return w.st.Update(time.Second, change) },
 		Concurrency: w.cfg.Concurrency,
 		ArchiveDir:  w.cfg.Backup.ArchiveDir,
-		KeepDirs:    []string{w.cfg.BaseDir, w.cfg.WorkgroupBaseDir},
+		KeepDirs:    []string{w.cfg.BaseDir},
 	}
-	results := reconcile.ApplyPlan(context.Background(), w.cfg, env, p, reconcile.Scope{Repos: true, Workgroups: true}, include)
+	results := p.Apply(context.Background(), env, include)
 	for _, r := range results {
 		if r.Err != nil {
 			w.t.Fatalf("%s %s: %v", r.Action.Kind, r.Action.Target, r.Err)
@@ -171,13 +170,9 @@ func TestApply_RepoLifecycle(t *testing.T) {
 		t.Fatalf("state after clone: %+v", a)
 	}
 
-	// A workgroup built on the repo, and a linked worktree, follow it when it moves.
+	// A linked worktree follows it when it moves.
 	wt := filepath.Join(root, "elsewhere", "wt")
 	mustGit(t, clonePath, "worktree", "add", "-q", "-b", "side", wt)
-	w.edit(func(st *state.State) {
-		st.Workgroups["side"] = &state.WorkgroupState{Name: "side", Kind: "worktree", Root: filepath.Dir(wt), Source: clonePath,
-			Members: []state.WorkgroupMemberState{{Name: "wt", Path: wt, Branch: "side"}}}
-	})
 
 	// A new path_template is a move, which only apply makes.
 	w.cfg.PathTemplate = "{{.Name}}"
@@ -196,10 +191,7 @@ func TestApply_RepoLifecycle(t *testing.T) {
 		t.Error("the move should remove the empty directories it left")
 	}
 	mustGit(t, wt, "status", "--short") // the linked worktree still works
-	if src := w.st.Workgroups["side"].Source; src != newPath {
-		t.Errorf("workgroup source = %s, want %s", src, newPath)
-	}
-	w.edit(func(st *state.State) { delete(st.Workgroups, "side") })
+	mustGit(t, newPath, "worktree", "remove", wt)
 
 	// A move interrupted after the rename, before state was saved, is recorded.
 	w.cfg.PathTemplate = "{{.Host}}/{{.Owner}}/{{.Name}}"
@@ -281,52 +273,6 @@ func TestApply_RenameFollowsTheProviderID(t *testing.T) {
 	mustGit(t, a.LocalPath, "fetch", "-q") // origin points at the renamed remote
 }
 
-func TestApply_WorkgroupLifecycle(t *testing.T) {
-	root := t.TempDir()
-	remote := bareRemote(t, root, "app")
-	w := newWorld(t, root)
-	w.cfg.Repos = []config.ManualRepo{{URL: remote}}
-	w.converge()
-	member := func(name string) config.WorkgroupMember { return config.WorkgroupMember{Name: name} }
-	w.cfg.Workgroups = []config.Workgroup{{Name: "fleet", Kind: "worktree", Source: "local/remotes/app",
-		Members: []config.WorkgroupMember{member("a1"), member("a2")}}}
-	fleet := filepath.Join(w.cfg.WorkgroupBaseDir, "fleet")
-
-	assertKinds(t, w.plan(), "create-workgroup")
-	w.converge()
-	if ws := w.st.Workgroups["fleet"]; ws == nil || !ws.Declared || len(ws.Members) != 2 {
-		t.Fatalf("workgroup state: %+v", ws)
-	}
-
-	// Dropping a member from config archives its uncommitted work, then removes it.
-	if err := os.WriteFile(filepath.Join(fleet, "a2", "notes.txt"), []byte("agent work\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	w.cfg.Workgroups[0].Members = []config.WorkgroupMember{member("a1")}
-	p := w.plan()
-	assertKinds(t, p, "remove-member!")
-	results := w.apply(p, reconcile.All)
-	if !strings.Contains(results[0].Info, "archived to") {
-		t.Errorf("removal should report the archive, got %q", results[0].Info)
-	}
-	if _, err := os.Stat(filepath.Join(fleet, "a2")); !os.IsNotExist(err) {
-		t.Fatal("a2 should be removed")
-	}
-
-	// A member deleted by hand is created again.
-	mustGit(t, w.st.Repos["local/remotes/app"].LocalPath, "worktree", "remove", "--force", filepath.Join(fleet, "a1"))
-	assertKinds(t, w.plan(), "create-member")
-	w.converge()
-
-	// Removing the declaration removes the workgroup.
-	w.cfg.Workgroups = nil
-	assertKinds(t, w.plan(), "remove-workgroup!")
-	w.converge()
-	if _, err := os.Stat(fleet); !os.IsNotExist(err) {
-		t.Error("the workgroup root should be gone")
-	}
-}
-
 // Adopting a clone never overwrites git config you set yourself; the
 // difference is reported as drift instead.
 func TestApply_AdoptKeepsConfigSetByHand(t *testing.T) {
@@ -352,8 +298,8 @@ func TestApply_AdoptKeepsConfigSetByHand(t *testing.T) {
 	}
 }
 
-// An account's commit identity reaches every repo it covers and every clone
-// an agent works in, and follows the account when it changes.
+// An account's commit identity reaches every repo it covers, and follows the
+// account when it changes.
 func TestApply_AccountIdentity(t *testing.T) {
 	root := t.TempDir()
 	remote := bareRemote(t, root, "app")
@@ -361,51 +307,17 @@ func TestApply_AccountIdentity(t *testing.T) {
 	w.cfg.Accounts = []config.Account{{Name: "work", Hosts: []string{"local"}, Owners: []string{"remotes"},
 		Git: config.GitIdentity{Name: "Work Me", Email: "me@work"}}}
 	w.cfg.Repos = []config.ManualRepo{{URL: remote}}
-	w.cfg.Workgroups = []config.Workgroup{{Name: "agents", Kind: "clone",
-		Members: []config.WorkgroupMember{{Name: "a1", Repo: "local/remotes/app"}}}}
 	w.converge()
 
 	repo := w.st.Repos["local/remotes/app"].LocalPath
-	member := filepath.Join(w.cfg.WorkgroupBaseDir, "agents", "a1")
-	for _, dir := range []string{repo, member} {
-		if got := mustGit(t, dir, "config", "--local", "user.email"); got != "me@work" {
-			t.Errorf("%s user.email = %q", dir, got)
-		}
+	if got := mustGit(t, repo, "config", "--local", "user.email"); got != "me@work" {
+		t.Errorf("user.email = %q", got)
 	}
-
 	w.cfg.Accounts[0].Git.Email = "me@new-work"
-	assertKinds(t, w.plan(), "config", "member-config")
+	assertKinds(t, w.plan(), "config")
 	w.converge()
-	for _, dir := range []string{repo, member} {
-		if got := mustGit(t, dir, "config", "--local", "user.email"); got != "me@new-work" {
-			t.Errorf("%s user.email = %q after the account changed", dir, got)
-		}
-	}
-
-	mustGit(t, member, "config", "user.email", "agent@elsewhere")
-	if p := w.plan(); len(p.Drift) != 1 || p.Drift[0].Target != "agents/a1" || len(p.Actions) != 0 {
-		t.Fatalf("an identity changed by hand in a member is drift: %+v", p)
-	}
-}
-
-// Applying a plan never runs a disruptive workgroup action the plan didn't
-// show, even when re-planning after the repo changes would find one.
-func TestApplyPlan_RunsOnlyDisruptionsThatWereShown(t *testing.T) {
-	root := t.TempDir()
-	remote := bareRemote(t, root, "app")
-	w := newWorld(t, root)
-	w.cfg.Repos = []config.ManualRepo{{URL: remote}}
-	w.cfg.Workgroups = []config.Workgroup{{Name: "fleet", Kind: "worktree", Source: "local/remotes/app",
-		Members: []config.WorkgroupMember{{Name: "a1"}, {Name: "a2"}}}}
-	w.converge()
-
-	shown := w.plan() // nothing to do
-	w.cfg.Workgroups[0].Members = w.cfg.Workgroups[0].Members[:1]
-	for _, r := range w.apply(shown, reconcile.All) {
-		t.Errorf("unexpected action %s %s", r.Action.Kind, r.Action.Target)
-	}
-	if _, err := os.Stat(filepath.Join(w.cfg.WorkgroupBaseDir, "fleet", "a2")); err != nil {
-		t.Fatal("a removal that wasn't shown must not run")
+	if got := mustGit(t, repo, "config", "--local", "user.email"); got != "me@new-work" {
+		t.Errorf("user.email = %q after the account changed", got)
 	}
 }
 

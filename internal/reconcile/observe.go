@@ -28,9 +28,9 @@ type Copy struct {
 	Err       error             // the copy exists but could not be read
 }
 
-// is reports whether the copy is a clone of the repo with key, judged by its
+// Is reports whether the copy is a clone of the repo with key, judged by its
 // copy ID when both have one, else by its origin URL.
-func (c Copy) is(key, copyID string) bool {
+func (c Copy) Is(key, copyID string) bool {
 	if !c.IsRepo || c.Err != nil {
 		return false
 	}
@@ -44,7 +44,8 @@ func (c Copy) is(key, copyID string) bool {
 // Seen is what was observed, by path.
 type Seen map[string]Copy
 
-func (s Seen) at(path string) Copy {
+// At is what was seen at path; nothing exists there if it wasn't observed.
+func (s Seen) At(path string) Copy {
 	if c, ok := s[path]; ok {
 		return c
 	}
@@ -61,7 +62,7 @@ func Observe(ctx context.Context, paths []string, concurrency int) Seen {
 	g.SetLimit(max(concurrency, 1))
 	for i, p := range paths {
 		g.Go(func() error {
-			copies[i] = observeCopy(gctx, p)
+			copies[i] = ObserveCopy(gctx, p)
 			return nil
 		})
 	}
@@ -73,7 +74,8 @@ func Observe(ctx context.Context, paths []string, concurrency int) Seen {
 	return seen
 }
 
-func observeCopy(ctx context.Context, path string) Copy {
+// ObserveCopy reads what is at path.
+func ObserveCopy(ctx context.Context, path string) Copy {
 	c := Copy{Path: path}
 	if path == "" {
 		return c
@@ -111,24 +113,6 @@ func RepoPaths(desired map[string]Repo, st *state.State) []string {
 			paths = append(paths, a.LocalPath)
 		} else if old := renamedFrom(d, desired, st); old != "" {
 			paths = append(paths, st.Repos[old].LocalPath)
-		}
-	}
-	return paths
-}
-
-// WorkgroupPaths lists the paths a workgroup plan needs observed: members
-// wanted and recorded, and each worktree group's source.
-func WorkgroupPaths(desired map[string]Workgroup, st *state.State) []string {
-	var paths []string
-	for _, w := range desired {
-		paths = append(paths, w.Spec.Source)
-		for _, m := range w.Spec.Members {
-			paths = append(paths, m.Path)
-		}
-	}
-	for _, ws := range st.Workgroups {
-		for _, m := range ws.Members {
-			paths = append(paths, m.Path)
 		}
 	}
 	return paths
