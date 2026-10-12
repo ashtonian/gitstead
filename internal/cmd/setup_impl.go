@@ -19,6 +19,7 @@ import (
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/discovery"
+	"github.com/ashtonian/git-mgr/internal/scheduler"
 	"github.com/ashtonian/git-mgr/internal/setup"
 )
 
@@ -158,7 +159,8 @@ func afterSetup(ctx *Context, cfg *config.Config, a setup.Answers) error {
 	}
 	if a.Schedule {
 		fmt.Println("\nInstalling the background sync agent:")
-		if err := (&InstallAgentCmd{Interval: 15 * time.Minute, Log: "~/.local/share/git-mgr/git-mgr.log"}).Run(ctx); err != nil {
+		agent := &InstallAgentCmd{Interval: 15 * time.Minute, Log: "~/.local/share/git-mgr/git-mgr.log", Linger: a.Linger}
+		if err := agent.Run(ctx); err != nil {
 			return fmt.Errorf("installing the background agent: %w", err)
 		}
 	}
@@ -277,6 +279,14 @@ func askSetup(ctx *Context, det setup.Detected, a setup.Answers, tracked map[str
 	}
 	if err := askFeatures(&a); err != nil {
 		return a, err
+	}
+	if a.Schedule && scheduler.DefaultKind() == scheduler.Systemd {
+		err := huh.NewConfirm().Title("Keep syncing while you are logged out?").
+			Description("Enables lingering (loginctl enable-linger); without it the timer stops at logout. Recommended.").
+			Value(&a.Linger).Run()
+		if err != nil {
+			return a, err
+		}
 	}
 	return a, askAdopt(det, &a, tracked, home)
 }

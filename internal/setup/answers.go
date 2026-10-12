@@ -21,8 +21,11 @@ type Answers struct {
 	// Adopt lists existing clones to track where they are.
 	Adopt []string `yaml:"adopt,omitempty"`
 
-	Backups       bool   `yaml:"backups"`
-	Schedule      bool   `yaml:"schedule"` // install the background sync agent
+	Backups  bool `yaml:"backups"`
+	Schedule bool `yaml:"schedule"` // install the background sync agent
+	// Linger keeps a Linux schedule running while you are logged out
+	// (loginctl enable-linger).
+	Linger        bool   `yaml:"linger,omitempty"`
 	RemoteSync    bool   `yaml:"remote_sync"`
 	ReconcileAuto string `yaml:"reconcile_auto"`
 	Cleanup       string `yaml:"cleanup"`
@@ -111,7 +114,7 @@ func (a Answers) Validate() error {
 func Defaults(det Detected, existing *config.Config, home string) Answers {
 	a := Answers{
 		BaseDir: "~/repos", Layout: "host/owner/name",
-		Backups: true, Schedule: true, ReconcileAuto: "safe", Cleanup: "mark_stale",
+		Backups: true, Schedule: true, Linger: true, ReconcileAuto: "safe", Cleanup: "mark_stale",
 	}
 	if existing != nil {
 		a.BaseDir = tildePath(existing.BaseDir, home)

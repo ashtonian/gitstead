@@ -29,6 +29,7 @@ type State struct {
 	LastSync   time.Time                  `yaml:"last_sync"`
 	Repos      map[string]*RepoState      `yaml:"repos"`
 	Workgroups map[string]*WorkgroupState `yaml:"workgroups,omitempty"`
+	Schedules  map[string]*ScheduleState  `yaml:"schedules,omitempty"`
 
 	// Internal: path to the state file for Save()
 	path string `yaml:"-"`
@@ -129,6 +130,22 @@ type WorkgroupMemberState struct {
 	BackupStatus  `yaml:",inline"`
 }
 
+// ScheduleState is a background sync git-mgr installed, kept so it can be
+// listed, checked by doctor and removed by name.
+type ScheduleState struct {
+	Name     string            `yaml:"name"               json:"name"`
+	Kind     string            `yaml:"kind"               json:"kind"` // launchd | systemd | cron
+	Daemon   bool              `yaml:"daemon,omitempty"   json:"daemon,omitempty"`
+	Interval time.Duration     `yaml:"interval"           json:"interval"`
+	Bin      string            `yaml:"bin"                json:"bin"`
+	Global   []string          `yaml:"global,omitempty"   json:"global,omitempty"` // --config, --state
+	Sync     []string          `yaml:"sync,omitempty"     json:"sync,omitempty"`   // the repo selection
+	Env      map[string]string `yaml:"env,omitempty"      json:"env,omitempty"`
+	LogPath  string            `yaml:"log_path,omitempty" json:"log_path,omitempty"`
+	// Installed is when it was last installed.
+	Installed time.Time `yaml:"installed" json:"installed"`
+}
+
 // BackupStatus is what the last backup of a working copy did.
 type BackupStatus struct {
 	// LastBackup is when the working copy's state was last known to be saved,
@@ -159,6 +176,7 @@ func Load(path string) (*State, error) {
 		Version:    CurrentVersion,
 		Repos:      make(map[string]*RepoState),
 		Workgroups: make(map[string]*WorkgroupState),
+		Schedules:  make(map[string]*ScheduleState),
 		path:       path,
 	}
 
@@ -184,6 +202,9 @@ func Load(path string) (*State, error) {
 	}
 	if s.Workgroups == nil {
 		s.Workgroups = make(map[string]*WorkgroupState)
+	}
+	if s.Schedules == nil {
+		s.Schedules = make(map[string]*ScheduleState)
 	}
 	s.migrate()
 	return s, nil
@@ -230,17 +251,16 @@ func (s *State) Save() error {
 }
 
 // Reload re-reads the state file from disk into s, preserving the file path and
-// any held lock. Call it after AcquireLock so a mutation works from the latest
-// on-disk data and cannot clobber a concurrent writer's changes.
+// any held lock. Update calls it under the lock, so a change works from the
+// latest on-disk data and cannot clobber a concurrent writer's.
 func (s *State) Reload() error {
 	fresh, err := Load(s.path)
 	if err != nil {
 		return err
 	}
-	s.Version = fresh.Version
-	s.LastSync = fresh.LastSync
-	s.Repos = fresh.Repos
-	s.Workgroups = fresh.Workgroups
+	lock := s.lockFD
+	*s = *fresh
+	s.lockFD = lock
 	return nil
 }
 

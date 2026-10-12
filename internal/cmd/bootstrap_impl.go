@@ -29,7 +29,7 @@ func (c *BootstrapCmd) Run(ctx *Context) error {
 		fmt.Printf("would: discover --apply%s\n", tagSuffix(c.Profile))
 		fmt.Printf("would: sync%s\n", tagSuffix(c.Profile))
 		if !c.NoAgent {
-			fmt.Printf("would: install-agent --interval %s\n", c.Interval)
+			fmt.Printf("would: install-agent --interval %s%s\n", c.Interval, c.scheduleFlags())
 		}
 		return nil
 	}
@@ -62,7 +62,9 @@ func (c *BootstrapCmd) Run(ctx *Context) error {
 
 	if !c.NoAgent {
 		fmt.Println("\n==> install-agent")
-		agent := &InstallAgentCmd{Interval: c.Interval, Log: "~/.local/share/git-mgr/git-mgr.log"}
+		// A profile gets a schedule of its own that syncs just its repos, so
+		// bootstrapping a second profile doesn't replace the first.
+		agent := &InstallAgentCmd{Name: c.Profile, Tag: c.Profile, Interval: c.Interval, Log: "~/.local/share/git-mgr/git-mgr.log"}
 		if err := agent.Run(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "install-agent failed (run it later): %v\n", err)
 		}
@@ -82,4 +84,11 @@ func tagSuffix(tag string) string {
 		return ""
 	}
 	return " --tag " + tag
+}
+
+func (c *BootstrapCmd) scheduleFlags() string {
+	if c.Profile == "" {
+		return ""
+	}
+	return fmt.Sprintf(" --name %s --tag %s", c.Profile, c.Profile)
 }

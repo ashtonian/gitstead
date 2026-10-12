@@ -366,10 +366,11 @@ config).
 
 | Command | Description |
 |---|---|
-| `bootstrap` | One-command machine setup: init (if missing) → doctor → discover --apply → sync → install-agent. `--profile` (tag scope), `--no-agent`, `--dry-run`. |
+| `bootstrap` | One-command machine setup: init (if missing) → doctor → discover --apply → sync → install-agent. `--profile` (tag scope; also names the schedule and limits it to the tag), `--no-agent`, `--dry-run`. |
 | `plan [--json]` | Discover and show every change config asks for -- repos and workgroups -- with drift and blocked changes. Changes nothing. |
 | `apply [--yes]` | Discover and make every change, including moves and removals; asks before those unless `--yes` (refuses without a terminal). Saves state after each change; non-zero exit if any change failed or was blocked. |
-| `doctor` | Offline, read-only preflight: git present, config valid, base_dir writable, provider tokens resolve, configured SSH keys exist, whether a sync is running, state lock free within 5s (held longer, its holder is reported as stuck), tracked repos on disk with matching origin. Non-zero exit on failure. |
+| `doctor` | Offline, read-only preflight: git present, config valid, base_dir writable, provider tokens resolve, configured SSH keys exist, whether a sync is running, state lock free within 5s (held longer, its holder is reported as stuck), each recorded schedule installed with its binary present and lingering on (systemd), doctor itself passing in each schedule's recorded environment, tracked repos on disk with matching origin. Non-zero exit on failure. |
+| `install-agent` | Install a named background sync (`--name`, default `default`) running `sync --quiet` plus its selection (`--repos`/`--tag`/`--set`) every `--interval` (must divide an hour or a day). Records a stable binary path (refuses `/nix/store`, Cellar and temporary paths), the current `PATH` and a long-lived `SSH_AUTH_SOCK`; runs at nice 10 with idle I/O. launchd: LaunchAgent, or `--daemon` LaunchDaemon with `UserName` via sudo. systemd: `OnCalendar=` + `Persistent=true`; `--linger` enables lingering. cron: refuses to rewrite an unreadable crontab, backs it up first, touches only lines with its marker. Recorded in state under `schedules`; `--list`, `--uninstall`, `--print`. |
 | `run [--set/--tag/--repos] -- <cmd>` | Run a command in each matching repo (parallel, bounded by concurrency). `--fail-fast`; non-zero exit if any failed. |
 | `manifest export [--out]` / `import <file>` | Portable `{url,tags,path}` manifest of the tracked set, to rehydrate a new machine (captures manual adoptions). import is idempotent and clones over the url's transport. |
 | `restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` (clone+apply to a scratch dir), or `--apply` onto the tree (refuses dirty without `--force`). id defaults to `latest`. |
@@ -806,7 +807,22 @@ workgroups:
     source: "/Users/me/repos/github.com/ashtonian/git-mgr"
     declared: true
     members:
-      - {name: agent-1, path: "/Users/me/workgroups/fleet/agent-1", branch: agent-1, copy_id: "1f2e3d4c5b6a7980"}
+      - {name: agent-1, path: "/Users/me/workgroups/fleet/agent-1", branch: agent-1, copy_id: "1f2e3d4c5b6a7980",
+         last_backup: 2026-10-12T14:00:00Z, last_backup_id: "20261012T140000.000Z"}
+
+# Background syncs `install-agent` installed, so doctor can check them and
+# --uninstall can remove them by name.
+schedules:
+  work:
+    name: work
+    kind: launchd
+    interval: 5m0s
+    bin: /opt/homebrew/bin/git-mgr
+    global: [--config, /Users/me/.config/git-mgr/config.yaml, --state, /Users/me/.local/share/git-mgr/state.yaml]
+    sync: [--tag, work]
+    env: {PATH: "/opt/homebrew/bin:/usr/bin:/bin"}
+    log_path: /Users/me/.local/share/git-mgr/git-mgr.log
+    installed: 2026-10-12T14:00:00Z
 ```
 
 ## Reconciliation

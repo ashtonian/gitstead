@@ -126,7 +126,7 @@ writes a config without asking anything.
 | `git-mgr config` | Print resolved config. `--validate`, `--edit`, `--path`, `--for-repo <key>`, `--redact`. |
 | `git-mgr report` / `log` | Summarize / list recent activity (clones, backups, syncs…) from the operation log. `--since`, `-n`. |
 | `git-mgr workgroup` (`wg`) | Manage workgroups: parallel worktrees or multi-repo bundles. `wg create` builds one from flags or config; `--save`, `--sync`, `open`, `ensure`, `check`. |
-| `git-mgr install-agent` | Install/remove a periodic sync agent (launchd/systemd/cron). |
+| `git-mgr install-agent` | Install, list (`--list`) or remove (`--uninstall`) background syncs (launchd/systemd/cron); `--name` and `--repos`/`--tag`/`--set` for several. |
 | `git-mgr install-completions` | Print a shell completion script (bash/zsh/fish). See [Shell completions](#shell-completions). |
 | `git-mgr version` | Print version, commit, build date. |
 
@@ -645,15 +645,65 @@ destination and renamed into place when complete. A failed or killed clone
 never leaves half a repository where the repo belongs, and the next clone of
 the same repo removes what a killed run left behind.
 
+### Installing a schedule
+
 ```bash
-git-mgr install-agent          # launchd (macOS) / systemd timer (Linux) / cron
+git-mgr install-agent                                   # every 15m: launchd (macOS) / systemd timer (Linux)
+git-mgr install-agent --name work --tag work --interval 5m
+git-mgr install-agent --list
+git-mgr install-agent --uninstall --name work
+git-mgr install-agent --print                           # show the unit files and commands; change nothing
 ```
 
-Or wire it up by hand:
+Each schedule has a name (`default` unless you give one) and its own
+selection of repos, so a work schedule and a personal one live side by side;
+installing a name again replaces it. `bootstrap --profile work` installs a
+`work` schedule that syncs `--tag work`. Schedules are recorded in the state
+file, and `git-mgr doctor` checks each one.
 
-```cron
-*/15 * * * * /usr/local/bin/git-mgr sync --quiet 2>> ~/.local/share/git-mgr/git-mgr.log
-```
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--name` | `default` | Schedule name: lowercase letters, digits, dashes. |
+| `--interval` | `15m` | Must divide an hour or a day (5m, 10m, 15m, 20m, 30m, 1h, 2h, 3h, 4h, 6h, 8h, 12h, 24h), so every backend runs it exactly. |
+| `--repos`, `--tag`, `--set` | all repos | What the schedule syncs. |
+| `--kind` | per OS | `launchd`, `systemd` or `cron`. |
+| `--bin` | the `git-mgr` on PATH | Binary the schedule runs. |
+| `--daemon` | off | macOS: a LaunchDaemon that runs as you while nobody is logged in. Installed with `sudo`. |
+| `--linger` | off | Linux: `loginctl enable-linger`, so the timer runs while you are logged out. |
+| `--log` | `~/.local/share/git-mgr/git-mgr.log` | Output of launchd and cron runs; systemd runs log to the journal (`journalctl --user -u git-mgr`). |
+
+What install does, so a background run behaves like one from your shell:
+
+- **Binary:** the `git-mgr` on your PATH when it is the binary you ran,
+  because a package manager's link there (`/opt/homebrew/bin`,
+  `~/.nix-profile/bin`) survives upgrades. A path an upgrade or garbage
+  collection removes -- `/nix/store`, a Homebrew `Cellar`, a temporary build
+  -- is refused; put `git-mgr` on PATH or pass `--bin`.
+- **Environment:** your current `PATH` is recorded, so `gh`, credential
+  helpers and `ssh` are found. `SSH_AUTH_SOCK` is recorded when the agent's
+  socket outlives your login (1Password, `$XDG_RUNTIME_DIR`); a per-login one
+  isn't, and on macOS a LaunchAgent gets the session's agent from launchd. No
+  other variable is recorded: tokens stay out of unit files, so use
+  `token_command` rather than a `token_env` set only in your shell.
+- **Priority:** runs at `nice 10` with idle/low-priority I/O.
+- **Missed runs:** systemd schedules with `OnCalendar=` and `Persistent=true`,
+  so a run missed while the machine was off happens at boot; launchd runs a
+  missed interval on wake.
+- **Without a login:** a systemd user timer stops at logout unless lingering
+  is on (`--linger`, which the setup wizard offers); a macOS LaunchAgent runs
+  only while you are logged in, so a Mac nobody logs in to needs `--daemon`.
+  Before anyone logs in the login keychain is locked, so a `token_command`
+  such as `gh auth token` fails there; read the token from a file instead.
+- **crontab:** never rewritten if it can't be read (only "no crontab" counts
+  as empty), and backed up to `backups/crontab-<time>.bak` beside the state
+  file before each change. Only lines ending in the schedule's own marker
+  (`# com.ashtonian.git-mgr[.<name>]`) are touched.
+
+`git-mgr doctor` checks each recorded schedule: still installed, its binary
+present, lingering on (systemd), and it runs its own checks again in the
+schedule's environment -- recorded PATH and agent, nothing else -- so a `gh`
+that isn't on the recorded PATH or a token that only your shell can read
+shows up there instead of as silent failures in the log.
 
 Exit codes are stable, so a scheduler or script can tell a flaky repo from a
 broken setup. With `--quiet`, only failures are printed, to stderr.
