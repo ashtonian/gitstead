@@ -20,6 +20,7 @@ type Config struct {
 	Cleanup       CleanupConfig    `koanf:"cleanup"       yaml:"cleanup"`
 	Backup        BackupCfg        `koanf:"backup"        yaml:"backup"`
 	RemoteSync    RemoteSyncConfig `koanf:"remote_sync"   yaml:"remote_sync"`
+	Reconcile     ReconcileConfig  `koanf:"reconcile"     yaml:"reconcile"`
 	Notify        NotifyConfig     `koanf:"notify"        yaml:"notify"`
 	Log           LogConfig        `koanf:"log"           yaml:"log"`
 
@@ -209,6 +210,19 @@ type BackupCfg struct {
 	// offsite as a normal, visible branch in addition to the local backup.
 	PushBranch bool   `koanf:"push_branch" yaml:"push_branch" default:"false"`
 	PushRemote string `koanf:"push_remote" yaml:"push_remote" default:"origin"`
+}
+
+// ReconcileConfig controls how config changes reach repos already on disk.
+type ReconcileConfig struct {
+	// Auto is what sync and discover --apply change on their own: "safe" applies
+	// changes that move or delete nothing (clone, set the remote URL, write
+	// managed git config, retag), "all" also moves repos, "none" only reports.
+	// `git-mgr apply` always applies everything.
+	Auto string `koanf:"auto" yaml:"auto" default:"safe" validate:"oneof=safe all none"`
+	// Drift is what happens when a value git-mgr set (a remote URL, a managed
+	// git config key) was changed by hand: "report" leaves it, "overwrite"
+	// puts git-mgr's value back.
+	Drift string `koanf:"drift" yaml:"drift" default:"report" validate:"oneof=report overwrite"`
 }
 
 // RemoteSyncConfig controls pushing backup refs.

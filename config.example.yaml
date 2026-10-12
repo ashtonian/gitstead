@@ -12,7 +12,10 @@ base_dir: "~/repos"
 path_template: "{{.Host}}/{{.Owner}}/{{.Name}}"
 
 # Transport for cloning/fetching: "ssh" (default) or "https".
-#   ssh   - uses your SSH agent/keys (or a provider/override ssh_key).
+#   ssh   - uses your SSH agent/keys, or the repo's ssh_key (override, repos:
+#           entry, rule, then provider). A repo with an ssh_key gets it written
+#           into its own git config as core.sshCommand, so your own git
+#           commands there use it too.
 #   https - uses git's own credential helper for auth (e.g. `gh auth setup-git`,
 #           osxkeychain, or a PAT via the manager) -- git-mgr does not store
 #           credentials. Override per repo set under `overrides:`.
@@ -212,6 +215,26 @@ sync:
 
   # Retry backoff base. Actual delay: base * 2^attempt.
   retry_backoff: "2s"
+
+# =============================================================================
+# Config Changes
+# =============================================================================
+# Every run compares what config wants with what git-mgr last set (state) and
+# what is on disk; `git-mgr plan` shows the difference, `git-mgr apply` makes it.
+
+reconcile:
+  # What sync and discover --apply change on their own:
+  #   safe - everything that moves and deletes nothing: clone new or deleted
+  #          repos, change origin URLs, write managed git config, retag
+  #   all  - also move repos to new paths
+  #   none - only report
+  # Moves and removals of workgroup members always wait for `git-mgr apply`.
+  auto: "safe"
+
+  # A value git-mgr set (origin URL, core.sshCommand) that was changed by hand:
+  #   report    - leave it and list it
+  #   overwrite - put git-mgr's value back
+  drift: "report"
 
 # =============================================================================
 # Cleanup Policy (Stale Repos)

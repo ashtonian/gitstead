@@ -11,10 +11,13 @@ import (
 
 // Repo represents a discovered repository from any provider.
 type Repo struct {
-	Host          string
-	Owner         string
-	Name          string
-	FullName      string // "owner/name"
+	Host     string
+	Owner    string
+	Name     string
+	FullName string // "owner/name"
+	// ProviderID is the host's own ID for the repository. It survives renames
+	// and transfers, which change the key. "" for repos: entries.
+	ProviderID    string
 	SSHURL        string // "git@host:owner/name.git"
 	HTTPURL       string // "https://host/owner/name.git" (for clone_protocol: https)
 	Description   string

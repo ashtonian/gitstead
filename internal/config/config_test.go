@@ -30,6 +30,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.Backup.Strategy != "both" {
 		t.Errorf("backup strategy: got %q, want both", cfg.Backup.Strategy)
 	}
+	if cfg.Reconcile.Auto != "safe" || cfg.Reconcile.Drift != "report" {
+		t.Errorf("reconcile: got %+v, want auto safe, drift report", cfg.Reconcile)
+	}
 }
 
 // A config file the caller named must exist: a typo in --config or
@@ -169,6 +172,15 @@ func TestResolveSSHKey(t *testing.T) {
 	key = cfg.ResolveSSHKey("ghes/other/repo", "work")
 	if !contains(key, "id_work") {
 		t.Errorf("expected provider key, got %q", key)
+	}
+
+	// A repos: entry's own key applies to that repo whatever rule found it.
+	cfg.Repos = []config.ManualRepo{{URL: "git@ghes:manual/repo.git", SSHKey: "~/.ssh/id_manual"}}
+	if key = cfg.ResolveSSHKey("ghes/manual/repo", "_manual"); !contains(key, "id_manual") {
+		t.Errorf("expected the repos: entry's key, got %q", key)
+	}
+	if key = cfg.ResolveSSHKey("ghes/manual/repo", "work"); !contains(key, "id_manual") {
+		t.Errorf("a repos: entry's key outranks the rule's, got %q", key)
 	}
 }
 

@@ -50,8 +50,8 @@ func CopyID(ctx context.Context, repoPath string) (string, error) {
 	return id, nil
 }
 
-// existingCopyID returns the copy's ID without creating one; "" if it has none.
-func existingCopyID(ctx context.Context, repoPath string) string {
+// ReadCopyID returns the copy's ID without creating one; "" if it has none.
+func ReadCopyID(ctx context.Context, repoPath string) string {
 	id, _ := readCopyID(filepath.Join(ResolveGitDirs(ctx, repoPath).GitDir, copyIDFile))
 	return id
 }

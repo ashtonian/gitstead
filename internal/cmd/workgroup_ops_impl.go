@@ -217,7 +217,7 @@ func (c *WGFetchCmd) Run(ctx *Context) error {
 		}
 		return nil
 	}
-	keyFor := wgSSHKeyFor(cfg, st)
+	keyFor := memberSSHKey(cfg, st)
 	results := workgroup.ForEach(ctx.GoCtx(), spec, cfg.Concurrency,
 		func(ctx context.Context, m workgroup.Member) (string, bool, error) {
 			return "", false, gitops.Fetch(ctx, m.Path, keyFor(m))
@@ -267,7 +267,7 @@ func (c *WGPullCmd) Run(ctx *Context) error {
 	if c.BackupFirst {
 		unsaved = backupDirtyMembers(ctx, cfg, spec)
 	}
-	keyFor := wgSSHKeyFor(cfg, st)
+	keyFor := memberSSHKey(cfg, st)
 	results := workgroup.ForEach(ctx.GoCtx(), spec, cfg.Concurrency,
 		func(ctx context.Context, m workgroup.Member) (string, bool, error) {
 			if err := unsaved[m.Name]; err != nil {
@@ -310,7 +310,7 @@ func (c *WGPushCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	keyFor := wgSSHKeyFor(cfg, st)
+	keyFor := memberSSHKey(cfg, st)
 	results := workgroup.ForEach(ctx.GoCtx(), spec, cfg.Concurrency,
 		func(ctx context.Context, m workgroup.Member) (string, bool, error) {
 			out, err := gitops.Push(ctx, m.Path, keyFor(m), c.SetUpstream)

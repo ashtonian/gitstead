@@ -1,15 +1,15 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/pathtemplate"
+	"github.com/ashtonian/git-mgr/internal/reconcile"
+	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/state"
 	"gopkg.in/yaml.v3"
 )
@@ -96,53 +96,34 @@ func (c *ManifestImportCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	cloned, skipped := 0, 0
+	added, skipped := 0, 0
+	var errs []error
 	for _, mr := range m.Repos {
-		id, perr := gitops.ParseURL(mr.URL)
+		id, perr := repourl.Parse(mr.URL)
 		if perr != nil {
-			fmt.Fprintf(os.Stderr, "skip %s: %v\n", mr.URL, perr)
+			errs = append(errs, fmt.Errorf("%s: %w", mr.URL, perr))
 			continue
 		}
-		key := id.Host + "/" + id.FullName
-		if _, exists := st.Repos[key]; exists {
+		if _, exists := st.Repos[id.Key()]; exists {
 			skipped++
 			continue
 		}
-		dest := manifestDest(cfg.ResolveForRepo(key), mr, id)
-
-		if c.DryRun {
-			fmt.Printf("  would clone %s -> %s\n", key, dest)
+		dest, derr := manifestDest(cfg, mr, id)
+		if derr != nil {
+			errs = append(errs, derr)
 			continue
 		}
-
-		cloneURL, cloneKey := mr.URL, ""
-		if !isHTTPURL(mr.URL) {
-			cloneKey = cfg.ResolveSSHKey(key, "")
-		}
-		if err := gitops.Clone(ctx.GoCtx(), cloneURL, dest, cloneKey); err != nil {
-			fmt.Fprintf(os.Stderr, "clone %s failed: %v\n", key, err)
+		d := reconcile.HandAdded(cfg, id, dest, mr.Tags)
+		if err := addByHand(ctx, cfg, st, d, c.DryRun); err != nil {
+			errs = append(errs, err)
 			continue
 		}
-		now := time.Now()
-		st.Repos[key] = &state.RepoState{
-			CloneURL: mr.URL, Host: id.Host, Owner: id.Owner, Name: id.Name, FullName: id.FullName,
-			Provider: id.Host, LocalPath: dest, Cloned: true, Tags: mr.Tags, ManuallyAdded: true,
-			Status: "clean", FirstSeen: now, LastDiscovered: now,
-		}
-		logEvent(ctx, "clone", key, mr.URL)
-		cloned++
-		if !ctx.Quiet {
-			fmt.Printf("  cloned %s\n", key)
-		}
+		added++
 	}
-
 	if !c.DryRun {
-		if err := st.Save(); err != nil {
-			return fmt.Errorf("saving state: %w", err)
-		}
+		fmt.Printf("Imported %d repos (%d already tracked)\n", added, skipped)
 	}
-	fmt.Printf("Imported %d repos (%d already tracked)\n", cloned, skipped)
-	return nil
+	return errors.Join(errs...)
 }
 
 // relToBase returns localPath relative to base when it lives under base, else
@@ -155,20 +136,14 @@ func relToBase(localPath, base string) string {
 }
 
 // manifestDest resolves the clone destination for a manifest entry: an explicit
-// path (relative to base_dir, or absolute), otherwise the configured template.
-func manifestDest(cfg *config.Config, mr manifestRepo, id *gitops.RepoIdentity) string {
-	base := config.ExpandHome(cfg.BaseDir)
-	if mr.Path != "" {
-		if filepath.IsAbs(mr.Path) {
-			return mr.Path
-		}
-		return filepath.Join(base, mr.Path)
+// path (relative to the repo's base_dir, or absolute), otherwise where config
+// puts the repo.
+func manifestDest(cfg *config.Config, mr manifestRepo, id *repourl.Identity) (string, error) {
+	if mr.Path == "" {
+		return reconcile.TemplatePath(cfg, id.Key(), id.Host, id.Owner, id.Name, id.FullName)
 	}
-	rel, err := pathtemplate.Resolve(cfg.PathTemplate, pathtemplate.RepoData{
-		Host: id.Host, Owner: id.Owner, Name: id.Name, FullName: id.FullName,
-	})
-	if err != nil {
-		rel = filepath.Join(id.Host, id.FullName)
+	if filepath.IsAbs(mr.Path) {
+		return mr.Path, nil
 	}
-	return filepath.Join(base, rel)
+	return filepath.Join(config.ExpandHome(cfg.ResolveForRepo(id.Key()).BaseDir), mr.Path), nil
 }

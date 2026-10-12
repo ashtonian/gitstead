@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,13 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// CurrentVersion is the state schema this build reads and writes.
+const CurrentVersion = 2
+
+// ErrNewerState reports a state file written by a newer git-mgr. It is never
+// read or rewritten, so an older binary can't drop fields it doesn't know.
+var ErrNewerState = errors.New("state file is newer than this git-mgr")
 
 // State is the top-level state structure persisted to disk.
 type State struct {
@@ -29,13 +37,19 @@ type State struct {
 // json tag matching its yaml tag so `git-mgr status --json` emits the same
 // snake_case keys used in config and the on-disk state file.
 type RepoState struct {
-	// Identity
+	// Identity. CloneURL and LocalPath, below, are the origin URL and path
+	// git-mgr last applied; the reconciler compares them with what config wants.
 	CloneURL string `yaml:"clone_url" json:"clone_url"`
 	Host     string `yaml:"host" json:"host"`
 	Owner    string `yaml:"owner" json:"owner"`
 	Name     string `yaml:"name" json:"name"`
 	FullName string `yaml:"full_name" json:"full_name"`
 	Provider string `yaml:"provider" json:"provider"` // provider instance name
+	// ProviderID is the hosting provider's ID for the repository, stable across
+	// renames and transfers on the same host; "" until discovery has seen it.
+	ProviderID string `yaml:"provider_id,omitempty" json:"provider_id,omitempty"`
+	// CopyID identifies the working copy on disk (see gitops.CopyID).
+	CopyID string `yaml:"copy_id,omitempty" json:"copy_id,omitempty"`
 
 	// Local State
 	LocalPath     string `yaml:"local_path" json:"local_path"`
@@ -52,7 +66,11 @@ type RepoState struct {
 	Languages    []string `yaml:"languages,omitempty" json:"languages,omitempty"`
 	Topics       []string `yaml:"topics" json:"topics"`
 	Tags         []string `yaml:"tags" json:"tags"`
-	Description  string   `yaml:"description" json:"description"`
+	// UserTags are the tags given by hand (clone/adopt --tag, a manifest,
+	// workgroup tracking). Tags is them plus the tags of the rules that find
+	// the repo.
+	UserTags    []string `yaml:"user_tags,omitempty" json:"user_tags,omitempty"`
+	Description string   `yaml:"description" json:"description"`
 
 	// Sync State
 	LastFetch      time.Time `yaml:"last_fetch" json:"last_fetch"`
@@ -69,21 +87,32 @@ type RepoState struct {
 	FirstSeen      time.Time `yaml:"first_seen" json:"first_seen"`
 	LastDiscovered time.Time `yaml:"last_discovered" json:"last_discovered"`
 	StaleSince     time.Time `yaml:"stale_since,omitempty" json:"stale_since,omitempty"`
-	ManuallyAdded  bool      `yaml:"manually_added" json:"manually_added"`
+	// ManuallyAdded marks a repo added by hand (clone, adopt, manifest import,
+	// workgroup tracking): its path and URL are the ones recorded, never
+	// derived from config.
+	ManuallyAdded bool `yaml:"manually_added" json:"manually_added"`
+
+	// ManagedConfig holds the repo-local git config keys git-mgr set, with the
+	// values it set, keyed by git's lower-case name (core.sshcommand).
+	ManagedConfig map[string]string `yaml:"managed_config,omitempty" json:"managed_config,omitempty"`
 }
 
 // WorkgroupState is the observed on-disk state of a managed workgroup. Like
 // RepoState, each field carries a json tag mirroring its yaml tag so JSON output
 // uses the same snake_case keys as the config and state file.
 type WorkgroupState struct {
-	Name      string                 `yaml:"name"                json:"name"`
-	Kind      string                 `yaml:"kind"                json:"kind"`
-	Root      string                 `yaml:"root"                json:"root"`
-	Source    string                 `yaml:"source,omitempty"    json:"source,omitempty"`
-	BaseRef   string                 `yaml:"base_ref,omitempty"  json:"base_ref,omitempty"`
-	Members   []WorkgroupMemberState `yaml:"members"             json:"members"`
-	CreatedAt time.Time              `yaml:"created_at"          json:"created_at"`
-	LastCheck time.Time              `yaml:"last_check,omitempty" json:"last_check,omitempty"`
+	Name    string                 `yaml:"name"                json:"name"`
+	Kind    string                 `yaml:"kind"                json:"kind"`
+	Root    string                 `yaml:"root"                json:"root"`
+	Source  string                 `yaml:"source,omitempty"    json:"source,omitempty"`
+	BaseRef string                 `yaml:"base_ref,omitempty"  json:"base_ref,omitempty"`
+	Members []WorkgroupMemberState `yaml:"members"             json:"members"`
+	// Declared marks a workgroup created from a config declaration; removing
+	// the declaration then means removing the workgroup. Workgroups created
+	// from flags or adopted have no declaration and are kept as recorded.
+	Declared  bool      `yaml:"declared,omitempty" json:"declared,omitempty"`
+	CreatedAt time.Time `yaml:"created_at"          json:"created_at"`
+	LastCheck time.Time `yaml:"last_check,omitempty" json:"last_check,omitempty"`
 }
 
 // WorkgroupMemberState is one working directory within a workgroup.
@@ -94,6 +123,7 @@ type WorkgroupMemberState struct {
 	RepoURL  string `yaml:"repo_url,omitempty" json:"repo_url,omitempty"`
 	RepoKey  string `yaml:"repo_key,omitempty" json:"repo_key,omitempty"`
 	Upstream string `yaml:"upstream,omitempty" json:"upstream,omitempty"`
+	CopyID   string `yaml:"copy_id,omitempty"  json:"copy_id,omitempty"`
 }
 
 // Load reads the state file from disk. Creates a new empty state if the file doesn't exist.
@@ -101,7 +131,7 @@ func Load(path string) (*State, error) {
 	path = expandHome(path)
 
 	s := &State{
-		Version:    1,
+		Version:    CurrentVersion,
 		Repos:      make(map[string]*RepoState),
 		Workgroups: make(map[string]*WorkgroupState),
 		path:       path,
@@ -115,10 +145,14 @@ func Load(path string) (*State, error) {
 		return nil, fmt.Errorf("reading state file %s: %w", path, err)
 	}
 
+	s.Version = 0 // a file without a version predates versioning
 	if err := yaml.Unmarshal(data, s); err != nil {
 		return nil, fmt.Errorf("parsing state file %s: %w", path, err)
 	}
 	s.path = path
+	if s.Version > CurrentVersion {
+		return nil, fmt.Errorf("%w: %s is version %d, this build supports up to %d; upgrade git-mgr", ErrNewerState, path, s.Version, CurrentVersion)
+	}
 
 	if s.Repos == nil {
 		s.Repos = make(map[string]*RepoState)
@@ -126,8 +160,23 @@ func Load(path string) (*State, error) {
 	if s.Workgroups == nil {
 		s.Workgroups = make(map[string]*WorkgroupState)
 	}
-
+	s.migrate()
 	return s, nil
+}
+
+// migrate upgrades a state read from an older schema in memory; Save writes
+// it back as CurrentVersion.
+func (s *State) migrate() {
+	if s.Version < 2 {
+		// Version 1 kept one tag list. Tags on hand-added repos were given by
+		// hand; tags on discovered repos came from their rules.
+		for _, r := range s.Repos {
+			if r.ManuallyAdded && len(r.UserTags) == 0 {
+				r.UserTags = slices.Clone(r.Tags)
+			}
+		}
+	}
+	s.Version = CurrentVersion
 }
 
 // Save writes the state file atomically (write to tmp + rename).

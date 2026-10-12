@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
+	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/reconcile"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
 func (c *AdoptCmd) Run(ctx *Context) error {
-	_, err := ctx.LoadConfig()
+	cfg, err := ctx.LoadConfig()
 	if err != nil {
 		return err
 	}
@@ -34,70 +34,31 @@ func (c *AdoptCmd) Run(ctx *Context) error {
 	}
 
 	if c.Scan {
-		return c.scanAndAdopt(ctx, st)
+		return c.scanAndAdopt(ctx, cfg, st)
 	}
-	return c.adoptSingle(ctx, st, c.Path)
+	return c.adoptSingle(ctx, cfg, st, c.Path)
 }
 
-func (c *AdoptCmd) adoptSingle(ctx *Context, st *state.State, repoPath string) error {
+func (c *AdoptCmd) adoptSingle(ctx *Context, cfg *config.Config, st *state.State, repoPath string) error {
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
 		return fmt.Errorf("resolving path: %w", err)
 	}
-
 	if !gitops.HasGitDir(absPath) {
 		return fmt.Errorf("%s is not a git repository", absPath)
 	}
-
 	identity, err := gitops.ParseRemoteURL(ctx.GoCtx(), absPath)
 	if err != nil {
 		return fmt.Errorf("parsing remote URL: %w", err)
 	}
-
-	key := identity.Host + "/" + identity.FullName
-
-	if _, exists := st.Repos[key]; exists {
-		fmt.Printf("Already tracked: %s\n", key)
+	if _, exists := st.Repos[identity.Key()]; exists {
+		fmt.Printf("Already tracked: %s\n", identity.Key())
 		return nil
 	}
-
-	if c.DryRun {
-		fmt.Printf("Would adopt: %s -> %s\n", absPath, key)
-		return nil
-	}
-
-	var tags []string
-	if c.Tag != "" {
-		tags = strings.Split(c.Tag, ",")
-	}
-
-	now := time.Now()
-	st.Repos[key] = &state.RepoState{
-		CloneURL:       identity.URL,
-		Host:           identity.Host,
-		Owner:          identity.Owner,
-		Name:           identity.Name,
-		FullName:       identity.FullName,
-		Provider:       identity.Host,
-		LocalPath:      absPath,
-		Cloned:         true,
-		Tags:           tags,
-		Status:         "clean",
-		ManuallyAdded:  true,
-		FirstSeen:      now,
-		LastDiscovered: now,
-	}
-
-	if err := st.Save(); err != nil {
-		return fmt.Errorf("saving state: %w", err)
-	}
-	logEvent(ctx, "adopt", key, absPath)
-
-	fmt.Printf("Adopted: %s -> %s\n", key, absPath)
-	return nil
+	return addByHand(ctx, cfg, st, reconcile.HandAdded(cfg, identity, absPath, splitTags(c.Tag)), c.DryRun)
 }
 
-func (c *AdoptCmd) scanAndAdopt(ctx *Context, st *state.State) error {
+func (c *AdoptCmd) scanAndAdopt(ctx *Context, cfg *config.Config, st *state.State) error {
 	absPath, err := filepath.Abs(c.Path)
 	if err != nil {
 		return fmt.Errorf("resolving path: %w", err)
@@ -125,7 +86,7 @@ func (c *AdoptCmd) scanAndAdopt(ctx *Context, st *state.State) error {
 
 	fmt.Printf("Found %d git repos\n", len(found))
 	for _, repoPath := range found {
-		if err := c.adoptSingle(ctx, st, repoPath); err != nil {
+		if err := c.adoptSingle(ctx, cfg, st, repoPath); err != nil {
 			fmt.Printf("  %s: %v\n", repoPath, err)
 		}
 	}

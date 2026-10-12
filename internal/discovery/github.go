@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/config"
@@ -209,6 +210,7 @@ func (c *ghCore) toRepo(r *github.Repository) Repo {
 		Owner:         owner,
 		Name:          name,
 		FullName:      owner + "/" + name,
+		ProviderID:    strconv.FormatInt(r.GetID(), 10),
 		SSHURL:        r.GetSSHURL(),
 		HTTPURL:       r.GetCloneURL(),
 		Description:   r.GetDescription(),

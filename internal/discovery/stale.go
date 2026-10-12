@@ -28,17 +28,20 @@ type StaleScope struct {
 }
 
 // StaleScopeOf returns the scope of a pass that produced results under the given
-// rule and tag filters. An unfiltered pass covers every tracked repo, including
-// repos whose rule has since been removed from config. A filtered pass covers
-// only repos first found by one of the rules that ran, so `sync --tag personal`
-// cannot mark work repos stale.
+// rule and tag filters. An unfiltered pass in which every rule succeeded covers
+// every tracked repo, including repos whose rule has since been removed from
+// config. Otherwise it covers only repos first found by a rule that ran and
+// succeeded, so `sync --tag personal` cannot judge work repos, and a rule that
+// failed judges nothing.
 func StaleScopeOf(results []DiscoverResult, ruleFilter, tagFilter string) StaleScope {
-	if ruleFilter == "" && tagFilter == "" {
+	if ruleFilter == "" && tagFilter == "" && !AnyFailed(results) {
 		return StaleScope{all: true}
 	}
 	rules := make(map[string]bool, len(results))
 	for _, r := range results {
-		rules[r.Rule] = true
+		if r.Err == nil {
+			rules[r.Rule] = true
+		}
 	}
 	return StaleScope{rules: rules}
 }

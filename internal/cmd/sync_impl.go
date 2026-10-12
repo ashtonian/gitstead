@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -13,7 +12,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/notify"
-	"github.com/ashtonian/git-mgr/internal/pathtemplate"
+	"github.com/ashtonian/git-mgr/internal/reconcile"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -57,59 +56,48 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	}
 
 	log := ctx.Logger()
+	var reconcileErr error
 
-	// Auto-discover if enabled
+	// Discover, then bring repos in line with config as far as reconcile.auto
+	// allows. Without discovery only hand-added repos can be judged.
+	scope := reconcile.Scope{Repos: true}
+	var results []discovery.DiscoverResult
 	if cfg.Sync.AutoDiscover && !c.NoDiscover {
 		if !ctx.Quiet {
 			fmt.Println("Discovering repos (auto-discover enabled)...")
 		}
-		results, discovered, err := discovery.RunDiscovery(ctx.GoCtx(), cfg, "", c.Tag)
+		var err error
+		results, scope.Discovered, err = discovery.RunDiscovery(ctx.GoCtx(), cfg, "", c.Tag)
 		if err != nil {
 			log.Warn("auto-discovery failed", "error", err)
 		} else {
-			// Clone new repos
-			for key, repo := range discovered {
-				if _, exists := st.Repos[key]; !exists {
-					if !ctx.Quiet {
-						fmt.Printf("  New repo: %s\n", key)
-					}
-					repoCfg := cfg.ResolveForRepo(key)
-					relPath, err := resolveRepoPath(repoCfg, repo)
-					if err != nil {
-						log.Warn("path template error", "repo", key, "error", err)
-						continue
-					}
-					destPath := filepath.Join(repoCfg.BaseDir, relPath)
-					sshKey := cfg.ResolveSSHKey(key, "")
-					cloneURL, cloneKey := cloneTarget(repo, cfg.CloneProtocolFor(key, repo.DiscoveredBy), sshKey)
-					if err := gitops.Clone(ctx.GoCtx(), cloneURL, destPath, cloneKey); err != nil {
-						log.Warn("clone failed", "repo", key, "error", err)
-						continue
-					}
-					addRepoToState(st, repo, destPath, cloneURL)
-					logEvent(ctx, "clone", key, cloneURL)
-				}
-			}
+			scope.Rules = discovery.StaleScopeOf(results, "", c.Tag)
+		}
+	}
+	plan := reconcile.Compute(ctx.GoCtx(), cfg, st, scope)
+	if err := applyAuto(ctx, cfg, st, plan, reconcile.AutoFilter(cfg.Reconcile.Auto)); err != nil {
+		reconcileErr = err
+	}
 
-			// Detect stale — but only if every rule succeeded. On a partial
-			// failure the discovered set is incomplete, and marking the missing
-			// repos stale (or deleting them under remove_and_delete) would be
-			// destructive on a transient provider outage.
-			if discovery.AnyFailed(results) {
-				log.Warn("skipping stale detection: one or more discovery rules failed")
-			} else {
-				discoveredKeys := make(map[string]bool)
-				for k := range discovered {
-					discoveredKeys[k] = true
-				}
-				outcome := discovery.DetectStale(st, discoveredKeys, discovery.StaleScopeOf(results, "", c.Tag), cfg.Cleanup, true,
-					archivingRemover(ctx.GoCtx(), log, cfg.Backup.ArchiveDir))
-				if outcome.Reaped > 0 {
-					log.Info("cleaned up stale repos", "count", outcome.Reaped, "policy", cfg.Cleanup.Policy)
-				}
-				if outcome.Failed > 0 {
-					log.Warn("some stale repos could not be deleted", "count", outcome.Failed)
-				}
+	// Detect stale -- but only if every rule succeeded. On a partial failure the
+	// discovered set is incomplete, and marking the missing repos stale (or
+	// deleting them under remove_and_delete) would be destructive on a
+	// transient provider outage.
+	if scope.Discovered != nil {
+		if discovery.AnyFailed(results) {
+			log.Warn("skipping stale detection: one or more discovery rules failed")
+		} else {
+			discoveredKeys := make(map[string]bool)
+			for k := range scope.Discovered {
+				discoveredKeys[k] = true
+			}
+			outcome := discovery.DetectStale(st, discoveredKeys, scope.Rules, cfg.Cleanup, true,
+				archivingRemover(ctx.GoCtx(), log, cfg.Backup.ArchiveDir))
+			if outcome.Reaped > 0 {
+				log.Info("cleaned up stale repos", "count", outcome.Reaped, "policy", cfg.Cleanup.Policy)
+			}
+			if outcome.Failed > 0 {
+				log.Warn("some stale repos could not be deleted", "count", outcome.Failed)
 			}
 		}
 	}
@@ -255,9 +243,9 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	}
 
 	if len(result.errors) > 0 {
-		return fmt.Errorf("%d repos failed", len(result.errors))
+		return errors.Join(fmt.Errorf("%d repos failed", len(result.errors)), reconcileErr)
 	}
-	return nil
+	return reconcileErr
 }
 
 func fetchWithRetry(ctx context.Context, repoPath, sshKey string, cfg config.SyncConfig) error {
@@ -281,13 +269,4 @@ func fetchWithRetry(ctx context.Context, repoPath, sshKey string, cfg config.Syn
 		}
 	}
 	return lastErr
-}
-
-func resolveRepoPath(cfg *config.Config, repo discovery.Repo) (string, error) {
-	return pathtemplate.Resolve(cfg.PathTemplate, pathtemplate.RepoData{
-		Host:     repo.Host,
-		Owner:    repo.Owner,
-		Name:     repo.Name,
-		FullName: repo.FullName,
-	})
 }

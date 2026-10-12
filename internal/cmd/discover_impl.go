@@ -2,12 +2,9 @@ package cmd
 
 import (
 	"fmt"
-	"path/filepath"
-	"time"
 
 	"github.com/ashtonian/git-mgr/internal/discovery"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/pathtemplate"
+	"github.com/ashtonian/git-mgr/internal/reconcile"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
@@ -38,18 +35,12 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	// Classify repos
-	var newRepos []discovery.Repo
 	existing := 0
-	for key, repo := range discovered {
+	for key := range discovered {
 		if _, ok := st.Repos[key]; ok {
 			existing++
-		} else {
-			newRepos = append(newRepos, repo)
 		}
 	}
-
-	// Print summary
 	for _, r := range results {
 		if r.Err != nil {
 			fmt.Printf("  [%s] %s: ERROR: %v\n", r.Provider, r.Rule, r.Err)
@@ -60,13 +51,17 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 			fmt.Printf("      warning: %s\n", w)
 		}
 	}
-	fmt.Printf("\n%d new, %d existing\n", len(newRepos), existing)
+	fmt.Printf("\n%d new, %d existing\n\n", len(discovered)-existing, existing)
 
-	if len(newRepos) > 0 {
-		fmt.Println("\nNew repos:")
-		for _, r := range newRepos {
-			fmt.Printf("  + %s\n", r.Key())
-		}
+	// Bring repos in line before judging staleness, so a renamed repo is
+	// rekeyed rather than marked stale under its old name.
+	scope := discovery.StaleScopeOf(results, c.Rule, c.Tag)
+	plan := reconcile.Compute(ctx.GoCtx(), cfg, st, reconcile.Scope{Discovered: discovered, Rules: scope, Repos: true})
+	var applyErr error
+	if c.Apply {
+		applyErr = applyAuto(ctx, cfg, st, plan, reconcile.Safe)
+	} else {
+		printPlan(plan, "safe")
 	}
 
 	// Detect stale — but only on a fully successful run. If any rule failed,
@@ -79,7 +74,7 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 		for k := range discovered {
 			discoveredKeys[k] = true
 		}
-		outcome := discovery.DetectStale(st, discoveredKeys, discovery.StaleScopeOf(results, c.Rule, c.Tag), cfg.Cleanup, c.Apply,
+		outcome := discovery.DetectStale(st, discoveredKeys, scope, cfg.Cleanup, c.Apply,
 			archivingRemover(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir))
 		if outcome.NewlyStale > 0 {
 			fmt.Printf("\n%d newly stale repos\n", outcome.NewlyStale)
@@ -97,66 +92,12 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 	}
 
 	if !c.Apply {
-		if len(newRepos) > 0 {
-			fmt.Println("\nUse --apply to clone new repos and update state.")
-		}
+		fmt.Println("\nUse --apply to make the changes that move and delete nothing, or `git-mgr apply` for all of them.")
 		return nil
 	}
-
-	// Clone new repos
-	if len(newRepos) > 0 {
-		fmt.Printf("\nCloning %d new repos...\n", len(newRepos))
-		for i, repo := range newRepos {
-			repoCfg := cfg.ResolveForRepo(repo.Key())
-			tmpl := repoCfg.PathTemplate
-
-			relPath, err := pathtemplate.Resolve(tmpl, pathtemplate.RepoData{
-				Host:     repo.Host,
-				Owner:    repo.Owner,
-				Name:     repo.Name,
-				FullName: repo.FullName,
-			})
-			if err != nil {
-				fmt.Printf("  [%d/%d] %s: path template error: %v\n", i+1, len(newRepos), repo.Key(), err)
-				continue
-			}
-
-			destPath := filepath.Join(repoCfg.BaseDir, relPath)
-			sshKey := cfg.ResolveSSHKey(repo.Key(), "")
-			cloneURL, cloneKey := cloneTarget(repo, cfg.CloneProtocolFor(repo.Key(), repo.DiscoveredBy), sshKey)
-
-			fmt.Printf("  [%d/%d] %s ...", i+1, len(newRepos), repo.Key())
-			start := time.Now()
-
-			if err := gitops.Clone(ctx.GoCtx(), cloneURL, destPath, cloneKey); err != nil {
-				fmt.Printf(" error: %v\n", err)
-				continue
-			}
-			fmt.Printf(" done (%.1fs)\n", time.Since(start).Seconds())
-
-			addRepoToState(st, repo, destPath, cloneURL)
-			logEvent(ctx, "clone", repo.Key(), cloneURL)
-		}
-	}
-
-	// Update existing repos' metadata
-	for key, repo := range discovered {
-		if rs, ok := st.Repos[key]; ok {
-			rs.LastDiscovered = time.Now()
-			rs.IsArchived = repo.IsArchived
-			rs.IsFork = repo.IsFork
-			rs.Description = repo.Description
-			rs.Language = repo.Language
-			rs.Languages = repo.Languages
-			rs.Topics = repo.Topics
-			rs.DefaultBranch = repo.DefaultBranch
-		}
-	}
-
 	if err := st.Save(); err != nil {
 		return fmt.Errorf("saving state: %w", err)
 	}
-
 	fmt.Printf("State updated: %d repos tracked.\n", len(st.Repos))
-	return nil
+	return applyErr
 }

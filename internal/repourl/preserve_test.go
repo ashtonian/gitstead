@@ -1,9 +1,9 @@
-package gitops_test
+package repourl_test
 
 import (
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/repourl"
 )
 
 // TestParseURL_PreservesOriginal verifies ParseURL keeps the exact input URL
@@ -17,7 +17,7 @@ func TestParseURL_PreservesOriginal(t *testing.T) {
 		"git@github.com:owner/repo.git",
 		"/srv/git/origin.git",
 	} {
-		id, err := gitops.ParseURL(raw)
+		id, err := repourl.Parse(raw)
 		if err != nil {
 			t.Fatalf("ParseURL(%q): %v", raw, err)
 		}

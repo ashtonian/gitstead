@@ -25,6 +25,8 @@ type CLI struct {
 	Bootstrap  BootstrapCmd  `cmd:"" help:"Set up a fresh machine: init, doctor, discover, sync, install agent."`
 	Discover   DiscoverCmd   `cmd:"" help:"Discover repos from configured providers."`
 	Sync       SyncCmd       `cmd:"" help:"Fetch all tracked repos and backup uncommitted changes."`
+	Plan       PlanCmd       `cmd:"" help:"Show what applying config would change, without changing anything."`
+	Apply      ApplyCmd      `cmd:"" help:"Make repos and workgroups match config, including moves and removals."`
 	Backup     BackupCmd     `cmd:"" help:"Backup uncommitted changes."`
 	Restore    RestoreCmd    `cmd:"" help:"Restore a backup (print steps, apply, or --into a scratch dir)."`
 	Status     StatusCmd     `cmd:"" help:"Show state of all managed repos."`
