@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/repourl"
 )
 
 func TestRelToBase(t *testing.T) {
@@ -20,15 +20,18 @@ func TestRelToBase(t *testing.T) {
 
 func TestManifestDest(t *testing.T) {
 	cfg := &config.Config{BaseDir: "/b", PathTemplate: "{{.Host}}/{{.Owner}}/{{.Name}}"}
-	id := &gitops.RepoIdentity{Host: "github.com", Owner: "a", Name: "b", FullName: "a/b"}
+	id := &repourl.Identity{Host: "github.com", Owner: "a", Name: "b", FullName: "a/b"}
 
-	if got := manifestDest(cfg, manifestRepo{Path: "x/y"}, id); got != filepath.Join("/b", "x/y") {
-		t.Errorf("relative path: got %q", got)
-	}
-	if got := manifestDest(cfg, manifestRepo{Path: "/abs/p"}, id); got != "/abs/p" {
-		t.Errorf("absolute path: got %q", got)
-	}
-	if got := manifestDest(cfg, manifestRepo{}, id); got != filepath.Join("/b", "github.com/a/b") {
-		t.Errorf("template path: got %q", got)
+	for _, tt := range []struct {
+		path, want string
+	}{
+		{"x/y", filepath.Join("/b", "x/y")},
+		{"/abs/p", "/abs/p"},
+		{"", filepath.Join("/b", "github.com/a/b")},
+	} {
+		got, err := manifestDest(cfg, manifestRepo{Path: tt.path}, id)
+		if err != nil || got != tt.want {
+			t.Errorf("manifestDest(path %q) = %q, %v; want %q", tt.path, got, err, tt.want)
+		}
 	}
 }

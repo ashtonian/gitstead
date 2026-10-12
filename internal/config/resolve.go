@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/ashtonian/git-mgr/internal/repourl"
 )
 
 // --- Path helpers ---
@@ -115,8 +117,7 @@ func (c *Config) ResolveForRepo(repoKey string) *Config {
 
 // CloneProtocolFor resolves the clone transport for a repo, in order: a per-repo
 // override, the provider that discovered it (via the discovery rule), then the
-// top-level clone_protocol default. Only consulted at first clone of a newly
-// discovered repo; afterwards the stored remote URL is used.
+// top-level clone_protocol default.
 func (c *Config) CloneProtocolFor(repoKey, discoveredBy string) string {
 	for _, o := range c.Overrides {
 		if matchesOverride(repoKey, o.Repos) && o.CloneProtocol != "" {
@@ -135,7 +136,9 @@ func (c *Config) CloneProtocolFor(repoKey, discoveredBy string) string {
 	return c.CloneProtocol
 }
 
-// ResolveSSHKey returns the SSH key path for a given repo, checking overrides -> rule -> provider.
+// ResolveSSHKey returns the SSH key path for a given repo, checking overrides,
+// then its `repos:` entry, then the discovering rule, then the rule's provider.
+// "" means none is configured.
 func (c *Config) ResolveSSHKey(repoKey, ruleName string) string {
 	var overrideKey string
 	for _, o := range c.Overrides {
@@ -145,6 +148,15 @@ func (c *Config) ResolveSSHKey(repoKey, ruleName string) string {
 	}
 	if overrideKey != "" {
 		return ExpandHome(overrideKey)
+	}
+
+	for _, mr := range c.Repos {
+		if mr.SSHKey == "" {
+			continue
+		}
+		if id, err := repourl.Parse(mr.URL); err == nil && id.Key() == repoKey {
+			return ExpandHome(mr.SSHKey)
+		}
 	}
 
 	for _, r := range c.Discovery {

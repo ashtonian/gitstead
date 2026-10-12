@@ -10,6 +10,7 @@ import (
 func TestGHCoreToRepoVisibilityInternal(t *testing.T) {
 	c := &ghCore{host: "github.example.com", inlineTopics: true}
 	r := c.toRepo(&github.Repository{
+		ID:         github.Ptr(int64(4242)),
 		Owner:      &github.User{Login: github.Ptr("acme")},
 		Name:       github.Ptr("svc"),
 		Visibility: github.Ptr("internal"),
@@ -24,6 +25,9 @@ func TestGHCoreToRepoVisibilityInternal(t *testing.T) {
 	}
 	if r.FullName != "acme/svc" {
 		t.Errorf("fullname = %q", r.FullName)
+	}
+	if r.ProviderID != "4242" {
+		t.Errorf("provider ID = %q, want 4242", r.ProviderID)
 	}
 	if r.Language != "Go" {
 		t.Errorf("language = %q", r.Language)
@@ -54,6 +58,7 @@ func TestGHCoreToRepoVisibilityFallback(t *testing.T) {
 func TestGitLabToRepo(t *testing.T) {
 	g := &GitLabProvider{host: "gitlab.example.com"}
 	r := g.toRepo(&gitlab.Project{
+		ID:           77,
 		Path:         "proj",
 		Namespace:    &gitlab.ProjectNamespace{FullPath: "grp/sub"},
 		Visibility:   gitlab.InternalVisibility,
@@ -66,6 +71,9 @@ func TestGitLabToRepo(t *testing.T) {
 	}
 	if r.Owner != "grp/sub" || r.FullName != "grp/sub/proj" {
 		t.Errorf("owner/fullname = %q / %q", r.Owner, r.FullName)
+	}
+	if r.ProviderID != "77" {
+		t.Errorf("provider ID = %q, want 77", r.ProviderID)
 	}
 	if !r.IsArchived {
 		t.Error("expected archived")

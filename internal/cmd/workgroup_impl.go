@@ -1,9 +1,10 @@
 package cmd
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/reconcile"
 	"github.com/ashtonian/git-mgr/internal/state"
 	"github.com/ashtonian/git-mgr/internal/workgroup"
 )
@@ -274,35 +276,38 @@ func (c *WGCreateCmd) materialize(ctx *Context) error {
 		return fmt.Errorf("workgroup %q already exists; use 'workgroup ensure %s' to reconcile", c.Name, c.Name)
 	}
 
-	// A synthesized workgroup is built from flags; otherwise look the name up in
-	// config (the original behavior).
-	var wg config.Workgroup
-	var spec *workgroup.Spec
-	if c.synthesized() {
-		wg, err = c.toWorkgroup()
-		if err != nil {
+	// A workgroup declared in config is created like any other change config
+	// asks for; one synthesized from flags is materialized here.
+	if !c.synthesized() {
+		if c.Save {
+			return fmt.Errorf("--save requires synthesizing flags (--repo/--from-tag/--source/--count/--member)")
+		}
+		if _, err := workgroup.FromConfig(cfg, st, c.Name); err != nil {
 			return err
 		}
-		spec, err = workgroup.SpecFromWorkgroup(cfg, st, &wg)
-	} else {
-		spec, err = workgroup.FromConfig(cfg, st, c.Name)
+		return ensureWorkgroups(ctx, cfg, st, c.Name)
 	}
+	wg, err := c.toWorkgroup()
+	if err != nil {
+		return err
+	}
+	spec, err := workgroup.SpecFromWorkgroup(cfg, st, &wg)
 	if err != nil {
 		return err
 	}
 
-	statuses, err := workgroup.Ensure(ctx.GoCtx(), spec, wgSSHKeyFor(cfg, st))
+	statuses, err := workgroup.Ensure(ctx.GoCtx(), spec, memberSSHKey(cfg, st))
 	if err != nil {
 		return err
 	}
 	created, failed := printEnsure(statuses, ctx.Quiet)
-	persistWorkgroup(st, spec)
+	// --save turns the flags into a config declaration, which then owns it.
+	persistWorkgroup(ctx, st, spec, c.Save)
 
-	// --sync (or sync:true on a config workgroup) tracks the underlying repo(s)
-	// so the normal sync loop keeps them fetched.
-	wantSync := c.Sync || (!c.synthesized() && configWorkgroupSync(cfg, c.Name))
-	if wantSync {
-		n, skipped := trackWorkgroupRepos(st, spec)
+	// --sync tracks the underlying repo(s) so the normal sync loop keeps them
+	// fetched.
+	if c.Sync {
+		n, skipped := workgroup.TrackRepos(ctx.GoCtx(), st, spec)
 		if n > 0 && !ctx.Quiet {
 			fmt.Printf("Tracking %d repo(s) for sync.\n", n)
 		}
@@ -318,9 +323,6 @@ func (c *WGCreateCmd) materialize(ctx *Context) error {
 
 	// --save persists the synthesized declaration to config.
 	if c.Save {
-		if !c.synthesized() {
-			return fmt.Errorf("--save requires synthesizing flags (--repo/--from-tag/--source/--count/--member)")
-		}
 		if err := config.SaveWorkgroup(ctx.Config, wg, c.Force); err != nil {
 			return err
 		}
@@ -338,59 +340,6 @@ func (c *WGCreateCmd) materialize(ctx *Context) error {
 	return nil
 }
 
-// configWorkgroupSync reports whether the named config workgroup has sync: true.
-func configWorkgroupSync(cfg *config.Config, name string) bool {
-	for i := range cfg.Workgroups {
-		if cfg.Workgroups[i].Name == name {
-			return cfg.Workgroups[i].Sync
-		}
-	}
-	return false
-}
-
-// trackWorkgroupRepos registers the workgroup's underlying repo(s) as tracked
-// (fetch-only) so `git-mgr sync` keeps them current. For worktree groups that is
-// the shared source repo; for clone groups it is each member clone. Already
-// tracked repos are left untouched. Returns how many new repos were added and
-// the paths it skipped because their origin remote could not be parsed (no
-// remote, or a non-SSH URL) -- those can't be synced and the caller warns.
-func trackWorkgroupRepos(st *state.State, spec *workgroup.Spec) (added int, skipped []string) {
-	track := func(localPath string) {
-		if localPath == "" {
-			return
-		}
-		for _, r := range st.Repos {
-			if r.LocalPath == localPath {
-				return // already tracked
-			}
-		}
-		id, err := gitops.ParseRemoteURL(context.Background(), localPath)
-		if err != nil {
-			skipped = append(skipped, localPath)
-			return
-		}
-		key := id.Host + "/" + id.FullName
-		if _, ok := st.Repos[key]; ok {
-			return
-		}
-		st.Repos[key] = &state.RepoState{
-			CloneURL: id.URL, Host: id.Host, Owner: id.Owner, Name: id.Name,
-			FullName: id.FullName, Provider: id.Host, LocalPath: localPath,
-			Cloned: true, ManuallyAdded: true, Status: "clean",
-			Tags: []string{"workgroup:" + spec.Name}, FirstSeen: time.Now(),
-		}
-		added++
-	}
-	if spec.Kind == "worktree" {
-		track(spec.Source)
-	} else {
-		for _, m := range spec.Members {
-			track(m.Path)
-		}
-	}
-	return added, skipped
-}
-
 func (c *WGEnsureCmd) Run(ctx *Context) error {
 	cfg, err := ctx.LoadConfig()
 	if err != nil {
@@ -401,45 +350,28 @@ func (c *WGEnsureCmd) Run(ctx *Context) error {
 		return err
 	}
 	defer unlock()
-
-	var names []string
-	if c.Name != "" {
-		names = []string{c.Name}
-	} else {
-		for _, wg := range cfg.Workgroups {
-			names = append(names, wg.Name)
-		}
-		sort.Strings(names)
+	if c.Name != "" && st.Workgroups[c.Name] == nil && !slices.ContainsFunc(cfg.Workgroups, func(w config.Workgroup) bool { return w.Name == c.Name }) {
+		return fmt.Errorf("workgroup %q is neither declared in config nor recorded", c.Name)
 	}
-	if len(names) == 0 {
-		fmt.Println("No workgroups configured.")
+	return ensureWorkgroups(ctx, cfg, st, c.Name)
+}
+
+// ensureWorkgroups creates what is missing of the named workgroup, or of all
+// of them: workgroups declared in config, members added to a declaration, and
+// members gone from disk. Moves and removals wait for `git-mgr apply`.
+func ensureWorkgroups(ctx *Context, cfg *config.Config, st *state.State, name string) error {
+	scope := reconcile.Scope{Workgroups: true}
+	if name != "" {
+		scope.Only = func(n string) bool { return n == name }
+	}
+	plan := reconcile.Compute(ctx.GoCtx(), cfg, st, scope)
+	if plan.Empty() {
+		if !ctx.Quiet {
+			fmt.Println("Workgroups match config.")
+		}
 		return nil
 	}
-
-	totalFailed := 0
-	for _, name := range names {
-		spec, err := workgroup.FromConfig(cfg, st, name)
-		if err != nil {
-			return err
-		}
-		if !ctx.Quiet {
-			fmt.Printf("%s:\n", name)
-		}
-		statuses, err := workgroup.Ensure(ctx.GoCtx(), spec, wgSSHKeyFor(cfg, st))
-		if err != nil {
-			return err
-		}
-		_, failed := printEnsure(statuses, ctx.Quiet)
-		totalFailed += failed
-		persistWorkgroup(st, spec)
-	}
-	if err := st.Save(); err != nil {
-		return err
-	}
-	if totalFailed > 0 {
-		return fmt.Errorf("%d member(s) failed", totalFailed)
-	}
-	return nil
+	return errors.Join(applyAuto(ctx, cfg, st, plan, reconcile.Safe), blockedErr(plan))
 }
 
 func (c *WGAdoptCmd) Run(ctx *Context) error {
@@ -455,7 +387,7 @@ func (c *WGAdoptCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	persistWorkgroup(st, spec)
+	persistWorkgroup(ctx, st, spec, false)
 	if err := st.Save(); err != nil {
 		return err
 	}
@@ -640,26 +572,21 @@ func lockedState(ctx *Context) (*state.State, func(), error) {
 	return st, st.ReleaseLock, nil
 }
 
-// persistWorkgroup writes the spec into state, preserving the original CreatedAt.
-func persistWorkgroup(st *state.State, spec *workgroup.Spec) {
+// persistWorkgroup writes the spec into state, preserving the original
+// CreatedAt. declared says whether config now declares it.
+func persistWorkgroup(ctx *Context, st *state.State, spec *workgroup.Spec, declared bool) {
 	ws := spec.ToState(time.Now())
+	ws.Declared = declared
+	for i := range ws.Members {
+		ws.Members[i].CopyID = gitops.ReadCopyID(ctx.GoCtx(), ws.Members[i].Path)
+	}
 	if prev, ok := st.Workgroups[spec.Name]; ok {
 		ws.CreatedAt = prev.CreatedAt
 	}
 	st.Workgroups[spec.Name] = ws
 }
 
-// wgSSHKeyFor returns an SSH-key resolver for clone members that originate from
-// a tracked repo (worktree members are local and need no key).
-func wgSSHKeyFor(cfg *config.Config, st *state.State) func(workgroup.Member) string {
-	return func(m workgroup.Member) string {
-		if m.RepoKey == "" {
-			return ""
-		}
-		discoveredBy := ""
-		if r, ok := st.Repos[m.RepoKey]; ok {
-			discoveredBy = r.DiscoveredBy
-		}
-		return cfg.ResolveSSHKey(m.RepoKey, discoveredBy)
-	}
+// memberSSHKey returns the SSH-key resolver for cloning workgroup members.
+func memberSSHKey(cfg *config.Config, st *state.State) func(workgroup.Member) string {
+	return func(m workgroup.Member) string { return reconcile.MemberSSHKey(cfg, st, m) }
 }

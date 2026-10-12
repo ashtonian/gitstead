@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"code.gitea.io/sdk/gitea"
@@ -166,6 +167,7 @@ func (g *GiteaProvider) toRepo(r *gitea.Repository) Repo {
 		Owner:         owner,
 		Name:          r.Name,
 		FullName:      owner + "/" + r.Name,
+		ProviderID:    strconv.FormatInt(r.ID, 10),
 		SSHURL:        r.SSHURL,
 		HTTPURL:       r.CloneURL,
 		Description:   r.Description,

@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/config"
@@ -202,6 +203,7 @@ func (g *GitLabProvider) toRepo(p *gitlab.Project) Repo {
 		Owner:         owner,
 		Name:          p.Path,
 		FullName:      owner + "/" + p.Path,
+		ProviderID:    strconv.FormatInt(int64(p.ID), 10),
 		SSHURL:        p.SSHURLToRepo,
 		HTTPURL:       p.HTTPURLToRepo,
 		Description:   p.Description,

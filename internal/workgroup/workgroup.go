@@ -288,6 +288,64 @@ func RemoveEmptyRoot(spec *Spec) {
 	_ = os.Remove(spec.Root) // fails, harmlessly, unless empty
 }
 
+// TrackRepos registers the workgroup's underlying repos as tracked, by hand,
+// so `git-mgr sync` keeps them fetched: the shared source for a worktree
+// group, each member clone for a clone group. Repos already tracked are left
+// alone. It returns how many it added and the paths it skipped because their
+// origin remote could not be parsed.
+func TrackRepos(ctx context.Context, st *state.State, spec *Spec) (added int, skipped []string) {
+	track := func(localPath string) {
+		if localPath == "" {
+			return
+		}
+		for _, r := range st.Repos {
+			if r.LocalPath == localPath {
+				return
+			}
+		}
+		id, err := gitops.ParseRemoteURL(ctx, localPath)
+		if err != nil {
+			skipped = append(skipped, localPath)
+			return
+		}
+		key := id.Key()
+		if _, ok := st.Repos[key]; ok {
+			return
+		}
+		tags := []string{"workgroup:" + spec.Name}
+		st.Repos[key] = &state.RepoState{
+			CloneURL: id.URL, Host: id.Host, Owner: id.Owner, Name: id.Name,
+			FullName: id.FullName, Provider: id.Host, LocalPath: localPath,
+			CopyID: gitops.ReadCopyID(ctx, localPath), Cloned: true, ManuallyAdded: true,
+			Status: "clean", Tags: tags, UserTags: tags, FirstSeen: time.Now(),
+		}
+		added++
+	}
+	if spec.Kind == "worktree" {
+		track(spec.Source)
+	} else {
+		for _, m := range spec.Members {
+			track(m.Path)
+		}
+	}
+	return added, skipped
+}
+
+// MoveMember moves member m's directory to dest: with `git worktree move` for
+// a worktree member, so its source repo follows, or a rename for a clone.
+func MoveMember(ctx context.Context, spec *Spec, m Member, dest string) error {
+	if _, err := os.Lstat(dest); err == nil {
+		return fmt.Errorf("cannot move %s: %s already exists", m.Path, dest)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	if spec.Kind == "worktree" && spec.Source != "" {
+		return gitops.WorktreeMove(ctx, spec.Source, m.Path, dest)
+	}
+	return os.Rename(m.Path, dest)
+}
+
 // ScanAdopt builds a clone-kind Spec from the immediate git subdirectories of dir.
 func ScanAdopt(name, dir string) (*Spec, error) {
 	dir = config.ExpandHome(dir)

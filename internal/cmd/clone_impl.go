@@ -1,13 +1,14 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/pathtemplate"
+	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/git-mgr/internal/reconcile"
+	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
@@ -22,78 +23,44 @@ func (c *CloneCmd) Run(ctx *Context) error {
 	}
 	defer unlock()
 
-	identity, err := gitops.ParseURL(c.URL)
+	id, err := repourl.Parse(c.URL)
 	if err != nil {
 		return fmt.Errorf("parsing URL: %w", err)
 	}
-
-	key := identity.Host + "/" + identity.FullName
-
-	if _, exists := st.Repos[key]; exists {
-		return fmt.Errorf("repo %s is already tracked", key)
+	if _, exists := st.Repos[id.Key()]; exists {
+		return fmt.Errorf("repo %s is already tracked", id.Key())
 	}
 
-	// Determine clone path, honoring any per-repo override (base_dir/path_template).
-	repoCfg := cfg.ResolveForRepo(key)
-	var destPath string
-	if c.Path != "" {
-		destPath = c.Path
-	} else {
-		relPath, err := pathtemplate.Resolve(repoCfg.PathTemplate, pathtemplate.RepoData{
-			Host:     identity.Host,
-			Owner:    identity.Owner,
-			Name:     identity.Name,
-			FullName: identity.FullName,
-		})
-		if err != nil {
-			return fmt.Errorf("resolving path: %w", err)
+	dest := c.Path
+	if dest == "" {
+		if dest, err = reconcile.TemplatePath(cfg, id.Key(), id.Host, id.Owner, id.Name, id.FullName); err != nil {
+			return err
 		}
-		destPath = filepath.Join(repoCfg.BaseDir, relPath)
-	}
-
-	// Clone exactly the URL the user gave (preserving scheme/port), and use an SSH
-	// key only for SSH transports -- https auth flows through git's credential
-	// helper.
-	cloneURL, cloneKey := c.URL, ""
-	if !isHTTPURL(c.URL) {
-		cloneKey = cfg.ResolveSSHKey(key, "")
-	}
-
-	fmt.Printf("Cloning %s ...\n", key)
-	if err := gitops.Clone(ctx.GoCtx(), cloneURL, destPath, cloneKey); err != nil {
+	} else if dest, err = filepath.Abs(config.ExpandHome(dest)); err != nil {
 		return err
 	}
+	return addByHand(ctx, cfg, st, reconcile.HandAdded(cfg, id, dest, splitTags(c.Tag)), false)
+}
 
-	var tags []string
-	if c.Tag != "" {
-		tags = strings.Split(c.Tag, ",")
+// addByHand plans tracking one repo added by hand -- cloning it, or adopting
+// the clone already at its path -- and applies the plan unless dryRun.
+func addByHand(ctx *Context, cfg *config.Config, st *state.State, d reconcile.Repo, dryRun bool) error {
+	desired := map[string]reconcile.Repo{d.Key: d}
+	seen := reconcile.Observe(ctx.GoCtx(), reconcile.RepoPaths(desired, st), 1)
+	plan := reconcile.PlanRepos(desired, st, seen, false)
+	if dryRun {
+		printPlan(plan, "all")
+		return blockedErr(plan)
 	}
+	printDriftAndBlocked(plan)
+	results := plan.Apply(ctx.GoCtx(), reconcileEnv(cfg, st), reconcile.All)
+	logResults(ctx, results)
+	return errors.Join(printResults(results, resultsEach), blockedErr(plan))
+}
 
-	now := time.Now()
-	st.Repos[key] = &state.RepoState{
-		CloneURL:       cloneURL,
-		Host:           identity.Host,
-		Owner:          identity.Owner,
-		Name:           identity.Name,
-		FullName:       identity.FullName,
-		Provider:       identity.Host,
-		LocalPath:      destPath,
-		Cloned:         true,
-		Tags:           tags,
-		Status:         "clean",
-		ManuallyAdded:  true,
-		FirstSeen:      now,
-		LastDiscovered: now,
+func splitTags(s string) []string {
+	if s == "" {
+		return nil
 	}
-
-	if err := st.Save(); err != nil {
-		return fmt.Errorf("saving state: %w", err)
-	}
-	logEvent(ctx, "clone", key, cloneURL)
-
-	fmt.Printf("Cloned to %s\n", destPath)
-	if len(tags) > 0 {
-		fmt.Printf("Tags: %v\n", tags)
-	}
-	return nil
+	return strings.Split(s, ",")
 }

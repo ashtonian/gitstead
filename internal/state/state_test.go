@@ -1,6 +1,8 @@
 package state_test
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -17,8 +19,8 @@ func TestLoadSave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if st.Version != 1 {
-		t.Errorf("version: got %d, want 1", st.Version)
+	if st.Version != state.CurrentVersion {
+		t.Errorf("version: got %d, want %d", st.Version, state.CurrentVersion)
 	}
 	if len(st.Repos) != 0 {
 		t.Errorf("repos: got %d, want 0", len(st.Repos))
@@ -93,5 +95,43 @@ func TestHasTag(t *testing.T) {
 	}
 	if repo.HasTag("personal") {
 		t.Error("expected HasTag('personal') to be false")
+	}
+}
+
+func TestLoad_MigratesVersion1(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.yaml")
+	v1 := `version: 1
+repos:
+  local/me/added:
+    tags: [mine]
+    manually_added: true
+  github.com/acme/found:
+    tags: [work]
+`
+	if err := os.WriteFile(path, []byte(v1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := state.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Version != state.CurrentVersion {
+		t.Errorf("version = %d", st.Version)
+	}
+	if got := st.Repos["local/me/added"].UserTags; len(got) != 1 || got[0] != "mine" {
+		t.Errorf("a hand-added repo's tags are user tags, got %v", got)
+	}
+	if got := st.Repos["github.com/acme/found"].UserTags; len(got) != 0 {
+		t.Errorf("a discovered repo's tags came from rules, got user tags %v", got)
+	}
+}
+
+func TestLoad_RefusesNewerVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.yaml")
+	if err := os.WriteFile(path, []byte("version: 99\nrepos: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := state.Load(path); !errors.Is(err, state.ErrNewerState) {
+		t.Fatalf("Load of a newer state = %v, want ErrNewerState", err)
 	}
 }

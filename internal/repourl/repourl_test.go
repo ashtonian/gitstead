@@ -1,9 +1,9 @@
-package gitops_test
+package repourl_test
 
 import (
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/repourl"
 )
 
 func TestParseURL_SSH(t *testing.T) {
@@ -24,7 +24,7 @@ func TestParseURL_SSH(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.url, func(t *testing.T) {
-			id, err := gitops.ParseURL(tt.url)
+			id, err := repourl.Parse(tt.url)
 			if err != nil {
 				t.Fatalf("ParseURL(%q) failed: %v", tt.url, err)
 			}
@@ -54,7 +54,7 @@ func TestParseURL_HTTPS(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.url, func(t *testing.T) {
-			id, err := gitops.ParseURL(tt.url)
+			id, err := repourl.Parse(tt.url)
 			if err != nil {
 				t.Fatalf("ParseURL(%q) failed: %v", tt.url, err)
 			}
@@ -73,7 +73,7 @@ func TestParseURL_HTTPS(t *testing.T) {
 
 func TestParseURL_HTTPSPort(t *testing.T) {
 	// A port and userinfo must be stripped from the host.
-	id, err := gitops.ParseURL("https://user@git.example.com:8443/team/app.git")
+	id, err := repourl.Parse("https://user@git.example.com:8443/team/app.git")
 	if err != nil {
 		t.Fatalf("ParseURL: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestParseURL_HTTPSPort(t *testing.T) {
 }
 
 func TestParseURL_GitProtocol(t *testing.T) {
-	id, err := gitops.ParseURL("git://host.tld/owner/repo.git")
+	id, err := repourl.Parse("git://host.tld/owner/repo.git")
 	if err != nil {
 		t.Fatalf("ParseURL: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestParseURL_LocalPath(t *testing.T) {
 		{"file:///srv/mirrors/app.git", "mirrors", "app"},
 	}
 	for _, c := range cases {
-		id, err := gitops.ParseURL(c.in)
+		id, err := repourl.Parse(c.in)
 		if err != nil {
 			t.Fatalf("ParseURL(%q): %v", c.in, err)
 		}
@@ -125,8 +125,21 @@ func TestParseURL_Invalid(t *testing.T) {
 		"git@github.com:",        // no path
 	}
 	for _, url := range invalids {
-		if _, err := gitops.ParseURL(url); err == nil {
+		if _, err := repourl.Parse(url); err == nil {
 			t.Errorf("expected error for %q", url)
+		}
+	}
+}
+
+func TestIsHTTP(t *testing.T) {
+	for _, u := range []string{"https://github.com/x/y.git", "http://h/x/y"} {
+		if !repourl.IsHTTP(u) {
+			t.Errorf("IsHTTP(%q) = false, want true", u)
+		}
+	}
+	for _, u := range []string{"git@github.com:x/y.git", "ssh://git@h/x/y", "/local/path", "~/r"} {
+		if repourl.IsHTTP(u) {
+			t.Errorf("IsHTTP(%q) = true, want false", u)
 		}
 	}
 }

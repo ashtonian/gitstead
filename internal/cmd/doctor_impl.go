@@ -9,15 +9,13 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/state"
 )
 
 // DoctorCmd diagnoses the health of the git-mgr setup: tooling, auth, config,
 // and whether tracked repos still exist on disk and point where state says.
-// It is offline (no provider API calls) and exits non-zero if any check fails.
-type DoctorCmd struct {
-	Fix bool `help:"Apply safe fixes (e.g. mark missing repos as not cloned)."`
-}
+// It is offline (no provider API calls), changes nothing, and exits non-zero
+// if any check fails. `git-mgr plan` and `apply` fix what config can.
+type DoctorCmd struct{}
 
 type doctorReport struct{ warns, fails int }
 
@@ -33,17 +31,7 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 		return fmt.Errorf("config invalid")
 	}
 
-	// --fix mutates state (marking missing repos uncloned), so take the lock.
-	var st *state.State
-	if c.Fix {
-		var unlock func()
-		st, unlock, err = lockedState(ctx)
-		if err == nil {
-			defer unlock()
-		}
-	} else {
-		st, err = ctx.LoadState()
-	}
+	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}
@@ -94,9 +82,7 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 	}
 
 	// --- State lock ---
-	if c.Fix {
-		d.ok("state lock held by this run")
-	} else if lerr := st.AcquireLock(); lerr != nil {
+	if lerr := st.AcquireLock(); lerr != nil {
 		d.warn("state lock is held (another git-mgr running?)")
 	} else {
 		st.ReleaseLock()
@@ -112,29 +98,17 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 		cloned++
 		if !gitops.HasGitDir(repo.LocalPath) {
 			missing++
-			if c.Fix {
-				repo.Cloned = false
-				repo.Status = "missing"
-				d.warn(fmt.Sprintf("repo %s: not on disk -- marked not cloned (%s)", key, repo.LocalPath))
-			} else {
-				d.fail(fmt.Sprintf("repo %s: not on disk (%s); run 'doctor --fix' or 'remove %s'", key, repo.LocalPath, key))
-			}
+			d.fail(fmt.Sprintf("repo %s: not on disk (%s); `git-mgr apply` clones it again, `git-mgr remove %s` stops tracking it", key, repo.LocalPath, key))
 			continue
 		}
 		if id, perr := gitops.ParseRemoteURL(ctx.GoCtx(), repo.LocalPath); perr == nil {
-			if got := id.Host + "/" + id.FullName; got != key {
+			if got := id.Key(); got != key {
 				d.warn(fmt.Sprintf("repo %s: origin now points to %s", key, got))
 			}
 		}
 	}
 	if cloned > 0 && missing == 0 {
 		d.ok(fmt.Sprintf("%d tracked repos present on disk", cloned))
-	}
-	if c.Fix && missing > 0 {
-		if serr := st.Save(); serr != nil {
-			return fmt.Errorf("saving state: %w", serr)
-		}
-		fmt.Printf("  fixed: marked %d missing repo(s) as not cloned\n", missing)
 	}
 
 	fmt.Printf("\n%d problem(s), %d warning(s)\n", d.fails, d.warns)

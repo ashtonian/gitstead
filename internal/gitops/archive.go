@@ -172,7 +172,7 @@ func RemoveClone(ctx context.Context, repoPath, archiveDir, name string, discard
 // or archive failure the worktree is left in place. The worktree's backup refs
 // go with it.
 func RemoveWorktree(ctx context.Context, source, path, archiveDir, name string, discard bool) (string, error) {
-	copyID := existingCopyID(ctx, path)
+	copyID := ReadCopyID(ctx, path)
 	var archived string
 	if !discard {
 		var err error

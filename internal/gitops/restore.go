@@ -94,7 +94,7 @@ func (b BackupInfo) RestoreCommands() []string {
 // such as a clone that was deleted and cloned again.
 func ListBackups(ctx context.Context, repoPath, patchRoot string) ([]BackupInfo, error) {
 	var all []BackupInfo
-	copyID := existingCopyID(ctx, repoPath)
+	copyID := ReadCopyID(ctx, repoPath)
 	if copyID != "" {
 		own, err := listCopyBackups(ctx, repoPath, patchRoot, copyID)
 		if err != nil {

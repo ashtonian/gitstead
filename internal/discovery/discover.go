@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/repourl"
 )
 
 // ProviderForConfig creates the right Provider for a given provider config.
@@ -222,11 +222,11 @@ func applyFilters(ctx context.Context, provider Provider, res ProviderResult, ru
 }
 
 // parseManualRepo converts a ManualRepo config entry into a Repo. It accepts any
-// URL form git does (ssh, scp, https, git://, local) via gitops.ParseURL and
+// URL form git does (ssh, scp, https, git://, local) via repourl.Parse and
 // records it under the matching transport, so a `repos:` entry given as https is
 // cloned over https -- the URL's scheme decides, no clone_protocol needed.
 func parseManualRepo(mr config.ManualRepo) (*Repo, error) {
-	id, err := gitops.ParseURL(mr.URL)
+	id, err := repourl.Parse(mr.URL)
 	if err != nil {
 		return nil, fmt.Errorf("%q: %w", mr.URL, err)
 	}

@@ -224,3 +224,18 @@ func TestStaleScopeOf_UnfilteredCoversRemovedRules(t *testing.T) {
 		t.Fatal("a rule-filtered pass with no results should cover nothing")
 	}
 }
+
+// A rule that failed judges none of its repos, even in an unfiltered pass.
+func TestStaleScopeOf_FailedRuleCoversNothing(t *testing.T) {
+	results := []DiscoverResult{{Rule: "work"}, {Rule: "personal", Err: errors.New("401")}}
+	scope := StaleScopeOf(results, "", "")
+	if !scope.Covers(&state.RepoState{DiscoveredBy: "work"}) {
+		t.Error("the rule that ran should be covered")
+	}
+	if scope.Covers(&state.RepoState{DiscoveredBy: "personal"}) {
+		t.Error("the failed rule must not be covered")
+	}
+	if scope.Covers(&state.RepoState{DiscoveredBy: "removed-rule"}) {
+		t.Error("with a failure, repos of removed rules must not be judged")
+	}
+}

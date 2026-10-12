@@ -80,14 +80,16 @@ sync → agent), so on a gh-authed machine it's a true one-liner.
 |---|---|
 | `git-mgr init` | Create a config file with sensible defaults. |
 | `git-mgr bootstrap` | Set up a fresh machine in one command: init → doctor → discover --apply → sync → install agent. `--profile`, `--no-agent`, `--dry-run`. |
-| `git-mgr discover` | Discover repos from providers (dry-run; `--apply` to clone). `--rule`, `--tag` to scope. |
-| `git-mgr sync` | Fetch all repos + back up uncommitted changes (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`, `--push-branch`. |
+| `git-mgr discover` | Discover repos from providers and show the plan; `--apply` makes the changes that move and delete nothing (clone new repos, update URLs, managed git config, tags). `--rule`, `--tag` to scope. |
+| `git-mgr sync` | Discover, apply config changes as far as `reconcile.auto` allows, fetch all repos and back up uncommitted changes (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`, `--push-branch`. |
+| `git-mgr plan` | Show what config would change on disk and in state, without changing anything. `--json`. See [Config changes](#config-changes-plan-and-apply). |
+| `git-mgr apply` | Make repos and workgroups match config, including the moves and removals sync leaves for you. Asks first; `--yes`. |
 | `git-mgr backup` | Back up only (no fetch). `--list` to see backups, `--restore <id>` for instructions, `--push-branch` to also save WIP to a remote branch. |
 | `git-mgr restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` to clone+apply into a scratch dir, or `--apply` onto the tree (dirty-guarded). |
 | `git-mgr status` | Table of managed repos. `--live` inspects working trees now (dirty + ahead/behind, no network); `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
-| `git-mgr doctor` | Diagnose tooling, auth (tokens/SSH keys), config, and repo-on-disk health. `--fix` for safe repairs. |
-| `git-mgr clone <url>` | Clone and track a single repo by SSH URL. `--tag`, `--path`. |
-| `git-mgr adopt <path>` | Import an existing clone. `--scan` for batch, `--dry-run`, `--tag`. |
+| `git-mgr doctor` | Diagnose tooling, auth (tokens/SSH keys), config, and repo-on-disk health. Read-only; `plan`/`apply` fix what config can. |
+| `git-mgr clone <url>` | Clone and track one repo by hand, at its templated path or `--path`. `--tag`. A repo added by hand keeps the path and URL it was given. |
+| `git-mgr adopt <path>` | Track an existing clone where it is. `--scan` for batch, `--dry-run`, `--tag`. |
 | `git-mgr remove <pattern>` | Stop tracking repos. `--tag`/`--set`, `--yes`. `--delete` also removes the clone from disk after archiving its unique work (see [Deleting without losing work](#deleting-without-losing-work)). |
 | `git-mgr run -- <cmd>` | Run a command in each matching repo (parallel). `--repos`/`--tag`/`--set`, `--fail-fast`. |
 | `git-mgr manifest export\|import` | Portable `{url,tags,path}` manifest to rehydrate the repo set on a new machine. |
@@ -234,6 +236,14 @@ overrides:
 HTTPS, `git@…`/`ssh://` over SSH). `git-mgr doctor` reports whether each
 provider's token resolves and whether configured SSH keys exist.
 
+A repo's SSH key comes from, in order: an override, its `repos:` entry, its
+discovery rule, then that rule's provider. git-mgr uses it for its own clones
+and fetches, and writes it into the repo's own git config as
+`core.sshCommand = ssh -i <key> -o IdentitiesOnly=yes`, so your own `git push`
+there uses the same key. Nothing is written for HTTPS repos or repos without a
+configured key. If you set `core.sshCommand` in a repo yourself, git-mgr leaves
+it and reports the difference (see [Config changes](#config-changes-plan-and-apply)).
+
 ### Manual repos, excludes, overrides, tags
 
 ```yaml
@@ -283,6 +293,69 @@ git-mgr status --tag work
 git-mgr sync   --set core
 git-mgr run    --set active-backend -- go test ./...
 ```
+
+## Config changes: plan and apply
+
+git-mgr keeps a state file (`~/.local/share/git-mgr/state.yaml`) recording what
+it last set for every repo and workgroup: path, origin URL, tags, the
+discovering rule, the provider's repo ID, the copy ID, the repo-local git config
+it wrote, and each workgroup's members. On every run it compares three things:
+
+- **desired** — what config and this run's discovery ask for;
+- **recorded** — what git-mgr set, from state;
+- **on disk** — the directory, its origin URL and its git config.
+
+Desired against recorded gives the changes. On disk against recorded gives
+*drift*: something git-mgr set was changed by hand. Drift is reported and left
+alone unless `reconcile.drift: overwrite`.
+
+```console
+$ git-mgr plan
+Changes:
+  ~ url              github.com/acme/api: git@github.com:acme/api.git -> https://github.com/acme/api.git
+  ~ config           github.com/acme/api core.sshcommand: (unset) -> ssh -i '~/.ssh/id_work' -o IdentitiesOnly=yes
+  ~ rename           github.com/acme/api-v2: github.com/acme/api -> github.com/acme/api-v2 (same repository (provider ID 4242))
+  > move             github.com/acme/web: ~/repos/github.com/acme/web -> ~/repos/acme/web   [needs git-mgr apply]
+  - remove-member    fleet/agent-3: ~/workgroups/fleet/agent-3 (no longer declared; unique work archived first)   [needs git-mgr apply]
+  + create-member    fleet/agent-4: ~/workgroups/fleet/agent-4   [git-mgr apply or wg ensure]
+Changed by hand, left alone (reconcile.drift: overwrite restores them):
+  ! github.com/acme/tools origin URL: git-mgr set git@github.com:acme/tools.git, now git@work:acme/tools.git; config wants git@github.com:acme/tools.git
+
+sync applies 3 of 6 on its own (reconcile.auto: safe); `git-mgr apply` makes them all.
+```
+
+| Config change | What happens |
+| --- | --- |
+| A new repo matches a rule or `repos:` entry | Cloned (`+ clone`). |
+| `base_dir`, `path_template` or an override's path | The repo moves (`> move`), with its linked worktrees reconnected and workgroups that use it repointed. |
+| `clone_protocol` | The origin URL changes (`~ url`). |
+| An `ssh_key` added, changed or removed | `core.sshCommand` is written, changed or unset (`~ config`). |
+| A rule's tags, or the rule that finds a repo | Tags and rule are updated in state (`~ tags`). |
+| A repo renamed or transferred upstream | Matched by the provider's repo ID: rekeyed, re-pointed, moved; its clone, work and backups stay (`~ rename`). |
+| A tracked clone deleted by hand | Cloned again. |
+| A workgroup declared, or a member added | Created (`+ create-workgroup`, `+ create-member`). |
+| A member or a whole workgroup removed from config | Its unique work is archived, then it is removed (`- remove-member`, `- remove-workgroup`). |
+| A workgroup's `base_dir` | Its members move (`> move-member`). |
+
+Changes marked `>` and `-` move or delete directories that a shell, editor or
+agent may be using, so they wait for `git-mgr apply`, which lists them and asks
+first. Everything else is applied by `sync` and `discover --apply` as it comes
+up. `sync` and `discover` handle repos only; workgroups change through `apply`
+and `wg ensure`.
+
+Repos added by hand (`clone`, `adopt`, `manifest import`) keep the path and URL
+they were given; only their tags and managed git config follow config. A
+workgroup created from flags or adopted is kept as recorded: `wg ensure <name>`
+recreates its missing members, and nothing removes it but `wg rm`.
+
+An interrupted run is safe to repeat. Every change looks at the disk first: a
+clone that finished before the interruption is adopted, a move that finished is
+recorded, a member that was created is recorded.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `reconcile.auto` | `safe` | What `sync` and `discover --apply` change on their own: `safe` (everything except moves and removals), `all`, or `none` (only report). |
+| `reconcile.drift` | `report` | `report` leaves values changed by hand; `overwrite` puts git-mgr's back. |
 
 ## Transparent backups
 
@@ -415,16 +488,19 @@ git-mgr wg open fleet --cmd claude          # add --no-check to skip the startup
 ```
 
 `--member` (repeatable) sets members explicitly — `name[:branch]` for worktree,
-a repo URL/key for clone — overriding `--count`. Workgroups declared in config
-(`workgroups:`) are reconciled with `wg ensure` and rebuilt deterministically
-after a reboot — a machine restart is a non-event. `wg check` exits non-zero on
+a repo URL/key for clone — overriding `--count`. `wg ensure` creates whatever is
+missing — workgroups declared in config (`workgroups:`), members added to a
+declaration, members gone from disk, including those of workgroups created from
+flags — so a machine restart is a non-event. Members removed from a declaration,
+and new member paths, wait for `git-mgr apply` (see
+[Config changes](#config-changes-plan-and-apply)). `wg check` exits non-zero on
 drift (missing members, wrong branch, in-progress rebase/merge, behind upstream),
 and `wg backup` (plus the scheduled `sync`) keeps every member's WIP safe.
 
 | `wg` subcommand | Description |
 |---|---|
 | `create <name>` | Build from flags (one-off) or config. `--kind`, `--repo`, `--from-tag`, `--from-set`, `--source`, `--count`, `--member`, `--save`, `--sync`, `--open`, `--cmd`/`--agent`. |
-| `ensure <name>` | Reconcile disk to the declared/created state (idempotent). |
+| `ensure [name]` | Create what is missing of one workgroup or all of them; list removals and moves for `git-mgr apply`. Idempotent. |
 | `open <name>` | Build/attach a tmux session, one pane per member. `--cmd <command>` (or `--agent <name>` from config) runs it per pane; `--no-check`, `--print`, `--recreate`, `--no-attach`. |
 | `check <name>` | Assert health; non-zero exit on drift. |
 | `backup <name>` / `recover <name>` | Back up / restore each member's WIP (`--push-branch`; `recover --into`/`--apply`). |
@@ -437,8 +513,9 @@ and `wg backup` (plus the scheduled `sync`) keeps every member's WIP safe.
 ## Running on a schedule
 
 `git-mgr sync` is cron-safe: flock prevents overlapping runs, `min_fetch_interval`
-skips recently-fetched repos, `auto_discover` picks up new repos, and it is
-strictly fetch-only.
+skips recently-fetched repos, and `auto_discover` picks up new repos. It never
+pulls or merges, and it moves or deletes a repo only if you configure it to
+(`reconcile.auto: all`, `cleanup.policy: remove_and_delete`).
 
 ```bash
 git-mgr install-agent          # launchd (macOS) / systemd timer (Linux) / cron
@@ -458,8 +535,10 @@ client has equivalent retry built in). If one discovery rule fails, the others
 still run, and stale detection is skipped for that run so a transient outage
 can't mark healthy repos stale. A run filtered with `--tag` or `--rule` only
 judges repos first found by the rules it ran, so `sync --tag personal` never
-marks work repos stale. SIGINT/SIGTERM cancels in-flight git and API operations
-cleanly.
+marks work repos stale; repos from a failed rule are left exactly as they are.
+An interrupted run is safe to repeat (see
+[Config changes](#config-changes-plan-and-apply)). SIGINT/SIGTERM cancels
+in-flight git and API operations cleanly.
 
 ## Environment variables
 
@@ -504,6 +583,22 @@ Build with version info:
 ```bash
 go build -ldflags="-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD)" .
 ```
+
+### Code map
+
+| Package | Owns |
+| --- | --- |
+| `main.go`, `internal/cmd` | The CLI: flags, wiring, output. Commands load config and state, call the packages below, print. |
+| `internal/config` | Loading, defaults, validation, per-repo overrides, SSH key and protocol resolution. |
+| `internal/discovery` | Provider clients (GitHub, GitLab, Gitea/Forgejo), rule filtering, stale detection. |
+| `internal/reconcile` | Desired vs recorded vs on-disk: plans and applies repo and workgroup changes. |
+| `internal/state` | The state file: schema, migrations, locking, atomic writes. |
+| `internal/gitops` | Everything that runs git: clone, fetch, status, snapshots, backups, restore, archives, copy IDs, worktrees. |
+| `internal/workgroup` | Workgroup specs, member creation, health, removal. |
+| `internal/repourl` | Parsing remote URLs into host/owner/name keys. |
+| `internal/pathtemplate`, `internal/pathutil`, `internal/shellutil` | Path templates, deletion guards, shell quoting. |
+| `internal/scheduler` | launchd, systemd and cron installation. |
+| `internal/oplog`, `internal/notify` | The operation log and desktop notifications. |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow and
 [SECURITY.md](SECURITY.md) for the security model and how to report issues.

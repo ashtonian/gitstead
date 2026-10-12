@@ -21,7 +21,7 @@ type InitCmd struct {
 // DiscoverCmd discovers repos from configured providers.
 // Run method is in discover_impl.go
 type DiscoverCmd struct {
-	Apply bool   `help:"Clone new repos and update state (default: preview only)." default:"false"`
+	Apply bool   `help:"Make the changes that move and delete nothing: clone new repos, update URLs, config and tags (default: preview only)." default:"false"`
 	Rule  string `help:"Run only a specific discovery rule." default:""`
 	Tag   string `help:"Run only rules with this tag." default:""`
 }

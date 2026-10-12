@@ -123,3 +123,16 @@ func AheadBehind(ctx context.Context, repoPath, ref string) (ahead, behind int, 
 	ahead, _ = strconv.Atoi(fields[1])  // commits in HEAD but not ref
 	return ahead, behind, nil
 }
+
+// WorktreeMove moves the linked worktree at from to to.
+func WorktreeMove(ctx context.Context, repoPath, from, to string) error {
+	_, err := Git(ctx, repoPath, "worktree", "move", from, to)
+	return err
+}
+
+// WorktreeRepair reconnects the linked worktrees of the repository at
+// repoPath, for instance after the repository itself was moved.
+func WorktreeRepair(ctx context.Context, repoPath string) error {
+	_, err := Git(ctx, repoPath, "worktree", "repair")
+	return err
+}

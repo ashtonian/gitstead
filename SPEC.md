@@ -127,11 +127,12 @@ Config written to ~/.config/git-mgr/config.yaml
 
 #### `git-mgr discover [flags]`
 
-Run discovery rules and show what repos would be added/removed.
+Run discovery rules and show the plan for the repos they find (see
+[Reconciliation](#reconciliation)).
 
 | Flag | Description |
 |---|---|
-| `--apply` | Actually add discovered repos to state and clone them (default: preview only) |
+| `--apply` | Make the plan's changes that move and delete nothing: clone new repos, update origin URLs, managed git config and tags (default: preview only). Moves wait for `git-mgr apply`. |
 | `--rule <name>` | Run only a specific discovery rule |
 | `--tag <tag>` | Run only rules with this tag |
 
@@ -152,12 +153,15 @@ Stale repos (not found in latest discovery):
   ~ github.com/your-login/old-thing (stale since 2026-04-10)
   ~ github.com/your-login/archived-lib (stale since 2026-04-15)
 
-Use --apply to clone new repos and update state.
+Use --apply to make the changes that move and delete nothing, or `git-mgr apply` for all of them.
 ```
 
 #### `git-mgr sync [flags]`
 
-Fetch all tracked repos and backup uncommitted changes. This is the primary command for cron usage.
+Discover, apply the plan's changes as far as `reconcile.auto` allows (default:
+everything that moves and deletes nothing), fetch all tracked repos and back up
+uncommitted changes. This is the primary command for cron usage. It never
+touches workgroups.
 
 | Flag | Description |
 |---|---|
@@ -262,13 +266,15 @@ Would adopt 14 repos:
 
 **Adopt logic:**
 1. Read the repo's `origin` remote URL to determine host/owner/name
-2. If path doesn't match the configured `path_template`, keep it at its current location (don't move)
-3. Add to state with `manually_added: true`
+2. Plan it as a repo added by hand at its current path: it is never moved, and its origin URL is kept
+3. Write managed git config that isn't already set (a value you set yourself is kept and reported as drift), record its copy ID, add it to state with `manually_added: true`
 4. `--scan` walks directory tree looking for `.git` dirs, adopts each
 
 #### `git-mgr clone <url> [flags]`
 
-Manually add and clone a single repo.
+Add a single repo by hand and clone it, at its templated path or `--path`. It
+is planned like any other repo, so a clone already at that path is adopted
+instead, and it keeps that path and URL from then on.
 
 | Flag | Description |
 |---|---|
@@ -329,7 +335,9 @@ config).
 | Command | Description |
 |---|---|
 | `bootstrap` | One-command machine setup: init (if missing) → doctor → discover --apply → sync → install-agent. `--profile` (tag scope), `--no-agent`, `--dry-run`. |
-| `doctor [--fix]` | Offline preflight: git present, config valid, base_dir writable, provider tokens resolve, configured SSH keys exist, state lock free, tracked repos on disk with matching origin. Non-zero exit on failure. |
+| `plan [--json]` | Discover and show every change config asks for -- repos and workgroups -- with drift and blocked changes. Changes nothing. |
+| `apply [--yes]` | Discover and make every change, including moves and removals; asks before those unless `--yes` (refuses without a terminal). Saves state after each change; non-zero exit if any change failed or was blocked. |
+| `doctor` | Offline, read-only preflight: git present, config valid, base_dir writable, provider tokens resolve, configured SSH keys exist, state lock free, tracked repos on disk with matching origin. Non-zero exit on failure. |
 | `run [--set/--tag/--repos] -- <cmd>` | Run a command in each matching repo (parallel, bounded by concurrency). `--fail-fast`; non-zero exit if any failed. |
 | `manifest export [--out]` / `import <file>` | Portable `{url,tags,path}` manifest of the tracked set, to rehydrate a new machine (captures manual adoptions). import is idempotent and clones over the url's transport. |
 | `restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` (clone+apply to a scratch dir), or `--apply` onto the tree (refuses dirty without `--force`). id defaults to `latest`. |
@@ -541,6 +549,17 @@ sync:
   retry_backoff: "2s"
 
 # ============================================================================
+# Config Changes
+# ============================================================================
+
+reconcile:
+  # What sync and discover --apply change on their own: "safe" (everything that
+  # moves and deletes nothing), "all" (also move repos), "none" (only report).
+  auto: "safe"
+  # Values git-mgr set that were changed by hand: "report" or "overwrite".
+  drift: "report"
+
+# ============================================================================
 # Cleanup Policy (Stale Repos)
 # ============================================================================
 
@@ -664,8 +683,9 @@ log:
 The state file is the source of truth for all managed repos. It is read/written atomically with flock protection.
 
 ```yaml
-# State file version for future migrations.
-version: 1
+# State schema version. Older files are migrated on load; a file newer than the
+# running git-mgr is refused rather than rewritten.
+version: 2
 
 # Last time any sync operation completed.
 last_sync: "2026-04-17T10:30:00Z"
@@ -680,6 +700,8 @@ repos:
     name: "git-mgr"
     full_name: "ashtonian/git-mgr"
     provider: "github.com"                               # Provider instance name
+    provider_id: "4242"            # the host's repo ID; survives renames and transfers
+    copy_id: "8ed3b5a3e9e769c3"    # the working copy's ID (also in .git/git-mgr-copy-id)
 
     # --- Local State ---
     local_path: "/Users/me/repos/github.com/ashtonian/git-mgr"
@@ -694,7 +716,8 @@ repos:
     is_archived: false
     language: "Go"
     topics: ["cli", "git"]
-    tags: ["personal", "oss"]                             # Combined: rule tags + manual tags
+    tags: ["personal", "oss"]                             # Combined: rule tags + user_tags
+    user_tags: ["oss"]                                    # Given by hand (clone/adopt --tag, manifest)
     description: "CLI tool for managing git repos"
 
     # --- Sync State ---
@@ -710,8 +733,73 @@ repos:
     first_seen: "2026-04-01T00:00:00Z"
     last_discovered: "2026-04-17T10:00:00Z"
     stale_since: ""                # Set when no longer found by any discovery rule
-    manually_added: false          # true if added via `git-mgr clone` or `git-mgr adopt`
+    manually_added: false          # true if added by hand (clone, adopt, manifest import): path and URL are pinned
+
+    # --- Applied git config ---
+    managed_config:                # repo-local keys git-mgr set, and the values it set
+      core.sshcommand: "ssh -i '/Users/me/.ssh/id_work' -o IdentitiesOnly=yes"
+
+# Workgroups. declared: true means config declares it, so removing the
+# declaration removes the workgroup; workgroups created from flags or adopted
+# are kept as recorded.
+workgroups:
+  fleet:
+    name: fleet
+    kind: worktree
+    root: "/Users/me/workgroups/fleet"
+    source: "/Users/me/repos/github.com/ashtonian/git-mgr"
+    declared: true
+    members:
+      - {name: agent-1, path: "/Users/me/workgroups/fleet/agent-1", branch: agent-1, copy_id: "1f2e3d4c5b6a7980"}
 ```
+
+## Reconciliation
+
+Package `internal/reconcile` brings disk and state in line with config. Each
+run compares, for every repo and workgroup:
+
+- **desired** -- `reconcile.Repos` and `reconcile.Workgroups` derive it from
+  config and this run's discovery through one resolver: path
+  (`base_dir`/`path_template` after overrides), origin URL (`clone_protocol`),
+  SSH key (override, `repos:` entry, rule, provider), tags (rule tags ∪
+  `user_tags`), rule, provider ID, managed git config, workgroup members;
+- **recorded** -- what git-mgr set, from state;
+- **on disk** -- `reconcile.Observe`: whether the path exists and is a repo,
+  and with one `git config --local --list` its origin and local config, plus its
+  copy ID and common git dir.
+
+Desired against recorded gives the plan's actions; on disk against recorded
+gives drift (a value git-mgr set was changed by hand), which is reported and
+left unless `reconcile.drift: overwrite`.
+
+| Action | Disruptive | Effect |
+|---|---|---|
+| `clone` | no | Clone a new repo, or one gone from disk; write managed config; record. |
+| `adopt` | no | Record a clone already at the desired path (an interrupted clone, or `adopt`). |
+| `rename` | no | A tracked repo with the same provider ID on the same host that discovery no longer finds under its key: rekey state and workgroup references. |
+| `url` | no | `git remote set-url origin`. |
+| `config` | no | Set or unset a managed key, or start/stop managing one already set to the wanted value. |
+| `tags` | no | Update tags and discovering rule in state. |
+| `move` | yes | Rename the directory (same filesystem only), `git worktree repair`, repoint workgroup sources, remove now-empty parents below `base_dir`. A move already done by hand or before an interruption is just recorded. |
+| `create-workgroup`, `create-member` | no | `workgroup.Ensure`; record members with copy IDs; `sync: true` tracks the repos. |
+| `move-member` | yes | `git worktree move`, or a rename for a clone member. |
+| `remove-member`, `remove-workgroup` | yes | Archive unique work to `backup.archive_dir`, then remove; a member that can't be archived is kept. |
+| `forget-member`, `member-url`, `workgroup` | no | State-only or origin URL changes for members. |
+
+Repos added by hand are pinned: their path and URL are the recorded ones. A
+repo whose rule failed, or that a filtered run didn't cover, is not judged.
+Paths wanted by two repos, occupied destinations, kind or source changes of a
+workgroup and branch changes of an existing member are reported as blocked.
+
+`Plan.Apply` first records observations (copy IDs, provider IDs, discovery
+metadata), then runs the selected actions in order -- renames first -- saving
+state after each and skipping later actions on a target whose earlier action
+failed. Every action looks at the disk before acting, so repeating an
+interrupted run finishes it instead of failing on what the first run did.
+
+`sync` and `discover --apply` apply repo actions selected by `reconcile.auto`
+(`safe`: non-disruptive; `all`; `none`). `wg ensure` applies non-disruptive
+workgroup actions. `apply` applies everything.
 
 ### State File Locking
 

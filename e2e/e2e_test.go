@@ -330,16 +330,13 @@ discovery:
 		t.Fatal(err)
 	}
 
-	out, code := env.run(t, "discover", "--apply")
-	if code != 0 {
-		t.Fatalf("discover --apply exit %d:\n%s", code, out)
-	}
-
 	// The clone is attempted over HTTP (not SSH), proving HTTPURL capture and the
 	// clone_protocol: https selection through the real binary. We assert the
 	// transport rather than a successful clone because the Forgejo container
 	// advertises an unreachable internal ROOT_URL (localhost:3000) instead of its
-	// mapped port -- a container quirk, not a git-mgr behavior.
+	// mapped port -- a container quirk, not a git-mgr behavior. That failed clone
+	// makes discover --apply exit non-zero, as any failed change does.
+	out, _ := env.run(t, "discover", "--apply")
 	if !strings.Contains(out, "git clone http") || !strings.Contains(out, "http-repo") {
 		t.Errorf("expected an http clone attempt for http-repo, got:\n%s", out)
 	}
