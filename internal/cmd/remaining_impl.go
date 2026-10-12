@@ -169,11 +169,26 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 
 	// Show resolved config for a specific repo
 	if c.ForRepo != "" {
+		rule := ""
+		if st, serr := ctx.LoadState(); serr == nil {
+			if r, ok := st.Repos[c.ForRepo]; ok {
+				rule = r.DiscoveredBy
+			}
+		}
 		resolved := cfg.ResolveForRepo(c.ForRepo)
-		sshKey := cfg.ResolveSSHKey(c.ForRepo, "")
 		fmt.Printf("Resolved config for %s:\n", c.ForRepo)
+		if rule != "" {
+			fmt.Printf("  discovered_by: %s\n", rule)
+		}
 		fmt.Printf("  path_template: %s\n", resolved.PathTemplate)
-		fmt.Printf("  ssh_key: %s\n", sshKey)
+		fmt.Printf("  ssh_key: %s\n", cfg.ResolveSSHKey(c.ForRepo, rule))
+		if a := cfg.AccountFor(c.ForRepo, rule); a != nil {
+			fmt.Printf("  account: %s\n", a.Name)
+			fmt.Printf("  user.name: %s\n", orInherited(a.Git.Name))
+			fmt.Printf("  user.email: %s\n", orInherited(a.Git.Email))
+		} else {
+			fmt.Println("  account: (none; your global git identity applies)")
+		}
 		fmt.Printf("  sync.timeout_per_repo: %s\n", resolved.Sync.TimeoutPerRepo)
 		fmt.Printf("  sync.min_fetch_interval: %s\n", resolved.Sync.MinFetchInterval)
 		fmt.Printf("  backup.enabled: %v\n", resolved.Backup.Enabled)

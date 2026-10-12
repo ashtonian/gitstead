@@ -285,7 +285,7 @@ func (c *WGCreateCmd) materialize(ctx *Context) error {
 		if _, err := workgroup.FromConfig(cfg, st, c.Name); err != nil {
 			return err
 		}
-		return ensureWorkgroups(ctx, cfg, st, c.Name)
+		return ensureWorkgroups(ctx, cfg, st, c.Name, true)
 	}
 	wg, err := c.toWorkgroup()
 	if err != nil {
@@ -326,6 +326,7 @@ func (c *WGCreateCmd) materialize(ctx *Context) error {
 		if err := config.SaveWorkgroup(ctx.Config, wg, c.Force); err != nil {
 			return err
 		}
+		cfg.Workgroups = append(slices.DeleteFunc(cfg.Workgroups, func(w config.Workgroup) bool { return w.Name == wg.Name }), wg)
 		if !ctx.Quiet {
 			fmt.Printf("Saved workgroup %q to config.\n", c.Name)
 		}
@@ -334,10 +335,12 @@ func (c *WGCreateCmd) materialize(ctx *Context) error {
 	if !ctx.Quiet {
 		fmt.Printf("Workgroup %q: %d members (%d created) at %s\n", c.Name, len(spec.Members), created, spec.Root)
 	}
+	// Give the members their accounts' managed git config.
+	ensureErr := ensureWorkgroups(ctx, cfg, st, c.Name, false)
 	if failed > 0 {
-		return fmt.Errorf("%d member(s) failed", failed)
+		return errors.Join(fmt.Errorf("%d member(s) failed", failed), ensureErr)
 	}
-	return nil
+	return ensureErr
 }
 
 func (c *WGEnsureCmd) Run(ctx *Context) error {
@@ -353,20 +356,20 @@ func (c *WGEnsureCmd) Run(ctx *Context) error {
 	if c.Name != "" && st.Workgroups[c.Name] == nil && !slices.ContainsFunc(cfg.Workgroups, func(w config.Workgroup) bool { return w.Name == c.Name }) {
 		return fmt.Errorf("workgroup %q is neither declared in config nor recorded", c.Name)
 	}
-	return ensureWorkgroups(ctx, cfg, st, c.Name)
+	return ensureWorkgroups(ctx, cfg, st, c.Name, true)
 }
 
 // ensureWorkgroups creates what is missing of the named workgroup, or of all
 // of them: workgroups declared in config, members added to a declaration, and
 // members gone from disk. Moves and removals wait for `git-mgr apply`.
-func ensureWorkgroups(ctx *Context, cfg *config.Config, st *state.State, name string) error {
+func ensureWorkgroups(ctx *Context, cfg *config.Config, st *state.State, name string, sayIfNothing bool) error {
 	scope := reconcile.Scope{Workgroups: true}
 	if name != "" {
 		scope.Only = func(n string) bool { return n == name }
 	}
 	plan := reconcile.Compute(ctx.GoCtx(), cfg, st, scope)
 	if plan.Empty() {
-		if !ctx.Quiet {
+		if sayIfNothing && !ctx.Quiet {
 			fmt.Println("Workgroups match config.")
 		}
 		return nil

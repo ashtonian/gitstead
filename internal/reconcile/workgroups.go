@@ -19,7 +19,7 @@ import (
 // PlanWorkgroups compares what config wants for each workgroup with what
 // state records and what seen found on disk. only, when not nil, limits the
 // plan to the workgroups it accepts.
-func PlanWorkgroups(desired map[string]Workgroup, st *state.State, seen Seen, only func(name string) bool) *Plan {
+func PlanWorkgroups(desired map[string]Workgroup, st *state.State, seen Seen, only func(name string) bool, overwrite bool) *Plan {
 	p := &Plan{}
 	names := map[string]bool{}
 	for name := range desired {
@@ -50,13 +50,13 @@ func PlanWorkgroups(desired map[string]Workgroup, st *state.State, seen Seen, on
 				run:  createWorkgroup(w),
 			})
 		default:
-			planMembers(p, w, ws, seen)
+			planMembers(p, w, ws, seen, overwrite)
 		}
 	}
 	return p
 }
 
-func planMembers(p *Plan, w Workgroup, ws *state.WorkgroupState, seen Seen) {
+func planMembers(p *Plan, w Workgroup, ws *state.WorkgroupState, seen Seen, overwrite bool) {
 	spec, name := w.Spec, w.Spec.Name
 	block := func(target, reason string) { p.Blocked = append(p.Blocked, Blocked{Target: target, Reason: reason}) }
 	if ws.Kind != spec.Kind {
@@ -88,7 +88,7 @@ func planMembers(p *Plan, w Workgroup, ws *state.WorkgroupState, seen Seen) {
 			create("")
 		case !ok && isMember(here, spec, m, seen, ""):
 			p.Actions = append(p.Actions, Action{Kind: KindCreateMember, Target: target, To: m.Path,
-				Note: "already there; recording it", run: recordMember(name, m)})
+				Note: "already there; recording it", run: recordMember(w, m)})
 		case !ok:
 			block(target, occupied(m.Path, here))
 		case am.Path != m.Path:
@@ -113,6 +113,12 @@ func planMembers(p *Plan, w Workgroup, ws *state.WorkgroupState, seen Seen) {
 			planMemberURL(p, target, name, am, m, here)
 		case spec.Kind == "worktree" && am.Branch != m.Branch:
 			block(target, fmt.Sprintf("branch changed in config from %s to %s; an existing member keeps its branch", am.Branch, m.Branch))
+		}
+		if ok && am.Path == m.Path && here.IsRepo && here.Err == nil && spec.Kind == "clone" {
+			p.Actions = append(p.Actions, planConfig(p, KindMemberConfig, target, w.Configs[m.Name], am.ManagedConfig, here.Config, overwrite,
+				func(k, v string, unset, recordOnly bool) func(context.Context, *Env) (string, error) {
+					return setMemberConfig(name, m.Name, k, v, unset, recordOnly)
+				})...)
 		}
 	}
 
@@ -182,12 +188,25 @@ func sshKeyFor(w Workgroup) func(workgroup.Member) string {
 	return func(m workgroup.Member) string { return w.SSHKeys[m.Name] }
 }
 
-func memberState(ctx context.Context, m workgroup.Member) state.WorkgroupMemberState {
+// memberState records member m, writing the managed git config it wants
+// that isn't set yet.
+func memberState(ctx context.Context, m workgroup.Member, want map[string]string) (state.WorkgroupMemberState, error) {
 	ms := state.WorkgroupMemberState{Name: m.Name, Path: m.Path, Branch: m.Branch, RepoURL: m.RepoURL, RepoKey: m.RepoKey}
-	if id, err := gitops.CopyID(ctx, m.Path); err == nil {
-		ms.CopyID = id
+	id, err := gitops.CopyID(ctx, m.Path)
+	if err != nil {
+		return ms, err
 	}
-	return ms
+	ms.CopyID = id
+	if len(want) > 0 {
+		have, err := gitops.LocalConfig(ctx, m.Path)
+		if err != nil {
+			return ms, err
+		}
+		if ms.ManagedConfig, err = writeManagedConfig(ctx, m.Path, want, have); err != nil {
+			return ms, err
+		}
+	}
+	return ms, nil
 }
 
 func workgroupState(env *Env, name string) (*state.WorkgroupState, error) {
@@ -229,7 +248,11 @@ func createWorkgroup(w Workgroup) func(context.Context, *Env) (string, error) {
 				errs = append(errs, fmt.Errorf("%s: %w", s.Name, s.Err))
 				continue
 			}
-			ws.Members = append(ws.Members, memberState(ctx, s.Member))
+			ms, err := memberState(ctx, s.Member, w.Configs[s.Name])
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", s.Name, err))
+			}
+			ws.Members = append(ws.Members, ms)
 		}
 		env.State.Workgroups[spec.Name] = ws
 		info := ""
@@ -257,19 +280,36 @@ func createMember(w Workgroup, m workgroup.Member) func(context.Context, *Env) (
 		if statuses[0].Err != nil {
 			return "", statuses[0].Err
 		}
-		upsertMember(ws, memberState(ctx, m))
-		return "", nil
+		ms, err := memberState(ctx, m, w.Configs[m.Name])
+		upsertMember(ws, ms)
+		return "", err
 	}
 }
 
-func recordMember(name string, m workgroup.Member) func(context.Context, *Env) (string, error) {
+func recordMember(w Workgroup, m workgroup.Member) func(context.Context, *Env) (string, error) {
+	return func(ctx context.Context, env *Env) (string, error) {
+		ws, err := workgroupState(env, w.Spec.Name)
+		if err != nil {
+			return "", err
+		}
+		ms, err := memberState(ctx, m, w.Configs[m.Name])
+		upsertMember(ws, ms)
+		return "", err
+	}
+}
+
+func setMemberConfig(name, member, key, value string, unset, recordOnly bool) func(context.Context, *Env) (string, error) {
 	return func(ctx context.Context, env *Env) (string, error) {
 		ws, err := workgroupState(env, name)
 		if err != nil {
 			return "", err
 		}
-		upsertMember(ws, memberState(ctx, m))
-		return "", nil
+		for i := range ws.Members {
+			if ws.Members[i].Name == member {
+				return "", applyConfig(ctx, ws.Members[i].Path, &ws.Members[i].ManagedConfig, key, value, unset, recordOnly)
+			}
+		}
+		return "", fmt.Errorf("%s/%s is no longer recorded", name, member)
 	}
 }
 

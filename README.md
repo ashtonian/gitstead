@@ -236,13 +236,50 @@ overrides:
 HTTPS, `git@…`/`ssh://` over SSH). `git-mgr doctor` reports whether each
 provider's token resolves and whether configured SSH keys exist.
 
-A repo's SSH key comes from, in order: an override, its `repos:` entry, its
-discovery rule, then that rule's provider. git-mgr uses it for its own clones
-and fetches, and writes it into the repo's own git config as
-`core.sshCommand = ssh -i <key> -o IdentitiesOnly=yes`, so your own `git push`
-there uses the same key. Nothing is written for HTTPS repos or repos without a
-configured key. If you set `core.sshCommand` in a repo yourself, git-mgr leaves
-it and reports the difference (see [Config changes](#config-changes-plan-and-apply)).
+### Accounts
+
+An account is one identity on one or more hosts: the SSH key and the commit
+identity for the repos it covers. With work and personal repos on the same
+host, each repo pushes with the right key and commits with the right email —
+yours and your agents'.
+
+```yaml
+accounts:
+  - name: personal
+    hosts: [github.com]                # every github.com owner no other account claims
+    ssh_key: ~/.ssh/id_personal
+    git: {name: Ashton Kinslow, email: me@example.com}
+  - name: work
+    hosts: [github.com]
+    owners: [acme, acme-labs]          # these owners, and their GitLab subgroups
+    ssh_key: ~/.ssh/id_work
+    git: {name: Ashton Kinslow, email: you@acme.com}
+  - name: ghe
+    ssh_key: ~/.ssh/id_ghe             # covers only what names it below
+providers:
+  - {name: ghes, type: github, url: https://ghes.acme.com, account: ghe}
+```
+
+A repo's account is the one named by the most specific of: a matching
+override's `account:`, its `repos:` entry, its discovery rule, that rule's
+provider; otherwise the account whose `hosts` and `owners` match the repo (an
+account listing the owner beats one covering the whole host). Its SSH key
+follows the same order, where an `ssh_key:` set directly at any of those places
+counts too. `git-mgr config --for-repo <key>` shows what a repo resolves to.
+
+git-mgr uses the key for its own clones and fetches, and writes the account
+into the repo's own git config, so your own git commands there behave the same:
+
+| Key | Written when |
+| --- | --- |
+| `core.sshCommand = ssh -i <key> -o IdentitiesOnly=yes` | the repo has an SSH remote and a key |
+| `user.name`, `user.email` | the account sets them; otherwise your global identity applies |
+
+Workgroup clone members get the same keys as the repo they come from, so
+agents commit as the right account; worktree members share their source repo's
+config. If you set one of these keys in a repo yourself, git-mgr leaves it and
+reports the difference (see [Config changes](#config-changes-plan-and-apply)).
+Changing an account updates every repo it covers on the next `sync` or `apply`.
 
 ### Manual repos, excludes, overrides, tags
 
@@ -329,7 +366,7 @@ sync applies 3 of 6 on its own (reconcile.auto: safe); `git-mgr apply` makes the
 | A new repo matches a rule or `repos:` entry | Cloned (`+ clone`). |
 | `base_dir`, `path_template` or an override's path | The repo moves (`> move`), with its linked worktrees reconnected and workgroups that use it repointed. |
 | `clone_protocol` | The origin URL changes (`~ url`). |
-| An `ssh_key` added, changed or removed | `core.sshCommand` is written, changed or unset (`~ config`). |
+| An `ssh_key` or account added, changed or removed | `core.sshCommand`, `user.name` and `user.email` are written, changed or unset in repos (`~ config`) and clone members (`~ member-config`). |
 | A rule's tags, or the rule that finds a repo | Tags and rule are updated in state (`~ tags`). |
 | A repo renamed or transferred upstream | Matched by the provider's repo ID: rekeyed, re-pointed, moved; its clone, work and backups stay (`~ rename`). |
 | A tracked clone deleted by hand | Cloned again. |

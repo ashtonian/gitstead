@@ -10,6 +10,7 @@ type Config struct {
 	PathTemplate  string           `koanf:"path_template"  yaml:"path_template"  default:"{{.Host}}/{{.Owner}}/{{.Name}}"  validate:"required"`
 	CloneProtocol string           `koanf:"clone_protocol" yaml:"clone_protocol" default:"ssh"                            validate:"oneof=ssh https"`
 	Concurrency   int              `koanf:"concurrency"   yaml:"concurrency"   default:"8"                                    validate:"min=1,max=128"`
+	Accounts      []Account        `koanf:"accounts"      yaml:"accounts,omitempty" validate:"dive"`
 	Providers     []Provider       `koanf:"providers"     yaml:"providers"      validate:"dive"`
 	Discovery     []DiscoveryRule  `koanf:"discovery"     yaml:"discovery"      validate:"dive"`
 	Repos         []ManualRepo     `koanf:"repos"         yaml:"repos,omitempty" validate:"dive"`
@@ -29,11 +30,34 @@ type Config struct {
 	Agents           map[string]string `koanf:"agents" yaml:"agents,omitempty"` // name -> command for `wg open --agent`
 }
 
+// Account is one identity on one or more hosts: the SSH key and commit
+// identity used for the repos it covers. It covers a repo when an override,
+// the repo's `repos:` entry, its discovery rule or that rule's provider names
+// it, or else when the repo's host is in Hosts and its owner in Owners (an
+// account with no Owners covers every owner on its hosts that no other
+// account claims).
+type Account struct {
+	Name   string      `koanf:"name"    yaml:"name"              validate:"required"`
+	Hosts  []string    `koanf:"hosts"   yaml:"hosts,omitempty"`
+	Owners []string    `koanf:"owners"  yaml:"owners,omitempty"`
+	SSHKey string      `koanf:"ssh_key" yaml:"ssh_key,omitempty"`
+	Git    GitIdentity `koanf:"git"     yaml:"git,omitempty"`
+}
+
+// GitIdentity is the commit identity written into each repo an account
+// covers, as user.name and user.email. Empty fields inherit your global git
+// config.
+type GitIdentity struct {
+	Name  string `koanf:"name"  yaml:"name,omitempty"`
+	Email string `koanf:"email" yaml:"email,omitempty"`
+}
+
 // ManualRepo allows specifying individual repos to manage without discovery rules.
 type ManualRepo struct {
-	URL    string   `koanf:"url"     yaml:"url"              validate:"required"`
-	Tags   []string `koanf:"tags"    yaml:"tags,omitempty"`
-	SSHKey string   `koanf:"ssh_key" yaml:"ssh_key,omitempty"`
+	URL     string   `koanf:"url"     yaml:"url"              validate:"required"`
+	Tags    []string `koanf:"tags"    yaml:"tags,omitempty"`
+	SSHKey  string   `koanf:"ssh_key" yaml:"ssh_key,omitempty"`
+	Account string   `koanf:"account" yaml:"account,omitempty"`
 }
 
 // Provider represents a GitHub, GitLab, or Gitea/Forgejo instance.
@@ -45,6 +69,7 @@ type Provider struct {
 	TokenEnv     string `koanf:"token_env"      yaml:"token_env,omitempty"`
 	TokenCommand string `koanf:"token_command"  yaml:"token_command,omitempty"`
 	SSHKey       string `koanf:"ssh_key"        yaml:"ssh_key,omitempty"`
+	Account      string `koanf:"account"        yaml:"account,omitempty"`
 	// CloneProtocol sets the transport for repos discovered from this provider
 	// ("ssh" or "https"); empty falls back to the top-level clone_protocol.
 	CloneProtocol string `koanf:"clone_protocol" yaml:"clone_protocol,omitempty" validate:"omitempty,oneof=ssh https"`
@@ -66,6 +91,7 @@ type DiscoveryRule struct {
 	NamePattern     string   `koanf:"name_pattern"     yaml:"name_pattern,omitempty"  validate:"omitempty,valid_regex"`
 	Tags            []string `koanf:"tags"             yaml:"tags,omitempty"`
 	SSHKey          string   `koanf:"ssh_key"          yaml:"ssh_key,omitempty"`
+	Account         string   `koanf:"account"          yaml:"account,omitempty"`
 }
 
 // ExcludeRule defines repos to skip.
@@ -104,6 +130,7 @@ type Override struct {
 	Repos         []string            `koanf:"repos"          yaml:"repos"                    validate:"required,min=1"`
 	BaseDir       string              `koanf:"base_dir"       yaml:"base_dir,omitempty"`
 	SSHKey        string              `koanf:"ssh_key"        yaml:"ssh_key,omitempty"`
+	Account       string              `koanf:"account"        yaml:"account,omitempty"`
 	PathTemplate  string              `koanf:"path_template"  yaml:"path_template,omitempty"`
 	CloneProtocol string              `koanf:"clone_protocol" yaml:"clone_protocol,omitempty" validate:"omitempty,oneof=ssh https"`
 	Sync          *SyncOverride       `koanf:"sync"          yaml:"sync,omitempty"`

@@ -124,6 +124,9 @@ type WorkgroupMemberState struct {
 	RepoKey  string `yaml:"repo_key,omitempty" json:"repo_key,omitempty"`
 	Upstream string `yaml:"upstream,omitempty" json:"upstream,omitempty"`
 	CopyID   string `yaml:"copy_id,omitempty"  json:"copy_id,omitempty"`
+	// ManagedConfig holds the git config keys git-mgr set in a clone member,
+	// as RepoState.ManagedConfig does for a repo.
+	ManagedConfig map[string]string `yaml:"managed_config,omitempty" json:"managed_config,omitempty"`
 }
 
 // Load reads the state file from disk. Creates a new empty state if the file doesn't exist.

@@ -320,7 +320,7 @@ func TestPlanWorkgroups(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := lines(PlanWorkgroups(tt.desired, tt.st, tt.seen, nil))
+			got := lines(PlanWorkgroups(tt.desired, tt.st, tt.seen, nil, false))
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("plan:\n  %s\nwant:\n  %s", strings.Join(got, "\n  "), strings.Join(tt.want, "\n  "))
 			}
@@ -370,5 +370,23 @@ func TestPlan_JSONHasEmptyLists(t *testing.T) {
 	}
 	if got := string(data); got != `{"actions":[],"drift":[],"blocked":[]}` {
 		t.Errorf("empty plan JSON = %s", got)
+	}
+}
+
+func TestRepos_AccountGivesKeyAndIdentity(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Accounts = []config.Account{{Name: "work", Hosts: []string{"github.com"}, Owners: []string{"acme"},
+		SSHKey: "/k/work", Git: config.GitIdentity{Name: "Me", Email: "me@acme"}}}
+	desired, _ := Repos(cfg, tracked(func(a *state.RepoState) { a.ManuallyAdded = true }), nil, discovery.StaleScope{})
+	d := desired[key]
+	want := map[string]string{keySSHCommand: SSHCommand("/k/work"), keyUserName: "Me", keyUserEmail: "me@acme"}
+	if d.Account != "work" || fmt.Sprint(d.Config) != fmt.Sprint(want) {
+		t.Errorf("account %q config %v, want work %v", d.Account, d.Config, want)
+	}
+
+	// An https remote gets the identity but no sshCommand.
+	desired, _ = Repos(cfg, tracked(func(a *state.RepoState) { a.ManuallyAdded, a.CloneURL = true, https }), nil, discovery.StaleScope{})
+	if _, ok := desired[key].Config[keySSHCommand]; ok || desired[key].Config[keyUserEmail] != "me@acme" {
+		t.Errorf("https repo config = %v", desired[key].Config)
 	}
 }

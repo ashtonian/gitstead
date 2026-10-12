@@ -93,7 +93,7 @@ func (w *world) plan() *reconcile.Plan {
 func (w *world) apply(p *reconcile.Plan, include func(reconcile.Action) bool) []reconcile.Result {
 	w.t.Helper()
 	env := &reconcile.Env{State: w.st, Save: w.st.Save, ArchiveDir: w.cfg.Backup.ArchiveDir, KeepDirs: []string{w.cfg.BaseDir, w.cfg.WorkgroupBaseDir}}
-	results := p.Apply(context.Background(), env, include)
+	results := reconcile.ApplyPlan(context.Background(), w.cfg, env, p, reconcile.Scope{Repos: true, Workgroups: true}, include)
 	for _, r := range results {
 		if r.Err != nil {
 			w.t.Fatalf("%s %s: %v", r.Action.Kind, r.Action.Target, r.Err)
@@ -327,5 +327,62 @@ func TestApply_AdoptKeepsConfigSetByHand(t *testing.T) {
 	p := w.plan()
 	if len(p.Actions) != 0 || len(p.Drift) != 1 || p.Drift[0].Found != "ssh -i /keys/mine" || p.Drift[0].Recorded != "(unset)" {
 		t.Fatalf("hand-set config should be drift: %+v", p)
+	}
+}
+
+// An account's commit identity reaches every repo it covers and every clone
+// an agent works in, and follows the account when it changes.
+func TestApply_AccountIdentity(t *testing.T) {
+	root := t.TempDir()
+	remote := bareRemote(t, root, "app")
+	w := newWorld(t, root)
+	w.cfg.Accounts = []config.Account{{Name: "work", Hosts: []string{"local"}, Owners: []string{"remotes"},
+		Git: config.GitIdentity{Name: "Work Me", Email: "me@work"}}}
+	w.cfg.Repos = []config.ManualRepo{{URL: remote}}
+	w.cfg.Workgroups = []config.Workgroup{{Name: "agents", Kind: "clone",
+		Members: []config.WorkgroupMember{{Name: "a1", Repo: "local/remotes/app"}}}}
+	w.converge()
+
+	repo := w.st.Repos["local/remotes/app"].LocalPath
+	member := filepath.Join(w.cfg.WorkgroupBaseDir, "agents", "a1")
+	for _, dir := range []string{repo, member} {
+		if got := mustGit(t, dir, "config", "--local", "user.email"); got != "me@work" {
+			t.Errorf("%s user.email = %q", dir, got)
+		}
+	}
+
+	w.cfg.Accounts[0].Git.Email = "me@new-work"
+	assertKinds(t, w.plan(), "config", "member-config")
+	w.converge()
+	for _, dir := range []string{repo, member} {
+		if got := mustGit(t, dir, "config", "--local", "user.email"); got != "me@new-work" {
+			t.Errorf("%s user.email = %q after the account changed", dir, got)
+		}
+	}
+
+	mustGit(t, member, "config", "user.email", "agent@elsewhere")
+	if p := w.plan(); len(p.Drift) != 1 || p.Drift[0].Target != "agents/a1" || len(p.Actions) != 0 {
+		t.Fatalf("an identity changed by hand in a member is drift: %+v", p)
+	}
+}
+
+// Applying a plan never runs a disruptive workgroup action the plan didn't
+// show, even when re-planning after the repo changes would find one.
+func TestApplyPlan_RunsOnlyDisruptionsThatWereShown(t *testing.T) {
+	root := t.TempDir()
+	remote := bareRemote(t, root, "app")
+	w := newWorld(t, root)
+	w.cfg.Repos = []config.ManualRepo{{URL: remote}}
+	w.cfg.Workgroups = []config.Workgroup{{Name: "fleet", Kind: "worktree", Source: "local/remotes/app",
+		Members: []config.WorkgroupMember{{Name: "a1"}, {Name: "a2"}}}}
+	w.converge()
+
+	shown := w.plan() // nothing to do
+	w.cfg.Workgroups[0].Members = w.cfg.Workgroups[0].Members[:1]
+	for _, r := range w.apply(shown, reconcile.All) {
+		t.Errorf("unexpected action %s %s", r.Action.Kind, r.Action.Target)
+	}
+	if _, err := os.Stat(filepath.Join(w.cfg.WorkgroupBaseDir, "fleet", "a2")); err != nil {
+		t.Fatal("a removal that wasn't shown must not run")
 	}
 }

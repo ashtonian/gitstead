@@ -61,24 +61,43 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 	}
 
 	// --- Auth: provider API tokens and configured SSH keys ---
-	sshKeyConfigured := false
 	for _, p := range cfg.Providers {
 		if discovery.ResolveToken(p) == "" {
 			d.warn(fmt.Sprintf("provider %q: no API token resolved (set token_command, token_env, or token)", p.Name))
 		} else {
 			d.ok(fmt.Sprintf("provider %q: API token resolved", p.Name))
 		}
-		if p.SSHKey != "" {
-			sshKeyConfigured = true
-			if key := config.ExpandHome(p.SSHKey); fileExists(key) {
-				d.ok(fmt.Sprintf("provider %q: ssh_key present (%s)", p.Name, key))
-			} else {
-				d.fail(fmt.Sprintf("provider %q: ssh_key not found (%s)", p.Name, key))
-			}
+	}
+	keys := configuredSSHKeys(cfg)
+	for _, k := range keys {
+		if fileExists(k.path) {
+			d.ok(fmt.Sprintf("%s: ssh_key present (%s)", k.where, k.path))
+		} else {
+			d.fail(fmt.Sprintf("%s: ssh_key not found (%s)", k.where, k.path))
 		}
 	}
-	if !sshKeyConfigured {
+	if len(keys) == 0 {
 		d.info("no ssh_key configured; SSH clones use your default agent/keys (~/.ssh)")
+	}
+
+	// --- Accounts: identity and what each covers ---
+	covered := map[string]int{}
+	for key, repo := range st.Repos {
+		if a := cfg.AccountFor(key, repo.DiscoveredBy); a != nil {
+			covered[a.Name]++
+		}
+	}
+	for _, a := range cfg.Accounts {
+		identity := "inherits your global git identity"
+		if a.Git.Name != "" || a.Git.Email != "" {
+			identity = fmt.Sprintf("commits as %s <%s>", orInherited(a.Git.Name), orInherited(a.Git.Email))
+		}
+		msg := fmt.Sprintf("account %q: %s; covers %d tracked repo(s)", a.Name, identity, covered[a.Name])
+		if covered[a.Name] == 0 && len(st.Repos) > 0 {
+			d.warn(msg + " -- check its hosts and owners")
+		} else {
+			d.ok(msg)
+		}
 	}
 
 	// --- State lock ---
@@ -128,4 +147,39 @@ func dirWritable(dir string) bool {
 	f.Close()
 	os.Remove(name)
 	return true
+}
+
+type sshKeyRef struct{ where, path string }
+
+// configuredSSHKeys lists every ssh_key config sets, once per place.
+func configuredSSHKeys(cfg *config.Config) []sshKeyRef {
+	var keys []sshKeyRef
+	add := func(where, key string) {
+		if key != "" {
+			keys = append(keys, sshKeyRef{where, config.ExpandHome(key)})
+		}
+	}
+	for _, a := range cfg.Accounts {
+		add(fmt.Sprintf("account %q", a.Name), a.SSHKey)
+	}
+	for _, p := range cfg.Providers {
+		add(fmt.Sprintf("provider %q", p.Name), p.SSHKey)
+	}
+	for _, r := range cfg.Discovery {
+		add(fmt.Sprintf("rule %q", r.Name), r.SSHKey)
+	}
+	for _, mr := range cfg.Repos {
+		add("repos entry "+mr.URL, mr.SSHKey)
+	}
+	for _, o := range cfg.Overrides {
+		add(fmt.Sprintf("override %v", o.Repos), o.SSHKey)
+	}
+	return keys
+}
+
+func orInherited(v string) string {
+	if v == "" {
+		return "(inherited)"
+	}
+	return v
 }
