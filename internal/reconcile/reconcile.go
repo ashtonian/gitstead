@@ -109,14 +109,14 @@ type Plan struct {
 	// record updates state with what this run observed (copy IDs, provider
 	// IDs, discovery metadata). It changes nothing on disk beyond creating
 	// missing copy IDs, so it runs whenever a plan is applied.
-	record []func(ctx context.Context, st *state.State)
+	record []Observation
 }
 
-// Observed adds a record of what this run observed, saved whenever the plan
-// is applied.
-func (p *Plan) Observed(record func(ctx context.Context, st *state.State)) {
-	p.record = append(p.record, record)
-}
+// Observation is what a run observed of something tracked: it does what disk
+// work recording it needs -- creating a missing copy ID -- before the state
+// lock is taken, and returns the change that records it, applied under the
+// lock; nil records nothing.
+type Observation func(ctx context.Context) func(*state.State)
 
 // MarshalJSON writes empty lists as [] rather than null.
 func (p *Plan) MarshalJSON() ([]byte, error) {

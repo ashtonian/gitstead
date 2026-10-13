@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
@@ -25,9 +27,23 @@ func (p *Plan) Apply(ctx context.Context, env *Env, include func(Action) bool) [
 		slots:  make(chan struct{}, max(env.Concurrency, 1)),
 	}
 	if len(p.record) > 0 {
+		// Each observation's disk work first, at most env.Concurrency at a
+		// time; then their records, in one write.
+		changes := make([]func(*state.State), len(p.record))
+		var g errgroup.Group
+		g.SetLimit(max(env.Concurrency, 1))
+		for i, observe := range p.record {
+			g.Go(func() error {
+				changes[i] = observe(ctx)
+				return nil
+			})
+		}
+		_ = g.Wait()
 		err := r.commit.Update(func(st *state.State) error {
-			for _, rec := range p.record {
-				rec(ctx, st)
+			for _, change := range changes {
+				if change != nil {
+					change(st)
+				}
 			}
 			return nil
 		})
