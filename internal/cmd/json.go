@@ -316,6 +316,15 @@ func WantsJSON(args []string) bool {
 	return false
 }
 
+// HelpDocument writes the document --json prints for --help: help, the text
+// printed for people on stderr.
+func HelpDocument(w io.Writer, help string) {
+	c := &Context{JSON: true, Out: w}
+	_ = c.Emit(struct {
+		Help string `json:"help"`
+	}{help})
+}
+
 // UsageError writes the document --json prints for a command line that
 // didn't parse.
 func UsageError(w io.Writer, err error) {

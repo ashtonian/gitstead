@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -29,10 +31,19 @@ func main() {
 		},
 	}
 	// Under --json, stdout carries only the one document: help and usage go
-	// to stderr.
-	wantsJSON := cmd.WantsJSON(os.Args[1:])
+	// to stderr, and help, which exits 0, is the document too. A shell asking
+	// for completions passes its own arguments, so it is left alone.
+	wantsJSON := cmd.WantsJSON(os.Args[1:]) && os.Getenv("COMP_LINE") == ""
 	if wantsJSON {
-		options = append(options, kong.Writers(os.Stderr, os.Stderr))
+		var help bytes.Buffer
+		options = append(options,
+			kong.Writers(io.MultiWriter(os.Stderr, &help), os.Stderr),
+			kong.Exit(func(code int) {
+				if code == 0 {
+					cmd.HelpDocument(os.Stdout, help.String())
+				}
+				os.Exit(code)
+			}))
 	}
 	parser := kong.Must(cli, options...)
 

@@ -189,8 +189,8 @@ func (e *testEnv) runJSON(t *testing.T, v any, args ...string) (stderr string, c
 	if err := dec.Decode(v); err != nil {
 		t.Fatalf("git-mgr %v --json: stdout isn't JSON: %v\nstdout: %s\nstderr: %s", args, err, text, errOut.String())
 	}
-	if dec.More() {
-		t.Fatalf("git-mgr %v --json printed more than one document:\n%s", args, text)
+	if err := dec.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
+		t.Fatalf("git-mgr %v --json printed more than one document (%v):\n%s", args, err, text)
 	}
 	return errOut.String(), code
 }
@@ -1914,7 +1914,8 @@ func TestE2E_ConfigPath(t *testing.T) {
 
 // TestE2E_JSONErrors: under --json a command that fails, a config that
 // doesn't load and a command line that doesn't parse each print one
-// document, the error, and exit with its code.
+// document, the error, and exit with its code; --help prints one too, of
+// its text.
 func TestE2E_JSONErrors(t *testing.T) {
 	env := newLocalEnv(t)
 	if err := os.WriteFile(env.configFile, []byte("base_dir: "+env.baseDir+"\n"), 0o600); err != nil {
@@ -1936,6 +1937,13 @@ func TestE2E_JSONErrors(t *testing.T) {
 	t.Run("a missing selector", func(t *testing.T) { check(t, 1, "remove") })
 	t.Run("a command that doesn't exist", func(t *testing.T) { check(t, 80, "no-such-command") })
 	t.Run("a bad flag", func(t *testing.T) { check(t, 80, "status", "--no-such-flag") })
+	t.Run("help", func(t *testing.T) {
+		var doc struct{ Help string }
+		stderr, code := env.runJSON(t, &doc, "sync", "--help")
+		if code != 0 || !strings.HasPrefix(doc.Help, "Usage: git-mgr sync") || !strings.Contains(stderr, "Usage: git-mgr sync") {
+			t.Errorf("git-mgr --json sync --help: exit %d, document %+v; want the help in it, and on stderr", code, doc)
+		}
+	})
 	t.Run("a config that doesn't load", func(t *testing.T) {
 		if err := os.WriteFile(env.configFile, []byte("unknown_key: true\n"), 0o600); err != nil {
 			t.Fatal(err)

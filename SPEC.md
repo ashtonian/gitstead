@@ -1909,7 +1909,12 @@ The tool is cron-safe because:
    composite commands run steps through `captured`, which returns each step's
    document for one outer document. Commands without a result refuse
    `--json`; ones that ask first need `--yes`. `doctor` in a schedule's
-   environment is run with `--json` and its checks decoded.
+   environment is run with `--json` and its checks decoded. Before a command
+   runs, kong's output goes to stderr: a parse error prints
+   `{error, exit_code: 80}` (`UsageError`), and `--help`, which kong ends
+   with exit 0 through the `kong.Exit` hook, prints `{help}` with the text
+   (`HelpDocument`). A relayed document (a fleet on another host) must decode
+   as exactly one value, a second decode reaching EOF.
 6. **All errors include repo context** -- `fmt.Errorf("fetching %s: %w", repo.FullName, err)`
 
 ---
