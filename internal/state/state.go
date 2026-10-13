@@ -93,6 +93,15 @@ type RepoState struct {
 	LastFetchError string    `yaml:"last_fetch_error,omitempty" json:"last_fetch_error,omitempty"`
 	BackupStatus   `yaml:",inline"`
 	OffsiteStatus  `yaml:",inline"`
+	MirrorStatus   `yaml:",inline"`
+}
+
+// MirrorStatus is the repo's mirror, when it is mirrored.
+type MirrorStatus struct {
+	// MirrorPath is where the mirror is; a repo renamed since moves it.
+	MirrorPath      string    `yaml:"mirror_path,omitempty"       json:"mirror_path,omitempty"`
+	LastMirror      time.Time `yaml:"last_mirror,omitempty"       json:"last_mirror,omitzero"`
+	LastMirrorError string    `yaml:"last_mirror_error,omitempty" json:"last_mirror_error,omitempty"`
 }
 
 // OffsiteStatus is what git-mgr last left offsite for a working copy, so the

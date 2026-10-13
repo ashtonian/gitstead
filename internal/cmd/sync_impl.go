@@ -120,6 +120,24 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		return fmt.Errorf("recording the sync: %w", err)
 	}
 
+	// Mirrors after fetches, which a slow mirror mustn't hold up.
+	mirrored := 0
+	if !c.NoFetch {
+		jobs, _ := mirrorJobs(cfg, st, pass, c.Force)
+		mirrors := runMirrors(ctx.GoCtx(), jobs, cfg.Concurrency)
+		if err := recordMirrors(cfg, st, mirrors); err != nil {
+			return fmt.Errorf("recording mirrors: %w", err)
+		}
+		for _, o := range mirrors {
+			tried++
+			if o.err != nil {
+				failures = append(failures, syncError{o.job.key, fmt.Errorf("mirror: %w", o.err)})
+			} else {
+				mirrored++
+			}
+		}
+	}
+
 	fetched, skippedLocked, backedUp := 0, 0, 0
 	for _, o := range outcomes {
 		if o.job.backup != nil {
@@ -145,11 +163,15 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	if cfg.Notify.Enabled && cfg.Notify.OnError && len(failures) > 0 {
 		notify.Send("git-mgr sync errors", fmt.Sprintf("%d repos failed to sync", len(failures)))
 	}
-	logEvent(ctx, "sync", "", fmt.Sprintf("fetched=%d backed_up=%d failed=%d skipped_recent=%d skipped_locked=%d",
-		fetched, backedUp, len(failures), skippedRecent, skippedLocked))
+	logEvent(ctx, "sync", "", fmt.Sprintf("fetched=%d backed_up=%d mirrored=%d failed=%d skipped_recent=%d skipped_locked=%d",
+		fetched, backedUp, mirrored, len(failures), skippedRecent, skippedLocked))
 	if !ctx.Quiet {
-		fmt.Printf("Synced: %d fetched, %d skipped (recent), %d skipped (locked), %d failed, %d backed up\n",
+		fmt.Printf("Synced: %d fetched, %d skipped (recent), %d skipped (locked), %d failed, %d backed up",
 			fetched, skippedRecent, skippedLocked, len(failures), backedUp)
+		if mirrored > 0 {
+			fmt.Printf(", %d mirrored", mirrored)
+		}
+		fmt.Println()
 	}
 	for _, e := range failures {
 		fmt.Fprintf(os.Stderr, "  %s: %v\n", e.repo, e.err)

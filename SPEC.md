@@ -355,6 +355,21 @@ or the directory `<archive_dir>/<id>/`, with `<id>.json` describing it.
 | `restore <id> [--to path]` | Move an archived clone back to where it was (or `--to`), drop it from the catalog and track it by hand (`adopt`), so it is never judged stale again. Refuses a bundle (its steps are in `show`), an occupied destination, and -- without `--to` -- a repo tracked again meanwhile; with `--to` such a repo's archive is restored untracked. |
 | `rm <id>... [--yes]` | Delete archives for good -- bundle or clone, description, LFS objects, submodules' archives -- and drop them from the catalog. Only files named for the archive, beside it, are deleted. Asks first; without a terminal, needs `--yes`. |
 
+#### `git-mgr mirror [--repos g] [--tag t] [--set s] [--force]`
+
+Make or update the mirrors that are due -- of each selected repo mirroring
+is on for, not stale, last updated more than `mirror.interval` ago or failing
+(all, with `--force`) -- `concurrency` at once. Per repo: a mirror recorded
+elsewhere (`mirror_path`, the repo renamed since) is moved to
+`<dir>/<key>.git` first; missing, it is made with `git clone --mirror <url>`
+in a staging directory, renamed into place; present, it must have
+`remote.origin.mirror=true` (else it is left alone and reported), gets the
+recorded URL as origin, and fetches `origin` (`+refs/*:refs/*`, no
+`--prune`); with `lfs`, `git lfs fetch --all origin`. Each within
+`sync.clone_timeout`, with the repo's SSH key over SSH. Records `mirror_path`,
+`last_mirror`, or `last_mirror_error`. `sync` runs the same after its
+fetches unless `--no-fetch`. Mirrors are never deleted.
+
 #### `git-mgr remote-sync [flags]`
 
 Back up each selected working copy and take it offsite now, under the
@@ -774,6 +789,18 @@ backup:
   archive_dir: ""
 
 # ============================================================================
+# Mirrors
+# ============================================================================
+
+# Full mirrors of upstreams; also accounts[].mirror and overrides[].mirror
+# ({enabled, lfs}), the most specific winning.
+mirror:
+  enabled: false
+  dir: ""                         # "" = ~/.local/share/git-mgr/mirrors; <dir>/<key>.git
+  interval: "24h"                 # sync updates a mirror at most this often (a failing one every sync)
+  lfs: false                      # git lfs fetch --all into the mirror
+
+# ============================================================================
 # Remote Sync Settings
 # ============================================================================
 
@@ -911,6 +938,9 @@ repos:
     current_branch: "feat/backup"
     last_fetch: "2026-04-17T10:30:00Z"
     last_fetch_error: ""
+    mirror_path: "/Volumes/backup/git-mirrors/github.com/ashtonian/git-mgr.git"   # where its mirror is
+    last_mirror: "2026-10-13T06:00:00Z"
+    last_mirror_error: ""
     last_backup: "2026-04-17T10:30:00Z"   # last time the current state was known to be saved
     last_backup_error: ""
     offsite_remote: origin                # what remote_sync last left offsite, so the next push

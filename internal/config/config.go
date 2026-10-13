@@ -36,6 +36,7 @@ type Config struct {
 	Reconcile  ReconcileConfig  `koanf:"reconcile"     yaml:"reconcile"`
 	Notify     NotifyConfig     `koanf:"notify"        yaml:"notify"`
 	Hooks      HooksConfig      `koanf:"hooks"         yaml:"hooks"`
+	Mirror     MirrorConfig     `koanf:"mirror"        yaml:"mirror"`
 	// Editor is the command `git-mgr open` opens a path with; empty for
 	// $VISUAL, then $EDITOR.
 	Editor string    `koanf:"editor" yaml:"editor,omitempty"`
@@ -68,6 +69,9 @@ type Account struct {
 	Clone *CloneOverride `koanf:"clone" yaml:"clone,omitempty"`
 	// Hooks sets hooks for the account's repos, under any override's.
 	Hooks *HooksOverride `koanf:"hooks" yaml:"hooks,omitempty"`
+	// Mirror turns mirroring on or off for the account's repos, under any
+	// override's.
+	Mirror *MirrorOverride `koanf:"mirror" yaml:"mirror,omitempty"`
 }
 
 // Signing is how commits and tags in an account's repos are signed.
@@ -213,6 +217,7 @@ type Override struct {
 	RemoteSync    *RemoteSyncOverride `koanf:"remote_sync"   yaml:"remote_sync,omitempty"`
 	Clone         *CloneOverride      `koanf:"clone"         yaml:"clone,omitempty"`
 	Hooks         *HooksOverride      `koanf:"hooks"         yaml:"hooks,omitempty"`
+	Mirror        *MirrorOverride     `koanf:"mirror" yaml:"mirror,omitempty"`
 }
 
 // SyncOverride overrides SyncConfig fields per repo. A nil pointer means "not set".

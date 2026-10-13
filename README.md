@@ -141,6 +141,7 @@ writes a config without asking anything.
 | `git-mgr report` / `log` | Summarize / list recent activity (clones, backups, syncs…) from the operation log. `--since`, `-n`. |
 | `git-mgr workspace` (`ws`, `wg`) | Manage workspaces: repos × agents, each agent in a copy of its own. See [Workspaces](#workspaces). |
 | `git-mgr fleet` | Open several workspaces' agents side by side with tmux, iTerm, Muxy or a plugin; `open`, `plan`, `ls`, `status`, `stop`. See [Fleets](#fleets-and-launchers). |
+| `git-mgr mirror` | Make or update full mirrors of repos' upstreams now; `sync` does it every `mirror.interval`. `--repos`/`--tag`/`--set`, `--force`. See [Mirrors](#mirrors-surviving-the-host). |
 | `git-mgr hooks post-clone\|post-create` | Run repos' `post_clone` or a workspace's `post_create` hooks again, output on the terminal. See [Hooks](#hooks). |
 | `git-mgr archives ls\|show\|restore\|rm` | The catalog of what was saved before copies and repos were taken away -- bundles of unique work, and whole clones -- and how to restore each; `restore` moves an archived clone back, `rm` deletes archives for good. |
 | `git-mgr cd\|path\|open <query>` | Jump to, print, or open in your editor (`--web`: the repo's page) a repo, workspace or agent's folder from part of its name. See [Jump and open](#jump-and-open). |
@@ -787,6 +788,45 @@ git checkout recovered
 git fetch origin refs/git-mgr/<machine>/<copy>/wip/<id>
 git stash apply --index FETCH_HEAD     # the uncommitted work, staged and unstaged as it was
 ```
+
+### Mirrors: surviving the host
+
+Offsite refs protect your work; a mirror protects the repo itself. With
+`mirror` on, git-mgr keeps a full mirror of each repo's upstream -- every
+branch, tag and other ref the host has, pull request refs included -- as a
+bare repository in `mirror.dir`, so a repo or account the host loses, or a
+history rewritten there, is still on your disk, NAS or backup volume.
+
+```yaml
+mirror:
+  enabled: true
+  dir: /Volumes/backup/git-mirrors     # <dir>/<host>/<owner>/<name>.git
+  interval: 24h                        # how often sync updates each
+overrides:
+  - repos: ["github.com/acme/huge-assets"]
+    mirror: {enabled: false}           # or enable for some repos only
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `mirror.enabled` | `false` | Mirror every tracked repo; `accounts[].mirror` and `overrides[].mirror` turn it on or off for some. |
+| `mirror.dir` | `~/.local/share/git-mgr/mirrors` | Holds `<host>/<owner>/<name>.git`. |
+| `mirror.interval` | `24h` | How long `sync` leaves a mirror before updating it again; a failing one is retried every sync. |
+| `mirror.lfs` | `false` | Also mirror Git LFS content (`git lfs fetch --all`); per account or repo too. |
+
+A mirror is made with `git clone --mirror`, staged like any clone, from the
+repo's upstream URL with its SSH key -- not from your clone, which may be
+partial, shallow or behind. Updates fetch every ref without pruning: a branch
+deleted upstream stays in the mirror, while one moved -- force-pushed included
+-- follows the remote. `sync` updates the mirrors that are due after its
+fetches (`--force` all of them, `--no-fetch` none); `git-mgr mirror` does it
+now (`--repos`, `--tag`, `--set`, `--force`). A stale repo's mirror is left as
+it was: its upstream is gone, which is what the mirror is for. A renamed repo's
+mirror moves with it; git-mgr never deletes a mirror. Failing mirrors show in
+`git-mgr status`, `git-mgr top` and `doctor`.
+
+To use one: `git clone /Volumes/backup/git-mirrors/github.com/acme/app.git`
+for a working copy, or `git push --mirror <new remote>` from it to re-host.
 
 ### Deleting without losing work
 
