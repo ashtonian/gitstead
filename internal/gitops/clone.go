@@ -87,9 +87,12 @@ func Clone(ctx context.Context, url, destPath string, opts CloneOptions) error {
 
 // staged makes a repository at destPath with make, which builds it in an
 // empty staging directory beside destPath; it is renamed into place when
-// complete, so destPath never holds a partial repository, a failed or killed
-// one leaves nothing there, and whatever already is at destPath -- files, or
-// another run's clone -- is never touched.
+// complete, so no process sees a partial repository at destPath, a failed or
+// killed one leaves nothing there, and whatever already is at destPath --
+// files, or another run's clone -- is never touched. Beyond what git syncs
+// itself, it isn't synced to disk: everything made this way can be made
+// again from what it came from (a remote, a source clone, an archive), so a
+// power cut costs a redo, not data.
 func staged(destPath string, make func(staging string) error) error {
 	parent, base := filepath.Dir(destPath), filepath.Base(destPath)
 	if err := checkFree(destPath); err != nil {
