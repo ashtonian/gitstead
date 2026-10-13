@@ -176,7 +176,7 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 	if c.Validate {
 		_, err := ctx.LoadConfig()
 		if err != nil {
-			return fmt.Errorf("config validation failed: %w", err)
+			return err
 		}
 		fmt.Println("Config is valid.")
 		return ctx.finish(map[string]any{"path": ctx.ConfigPath(), "valid": true}, nil)

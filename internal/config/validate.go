@@ -181,7 +181,7 @@ func formatValidationErrors(errs validator.ValidationErrors) error {
 			msgs = append(msgs, fmt.Sprintf("%s: failed %s validation", field, e.Tag()))
 		}
 	}
-	return fmt.Errorf("config validation failed:\n  %s", strings.Join(msgs, "\n  "))
+	return fmt.Errorf("\n  %s", strings.Join(msgs, "\n  "))
 }
 
 func providerNames(providers []Provider) []string {

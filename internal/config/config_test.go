@@ -407,3 +407,20 @@ func TestResolve_OverrideGlobsAndPrecedence(t *testing.T) {
 		t.Errorf("the later override's retries should win, got %d", got)
 	}
 }
+
+// An invalid config is reported once, naming the file, each problem on a
+// line of its own.
+func TestLoad_InvalidIsReportedOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("concurrency: -1\nlock_timeout: -1s\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := config.Load(path)
+	if err == nil {
+		t.Fatal("Load accepted an invalid config")
+	}
+	msg := err.Error()
+	if !strings.HasPrefix(msg, "config "+path+" is invalid:\n  ") || strings.Count(msg, "invalid") != 1 || strings.Contains(msg, "E7002") {
+		t.Errorf("error = %q", msg)
+	}
+}
