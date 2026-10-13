@@ -1961,8 +1961,11 @@ disk by copy ID, else (worktree) a common git dir equal to the source's, else
 
 `ws check` flags (and exits non-zero on) missing copies, a wrong branch, an
 in-progress rebase/merge/cherry-pick, a git lock, or being behind the upstream
-or, for a branch without one, what it started from. Uncommitted and untracked
-work is reported but isn't a failure: agents are expected to have WIP.
+or, for a branch without one, what it started from: `base_ref`, else origin's
+default branch (`origin/HEAD`), else the branch the repo's checkout tracks. A
+base that doesn't resolve is flagged; a repo with none of these has nothing to
+compare with. Uncommitted and untracked work is reported but isn't a failure:
+agents are expected to have WIP.
 
 ### Runs and leases
 
