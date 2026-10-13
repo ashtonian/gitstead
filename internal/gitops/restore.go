@@ -325,10 +325,15 @@ func RestoreBackupInto(ctx context.Context, repoPath string, b BackupInfo, into 
 	if err := restoreInto(ctx, repoPath, b, into); err != nil {
 		return err
 	}
-	// Each submodule is restored as a clone of its own, in its place.
+	// Each submodule is restored as a clone of its own, in its place,
+	// shallowest first, so the clone of a submodule with a backup holds those
+	// inside it.
 	for _, path := range slices.Sorted(maps.Keys(b.Submodules)) {
 		subPath := filepath.Join(repoPath, path)
 		sub, err := b.submoduleBackup(ctx, subPath, b.Submodules[path])
+		if err == nil {
+			err = cloneEnclosingSubmodules(ctx, repoPath, into, path)
+		}
 		if err == nil {
 			err = RestoreBackupInto(ctx, subPath, sub, filepath.Join(into, path))
 		}
@@ -337,6 +342,57 @@ func RestoreBackupInto(ctx context.Context, repoPath string, b BackupInfo, into 
 		}
 	}
 	return nil
+}
+
+// cloneEnclosingSubmodules makes a clone, under into, of each submodule that
+// submodule path is inside and that has no backup of its own -- its own work
+// may be hidden by an ignore setting, or its backup may have failed -- so the
+// one at path is restored inside it, as it was. Each is cloned from its clone
+// under repoPath, at the commit its parent, as restored, records.
+func cloneEnclosingSubmodules(ctx context.Context, repoPath, into, path string) error {
+	enclosing, rest := "", path
+	for {
+		links, err := gitlinks(ctx, filepath.Join(into, enclosing))
+		if err != nil {
+			return err
+		}
+		next, commit := "", ""
+		for link, c := range links {
+			if strings.HasPrefix(rest, link+"/") {
+				next, commit = link, c
+			}
+		}
+		if next == "" {
+			return nil
+		}
+		sub := filepath.Join(enclosing, next)
+		if dest := filepath.Join(into, sub); !HasGitDir(dest) {
+			if _, err := Git(ctx, filepath.Dir(dest), "clone", "-q", "--no-checkout", filepath.Join(repoPath, sub), dest); err != nil {
+				return fmt.Errorf("cloning submodule %s, which holds %s: %w", sub, path, err)
+			}
+			if _, err := Git(ctx, dest, "checkout", "-q", "--detach", commit); err != nil {
+				return fmt.Errorf("checking out %s in submodule %s, which holds %s: %w", commit, sub, path, err)
+			}
+		}
+		enclosing, rest = sub, strings.TrimPrefix(rest, next+"/")
+	}
+}
+
+// gitlinks maps the path of each submodule in the index of the repo at
+// repoPath to the commit recorded for it.
+func gitlinks(ctx context.Context, repoPath string) (map[string]string, error) {
+	out, err := GitOutput(ctx, repoPath, "ls-files", "--stage", "-z")
+	if err != nil {
+		return nil, err
+	}
+	links := map[string]string{}
+	for _, entry := range strings.Split(string(out), "\x00") {
+		info, name, ok := strings.Cut(entry, "\t")
+		if fields := strings.Fields(info); ok && len(fields) == 3 && fields[0] == "160000" {
+			links[filepath.FromSlash(name)] = fields[1]
+		}
+	}
+	return links, nil
 }
 
 func restoreInto(ctx context.Context, repoPath string, b BackupInfo, into string) error {

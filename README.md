@@ -825,7 +825,9 @@ Guarantees:
 - **Submodules too.** Each checked-out submodule with uncommitted work is
   backed up as a working copy of its own, and its parent's backup records
   which of the submodule's backups goes with it: `restore --apply` restores
-  them in place, `restore --into` as clones of their own in their places.
+  them in place, `restore --into` as clones of their own in their places --
+  inside a clone of each submodule they are in that has no backup of its own
+  (its status ignoring them, say), at the commit its parent records.
 - **Nothing silently skipped.** Untracked files over `max_untracked_file_mb`
   (50) or past `max_untracked_total_mb` (500), unreadable files and nested git
   repositories are left out *and reported* with the reason, in the command's
