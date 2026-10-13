@@ -54,3 +54,55 @@ func TestEmit_RedactsCredentials(t *testing.T) {
 		t.Errorf("emitted:\n%s", out.String())
 	}
 }
+
+// A run under --json ends with exactly one document on stdout: the
+// command's, else its error, else an empty one.
+func TestConclude(t *testing.T) {
+	boom := &exitError{exitPartial, errors.New("boom")}
+	tests := []struct {
+		name   string
+		emit   bool
+		err    error
+		want   string
+		wantRC int
+	}{
+		{"the command's document", true, boom, `{"done":true}`, exitPartial},
+		{"the error, when it printed none", false, boom, `{"error":"boom","exit_code":3}`, exitPartial},
+		{"an empty one for a success that printed none", false, nil, `{}`, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			c := &Context{JSON: true, Out: &out}
+			if tt.emit {
+				if err := c.Emit(map[string]bool{"done": true}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if rc := Conclude(c, tt.err); rc != tt.wantRC {
+				t.Errorf("exit code %d, want %d", rc, tt.wantRC)
+			}
+			var got bytes.Buffer
+			if err := json.Compact(&got, out.Bytes()); err != nil {
+				t.Fatalf("stdout isn't one document: %v\n%s", err, out.String())
+			}
+			if got.String() != tt.want {
+				t.Errorf("stdout = %s, want %s", got.String(), tt.want)
+			}
+		})
+	}
+}
+
+func TestWantsJSON(t *testing.T) {
+	for args, want := range map[string]bool{
+		"--json status":       true,
+		"status --json=true":  true,
+		"run -- echo --json":  false,
+		"status --jsonx":      false,
+		"ws run app agent-1 ": false,
+	} {
+		if got := WantsJSON(strings.Fields(args)); got != want {
+			t.Errorf("WantsJSON(%q) = %v, want %v", args, got, want)
+		}
+	}
+}

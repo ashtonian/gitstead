@@ -82,6 +82,8 @@ type Context struct {
 
 	// changes keeps what the plans the command applied did, for --json.
 	changes changesJSON
+	// emitted records that the command's document was written to Out.
+	emitted bool
 
 	// Lazily loaded
 	cfg    *config.Config
@@ -150,7 +152,19 @@ func (c *Context) Emit(v any) error {
 		return err
 	}
 	_, err := io.WriteString(out, repourl.Redact(buf.String()))
+	c.emitted = err == nil
 	return err
+}
+
+// relay writes data, the --json document of git-mgr run elsewhere, as this
+// command's, once it has checked it is one.
+func (c *Context) relay(data []byte, from string) error {
+	var doc json.RawMessage
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if err := dec.Decode(&doc); err != nil || dec.More() {
+		return fmt.Errorf("git-mgr on %s didn't print one JSON document (is it older than this one?): %s", from, firstLineOf(string(data)))
+	}
+	return c.Emit(doc)
 }
 
 // errNoJSON is what a command with no result to print as JSON returns under

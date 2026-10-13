@@ -111,7 +111,7 @@ func (c *WSRetireCmd) Run(ctx *Context) error {
 	opts := workspace.RetireOptions{StateDir: st.Dir(), ArchiveDir: cfg.Backup.ArchiveDir, Stop: c.Stop, StopTimeout: c.Timeout, Discard: c.Force}
 	retired := map[string]workspace.Retired{}
 	var doc retiredJSON
-	kept := 0
+	kept, total := 0, 0
 	for _, a := range names {
 		if spec.Shared() {
 			retired[a] = workspace.Retired{}
@@ -120,6 +120,7 @@ func (c *WSRetireCmd) Run(ctx *Context) error {
 		r := workspace.Retire(ctx.GoCtx(), spec, ws, a, nil, opts)
 		retired[a] = r
 		kept += len(r.Kept)
+		total += len(r.Kept) + len(r.Removed)
 		reportRetired(spec, r, ctx.Quiet)
 		doc.add(spec, r)
 	}
@@ -150,7 +151,7 @@ func (c *WSRetireCmd) Run(ctx *Context) error {
 	}
 	logEvent(ctx, "ws_retire", c.Name, strings.Join(names, ","))
 	if kept > 0 {
-		return ctx.finish(doc, &exitError{exitPartial, fmt.Errorf("%d copies could not be retired and are still recorded; their agents show as retiring", kept)})
+		return ctx.finish(doc, outcome(kept, total, "copies could not be retired and are still recorded; their agents show as retiring"))
 	}
 	if !ctx.Quiet {
 		fmt.Printf("Retired %s of %q.\n", strings.Join(names, ", "), c.Name)

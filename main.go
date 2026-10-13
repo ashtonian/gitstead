@@ -20,14 +20,21 @@ var (
 
 func main() {
 	cli := &cmd.CLI{}
-	parser := kong.Must(cli,
+	options := []kong.Option{
 		kong.Name("git-mgr"),
 		kong.Description("Discover, clone, sync, and back up git repositories; run agent fleets."),
 		kong.UsageOnError(),
 		kong.Vars{
 			"version": fmt.Sprintf("%s (%s, built %s)", version, commit, date),
 		},
-	)
+	}
+	// Under --json, stdout carries only the one document: help and usage go
+	// to stderr.
+	wantsJSON := cmd.WantsJSON(os.Args[1:])
+	if wantsJSON {
+		options = append(options, kong.Writers(os.Stderr, os.Stderr))
+	}
+	parser := kong.Must(cli, options...)
 
 	// Shell completion: handles `install-completions` and, when the shell sets
 	// COMP_LINE, prints candidates and exits. Predictors complete repo keys,
@@ -35,6 +42,9 @@ func main() {
 	kongplete.Complete(parser, cmd.CompletionPredictors()...)
 
 	ctx, err := parser.Parse(os.Args[1:])
+	if err != nil && wantsJSON {
+		cmd.UsageError(os.Stdout, err)
+	}
 	parser.FatalIfErrorf(err)
 
 	// Cancel in-flight git/API operations on Ctrl-C / SIGTERM. A second signal
@@ -59,8 +69,11 @@ func main() {
 		run.Out, os.Stdout = os.Stdout, os.Stderr
 		run.Quiet = true
 	}
-	if err := ctx.Run(run); err != nil {
+	err = ctx.Run(run)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(cmd.ExitCode(err))
+	}
+	if code := cmd.Conclude(run, err); code != 0 {
+		os.Exit(code)
 	}
 }

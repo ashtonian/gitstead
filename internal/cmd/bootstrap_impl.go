@@ -66,12 +66,16 @@ func (c *BootstrapCmd) Run(ctx *Context) error {
 	if err := step("sync", (&SyncCmd{Tag: c.Profile}).Run); err != nil {
 		return finish(fmt.Errorf("sync: %w", err))
 	}
+	// What's left undone after this point is reported, and the run exits 3,
+	// rather than stopping a setup that has already cloned and synced.
+	var unfinished error
 	if !c.NoAgent {
 		// A profile gets a schedule of its own that syncs just its repos, so
 		// bootstrapping a second profile doesn't replace the first.
 		agent := &InstallAgentCmd{Name: c.Profile, Tag: c.Profile, Interval: c.Interval, Log: "~/.local/share/git-mgr/git-mgr.log"}
 		if err := step("install-agent", agent.Run); err != nil {
 			fmt.Fprintf(os.Stderr, "install-agent failed (run it later): %v\n", err)
+			unfinished = &exitError{exitPartial, fmt.Errorf("bootstrapped, but installing the background sync failed: %w; run git-mgr install-agent%s", err, c.scheduleFlags())}
 		}
 	}
 
@@ -80,6 +84,9 @@ func (c *BootstrapCmd) Run(ctx *Context) error {
 		fmt.Printf("\nNo providers configured yet — add providers + discovery rules to %s, then re-run bootstrap.\n", ctx.ConfigPath())
 	}
 
+	if unfinished != nil {
+		return finish(unfinished)
+	}
 	fmt.Println("\nBootstrap complete.")
 	return finish(nil)
 }

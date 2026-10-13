@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
@@ -271,4 +272,47 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// errorJSON is the document --json prints for a command that failed before
+// it printed its result, or a command line that didn't parse.
+type errorJSON struct {
+	Error    string `json:"error"`
+	ExitCode int    `json:"exit_code"`
+}
+
+// Conclude ends a run and returns its exit code. Under --json it makes sure
+// stdout holds exactly one document: the command's, or, for one that failed
+// before printing it, the error.
+func Conclude(c *Context, err error) int {
+	code := ExitCode(err)
+	if c.JSON && !c.emitted {
+		var doc any = struct{}{}
+		if err != nil {
+			doc = errorJSON{Error: err.Error(), ExitCode: code}
+		}
+		_ = c.Emit(doc)
+	}
+	return code
+}
+
+// WantsJSON reports whether args, which didn't parse, asked for --json: then
+// the parse error is the one document on stdout.
+func WantsJSON(args []string) bool {
+	for _, a := range args {
+		switch {
+		case a == "--":
+			return false
+		case a == "--json", a == "--json=true":
+			return true
+		}
+	}
+	return false
+}
+
+// UsageError writes the document --json prints for a command line that
+// didn't parse.
+func UsageError(w io.Writer, err error) {
+	c := &Context{JSON: true, Out: w}
+	_ = c.Emit(errorJSON{Error: err.Error(), ExitCode: ExitCode(err)})
 }

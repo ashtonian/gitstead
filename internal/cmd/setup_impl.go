@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -112,6 +113,8 @@ func (c *SetupCmd) Run(ctx *Context) error {
 		Written bool          `json:"written"`
 		Text    string        `json:"text"`
 		Checks  []doctorCheck `json:"checks"`
+		// Schedule is install-agent's result, when setup installed one.
+		Schedule json.RawMessage `json:"schedule,omitempty"`
 	}{Config: configPath, Text: string(after), Checks: []doctorCheck{}}
 	for _, ch := range checks {
 		result.Checks = append(result.Checks, doctorCheck{Level: string(ch.Status), Message: ch.Message})
@@ -144,8 +147,10 @@ func (c *SetupCmd) Run(ctx *Context) error {
 		fmt.Printf("Answers saved to %s; repeat this setup with `git-mgr setup --answers %s`.\n", c.SaveAnswers, c.SaveAnswers)
 	}
 
-	if err := afterSetup(ctx, candidate, answers); err != nil {
-		return err
+	schedule, err := afterSetup(ctx, candidate, answers)
+	result.Schedule = schedule
+	if err != nil {
+		return ctx.finish(result, err)
 	}
 	fmt.Println("\nNext: `git-mgr plan` shows what will be cloned and changed; `git-mgr apply` does it.")
 	if answers.Workspaces != nil {
@@ -154,12 +159,13 @@ func (c *SetupCmd) Run(ctx *Context) error {
 	return ctx.finish(result, outcome(failed, len(checks), "setup checks failed"))
 }
 
-// afterSetup adopts the chosen clones and installs the background agent.
-func afterSetup(ctx *Context, cfg *config.Config, a setup.Answers) error {
+// afterSetup adopts the chosen clones and installs the background agent,
+// returning the agent's result under --json.
+func afterSetup(ctx *Context, cfg *config.Config, a setup.Answers) (json.RawMessage, error) {
 	if len(a.Adopt) > 0 {
 		st, err := ctx.LoadState()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		failed := 0
 		for _, path := range a.Adopt {
@@ -169,17 +175,19 @@ func afterSetup(ctx *Context, cfg *config.Config, a setup.Answers) error {
 			}
 		}
 		if err := outcome(failed, len(a.Adopt), "clones could not be adopted"); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if a.Schedule {
 		fmt.Println("\nInstalling the background sync agent:")
 		agent := &InstallAgentCmd{Interval: 15 * time.Minute, Log: "~/.local/share/git-mgr/git-mgr.log", Linger: a.Linger}
-		if err := agent.Run(ctx); err != nil {
-			return fmt.Errorf("installing the background agent: %w", err)
+		doc, err := ctx.captured(agent.Run)
+		if err != nil {
+			return doc, fmt.Errorf("installing the background agent: %w", err)
 		}
+		return doc, nil
 	}
-	return nil
+	return nil, nil
 }
 
 // existingConfig loads the config at path, or nil if there is none yet.
