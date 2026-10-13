@@ -9,10 +9,11 @@ import (
 // FastForward brings the checked-out branch of the clone at repoPath up to
 // its upstream, as git merge --ff-only does, when nothing can be lost: the
 // branch is behind and not ahead, no tracked file has changes, and git is
-// not busy in it. Untracked files stay where they are; git refuses rather
-// than overwrite one. A clone it leaves behind its upstream gets a reason in
-// skipped; one that is up to date, detached or without an upstream has
-// nothing to do.
+// not busy in it. Untracked and ignored files stay where they are: git
+// refuses rather than overwrite one (--no-overwrite-ignore, as by default it
+// would overwrite an ignored file the upstream starts tracking). A clone it
+// leaves behind its upstream gets a reason in skipped; one that is up to
+// date, detached or without an upstream has nothing to do.
 func FastForward(ctx context.Context, repoPath string) (updated bool, skipped string, err error) {
 	if _, err := Git(ctx, repoPath, "symbolic-ref", "-q", "HEAD"); err != nil {
 		return false, "", nil
@@ -43,8 +44,8 @@ func FastForward(ctx context.Context, repoPath string) (updated bool, skipped st
 	if len(changes) > 0 {
 		return false, "it has uncommitted changes", nil
 	}
-	if _, err := Git(ctx, repoPath, "merge", "--ff-only", "--quiet", upstream); err != nil {
-		// Such as an untracked file in the way: git kept everything.
+	if _, err := Git(ctx, repoPath, "merge", "--ff-only", "--no-overwrite-ignore", "--quiet", upstream); err != nil {
+		// Such as an untracked or ignored file in the way: git kept everything.
 		return false, fmt.Sprintf("git left it as it was: %v", err), nil
 	}
 	return true, "", nil

@@ -733,7 +733,8 @@ sync:
   retry_backoff: "2s"
 
   # After a successful fetch of a tracked clone: "off", or "ff-only-clean" --
-  # git merge --ff-only @{upstream} when the branch is behind and not ahead,
+  # git merge --ff-only --no-overwrite-ignore @{upstream} when the branch is
+  # behind and not ahead,
   # no tracked file has changes, and git isn't busy (gitops.CheckIdle).
   # Otherwise update_skipped records why. Workspace copies are never updated.
   update: "off"

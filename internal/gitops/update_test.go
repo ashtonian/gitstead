@@ -38,6 +38,10 @@ func TestFastForward(t *testing.T) {
 		{"an untracked file in the way", func(t *testing.T, c string) {
 			writeFile(t, filepath.Join(c, "upstream.txt"), []byte("mine\n"))
 		}, false, "git left it as it was"},
+		{"an ignored file in the way", func(t *testing.T, c string) {
+			writeFile(t, filepath.Join(c, ".git", "info", "exclude"), []byte("upstream.txt\n"))
+			writeFile(t, filepath.Join(c, "upstream.txt"), []byte("mine\n"))
+		}, false, "git left it as it was"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -61,6 +65,9 @@ func TestFastForward(t *testing.T) {
 				}
 			} else if after != before {
 				t.Error("HEAD moved")
+			}
+			if got, err := os.ReadFile(filepath.Join(clone, "upstream.txt")); err == nil && strings.Contains(tt.name, "in the way") && string(got) != "mine\n" {
+				t.Errorf("the file in the way now holds %q", got)
 			}
 		})
 	}
