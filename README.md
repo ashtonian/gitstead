@@ -887,7 +887,9 @@ there could be caught half-done. A lock a crashed git command left behind
 counts too: delete it once no git command is running there. If git-mgr can't
 inspect the repo or write and verify the bundle, nothing is deleted and the
 repo stays tracked. A repo that workspace copies are made from, or that has
-linked worktrees, is never untracked or deleted until they are gone. Stale
+linked worktrees, is never untracked or deleted until they are gone -- including
+a copy another command is making at that moment: deleting, archiving or moving
+a repo waits for it (see `lock_timeout`) and then keeps the repo. Stale
 cleanup lists each repo it kept and why: `discover --apply` prints them, and
 `sync` reports each as a failure (exit code 3) until a later run deletes it.
 
@@ -1330,7 +1332,7 @@ Nothing waits on a person or hangs forever:
 | `sync.clone_timeout` | `30m` | One clone. |
 | `sync.api_timeout` | `60s` | One provider API request attempt. |
 | `sync.discovery_timeout` | `5m` | One discovery rule: listing plus language/topic lookups, retries and rate-limit waits. |
-| `lock_timeout` | `2m` | How long a command waits for another run's state write before exiting 75. |
+| `lock_timeout` | `2m` | How long a command waits for another run's state write, or for a repo another command is deleting, moving or making a workspace copy of, before exiting 75. |
 | `token_command` | `30s` (fixed) | Running a provider's `token_command`. |
 
 A clone is made in a hidden `.git-mgr-clone-*` directory beside its
@@ -1450,7 +1452,7 @@ broken setup. With `--quiet`, only failures are printed, to stderr.
 | 1 | The command failed: bad config, unreadable state, every target failed, or it has no `--json` output or needs `--yes`. |
 | 2 | A check ran and found problems: `doctor`, `ws check`. |
 | 3 | Partial failure: some repos, copies or changes failed and the rest succeeded. Each failure is printed to stderr. |
-| 75 | Another git-mgr run held the state lock for longer than `lock_timeout`; try again (EX_TEMPFAIL). `git-mgr doctor` reports a stuck holder. |
+| 75 | Another git-mgr run held the state lock, or a repo's lock (`.git/git-mgr.lock`, held while a repo is deleted, moved or copied into a workspace), for longer than `lock_timeout`; try again (EX_TEMPFAIL). `git-mgr doctor` reports a stuck state-lock holder; `lsof <repo>/.git/git-mgr.lock` shows a repo lock's. |
 | 80 | Usage error: unknown command or flag. |
 
 ## Resilience

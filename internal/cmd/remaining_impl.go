@@ -70,29 +70,37 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 	}
 	var archives []state.ArchiveEntry
 	untrack := map[string]string{} // key -> the path it was removed at
-	for _, key := range toRemove {
-		repo := st.Repos[key]
+	take := repoTaker(st.Path(), cfg.LockTimeout)
+	// Each clone is taken -- locked, and checked against state as it is
+	// then -- for as long as deleting or archiving it takes, so no workspace
+	// copy is made from it meanwhile.
+	removeOne := func(key string, repo *state.RepoState) error {
 		if err := st.CheckRemovable(key); err != nil {
-			keep(key, err)
-			continue
+			return err
 		}
-		switch {
-		case c.Delete && repo.LocalPath != "":
-			archived, err := gitops.RemoveClone(ctx.GoCtx(), repo.LocalPath, cfg.Backup.ArchiveDir, key, gitops.RemoveOptions{KeepHistory: st.LeansOn(key)})
+		if !c.Delete && !c.Archive || repo.LocalPath == "" {
+			untrack[key] = repo.LocalPath
+			return nil
+		}
+		taken, err := take(ctx.GoCtx(), key, repo.LocalPath)
+		if err != nil {
+			return err
+		}
+		defer taken.release()
+		if c.Delete {
+			archived, err := gitops.RemoveClone(ctx.GoCtx(), repo.LocalPath, cfg.Backup.ArchiveDir, key, gitops.RemoveOptions{KeepHistory: taken.state.LeansOn(key)})
 			if err != nil {
-				keep(key, err)
-				continue
+				return err
 			}
 			if archived != "" {
 				fmt.Printf("  Archived unique work of %s to %s\n", key, archived)
 				archives = append(archives, archiveEntry(archived, key, repo.LocalPath))
 			}
 			fmt.Printf("  Deleted %s\n", repo.LocalPath)
-		case c.Archive && repo.LocalPath != "":
+		} else {
 			entry, err := archiveClone(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir, key, repo.LocalPath)
 			if err != nil {
-				keep(key, err)
-				continue
+				return err
 			}
 			if entry != nil {
 				fmt.Printf("  Moved %s to %s (git-mgr archives restore %s)\n", repo.LocalPath, entry.Path, entry.ID)
@@ -100,22 +108,35 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 			}
 		}
 		untrack[key] = repo.LocalPath
+		return nil
+	}
+	for _, key := range toRemove {
+		if err := removeOne(key, st.Repos[key]); err != nil {
+			keep(key, err)
+		}
 	}
 
 	tookClones := c.Delete || c.Archive
+	var stillTracked []string
 	err = st.Update(cfg.LockTimeout, func(st *state.State) error {
 		st.Archives = append(st.Archives, archives...)
+		stillTracked = nil
 		for key, path := range untrack {
 			// A repo moved meanwhile wasn't the one deleted, and one a
 			// workspace started using meanwhile is still needed.
 			if repo := st.Repos[key]; repo != nil && (!tookClones || repo.LocalPath == path) && st.CheckRemovable(key) == nil {
 				delete(st.Repos, key)
+			} else if repo != nil {
+				stillTracked = append(stillTracked, key)
 			}
 		}
 		return nil
 	})
 	if err != nil {
 		return err
+	}
+	for _, key := range stillTracked {
+		keep(key, errors.New("its clone was taken, but it changed in state meanwhile -- moved, or a workspace copy made from it"))
 	}
 	removed := []string{}
 	for _, key := range toRemove {

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -58,9 +59,10 @@ func agentEnv(cfg *config.Config, st *state.State, ws, agent string) ([]string, 
 // configured cleanup policy, deleting clones through archivingRemover or
 // moving them into the archive through cloneArchiver.
 func staleCleanup(ctx *Context, cfg *config.Config, st *state.State) discovery.Cleanup {
-	remove := archivingRemover(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir, st.LeansOn)
+	take := repoTaker(st.Path(), cfg.LockTimeout)
+	remove := archivingRemover(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir, take)
 	if cfg.Cleanup.Policy == "archive" {
-		remove = cloneArchiver(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir)
+		remove = cloneArchiver(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir, take)
 	}
 	return discovery.Cleanup{
 		Config: cfg.Cleanup,
@@ -78,13 +80,59 @@ func discoveredKeys[V any](discovered map[string]V) map[string]bool {
 	return keys
 }
 
+// takenRepo is a tracked repo's clone, locked for deleting or archiving it,
+// and state as it was once the lock was held.
+type takenRepo struct {
+	release func()
+	state   *state.State
+}
+
+// repoTaker returns what takes repo key's clone at path for deleting or
+// archiving it: its lock (see gitops.LockRepo), waiting up to wait, then a
+// check against state as it is now that the repo is still tracked at path
+// and no workspace copy was made from it meanwhile. A clone not on disk
+// needs no lock.
+func repoTaker(statePath string, wait time.Duration) func(ctx context.Context, key, path string) (takenRepo, error) {
+	return func(ctx context.Context, key, path string) (takenRepo, error) {
+		taken := takenRepo{release: func() {}}
+		if gitops.HasGitDir(path) {
+			release, err := gitops.LockRepo(ctx, path, true, wait)
+			if err != nil {
+				return taken, err
+			}
+			taken.release = release
+		}
+		fresh, err := state.Load(statePath)
+		if err == nil {
+			err = fresh.CheckRemovable(key)
+		}
+		if err == nil {
+			if r := fresh.Repos[key]; r == nil || r.LocalPath != path {
+				err = errors.New("it was moved or untracked meanwhile")
+			}
+		}
+		if err != nil {
+			taken.release()
+			return taken, err
+		}
+		taken.state = fresh
+		return taken, nil
+	}
+}
+
 // archivingRemover deletes stale clones through gitops.RemoveClone: unique work
 // is bundled into archiveDir first, and a clone that can't be inspected or
 // archived is kept. A repo other archives lean on has its whole history
 // bundled.
-func archivingRemover(ctx context.Context, log *slog.Logger, archiveDir string, leansOn func(string) bool) discovery.RemoveFunc {
+func archivingRemover(ctx context.Context, log *slog.Logger, archiveDir string, take func(context.Context, string, string) (takenRepo, error)) discovery.RemoveFunc {
 	return func(key string, repo *state.RepoState) (*state.ArchiveEntry, error) {
-		archived, err := gitops.RemoveClone(ctx, repo.LocalPath, archiveDir, key, gitops.RemoveOptions{KeepHistory: leansOn(key)})
+		taken, err := take(ctx, key, repo.LocalPath)
+		if err != nil {
+			log.Warn("stale repo kept", "repo", key, "path", repo.LocalPath, "error", err)
+			return nil, err
+		}
+		defer taken.release()
+		archived, err := gitops.RemoveClone(ctx, repo.LocalPath, archiveDir, key, gitops.RemoveOptions{KeepHistory: taken.state.LeansOn(key)})
 		if err != nil {
 			log.Warn("stale repo kept", "repo", key, "path", repo.LocalPath, "error", err)
 			return nil, err
@@ -99,8 +147,14 @@ func archivingRemover(ctx context.Context, log *slog.Logger, archiveDir string, 
 }
 
 // cloneArchiver moves stale clones, whole, into archiveDir.
-func cloneArchiver(ctx context.Context, log *slog.Logger, archiveDir string) discovery.RemoveFunc {
+func cloneArchiver(ctx context.Context, log *slog.Logger, archiveDir string, take func(context.Context, string, string) (takenRepo, error)) discovery.RemoveFunc {
 	return func(key string, repo *state.RepoState) (*state.ArchiveEntry, error) {
+		taken, err := take(ctx, key, repo.LocalPath)
+		if err != nil {
+			log.Warn("stale repo kept", "repo", key, "path", repo.LocalPath, "error", err)
+			return nil, err
+		}
+		defer taken.release()
 		entry, err := archiveClone(ctx, log, archiveDir, key, repo.LocalPath)
 		switch {
 		case err != nil:
