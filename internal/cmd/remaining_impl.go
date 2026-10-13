@@ -40,6 +40,9 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 		return fmt.Errorf("no repos matched")
 	}
 
+	if !c.Yes && ctx.JSON {
+		return errNeedsYes("remove")
+	}
 	if !c.Yes {
 		fmt.Printf("Will remove %d repos from tracking:\n", len(toRemove))
 		for _, k := range toRemove {
@@ -60,22 +63,24 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 		}
 	}
 
-	var kept []string
+	var kept []targetError
+	keep := func(key string, err error) {
+		fmt.Fprintf(os.Stderr, "  %s: kept and still tracked: %v\n", key, err)
+		kept = append(kept, targetError{key, err.Error()})
+	}
 	var archives []state.ArchiveEntry
 	untrack := map[string]string{} // key -> the path it was removed at
 	for _, key := range toRemove {
 		repo := st.Repos[key]
 		if err := st.CheckRemovable(key); err != nil {
-			fmt.Fprintf(os.Stderr, "  %s: kept and still tracked: %v\n", key, err)
-			kept = append(kept, key)
+			keep(key, err)
 			continue
 		}
 		switch {
 		case c.Delete && repo.LocalPath != "":
 			archived, err := gitops.RemoveClone(ctx.GoCtx(), repo.LocalPath, cfg.Backup.ArchiveDir, key, false)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "  %s: kept and still tracked: %v\n", key, err)
-				kept = append(kept, key)
+				keep(key, err)
 				continue
 			}
 			if archived != "" {
@@ -86,8 +91,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 		case c.Archive && repo.LocalPath != "":
 			entry, err := archiveClone(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir, key, repo.LocalPath)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "  %s: kept and still tracked: %v\n", key, err)
-				kept = append(kept, key)
+				keep(key, err)
 				continue
 			}
 			if entry != nil {
@@ -112,7 +116,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	var removed []string
+	removed := []string{}
 	for _, key := range toRemove {
 		if _, ok := untrack[key]; ok && st.Repos[key] == nil {
 			removed = append(removed, key)
@@ -120,17 +124,26 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 			fmt.Printf("  Removed %s\n", key)
 		}
 	}
+	keptKeys := make([]string, 0, len(kept))
+	for _, k := range kept {
+		keptKeys = append(keptKeys, k.Target)
+	}
 	// Other machines reading the manifest no longer clone it; the ones that
 	// have it keep it, as with a repos: entry dropped.
-	return errors.Join(
-		outcome(len(kept), len(toRemove), "repos could not be deleted or archived and are still tracked: %s", strings.Join(kept, ", ")),
+	err = errors.Join(
+		outcome(len(kept), len(toRemove), "repos could not be deleted or archived and are still tracked: %s", strings.Join(keptKeys, ", ")),
 		dropFromManifest(cfg, removed...))
+	return ctx.finish(struct {
+		Removed  []string             `json:"removed"`
+		Kept     []targetError        `json:"kept,omitempty"`
+		Archives []state.ArchiveEntry `json:"archives,omitempty"`
+	}{removed, kept, archives}, err)
 }
 
 func (c *ConfigCmd) Run(ctx *Context) error {
 	if c.ShowPath {
 		fmt.Println(ctx.Config)
-		return nil
+		return ctx.finish(map[string]string{"path": config.ExpandHome(ctx.Config)}, nil)
 	}
 	if c.Validate {
 		_, err := ctx.LoadConfig()
@@ -138,7 +151,10 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 			return fmt.Errorf("config validation failed: %w", err)
 		}
 		fmt.Println("Config is valid.")
-		return nil
+		return ctx.finish(map[string]any{"path": config.ExpandHome(ctx.Config), "valid": true}, nil)
+	}
+	if c.Edit && ctx.JSON {
+		return errNoJSON("config --edit")
 	}
 	if c.Edit {
 		editor := os.Getenv("EDITOR")
@@ -163,6 +179,19 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 			}
 		}
 		resolved := cfg.ResolveForRepo(c.ForRepo)
+		if ctx.JSON {
+			doc := map[string]any{
+				"repo": c.ForRepo, "discovered_by": rule, "path_template": resolved.PathTemplate,
+				"ssh_key": cfg.ResolveSSHKey(c.ForRepo, rule), "sync": resolved.Sync, "backup": resolved.Backup,
+				"remote_sync": cfg.RemoteSyncFor(c.ForRepo, rule), "clone": cfg.CloneFor(c.ForRepo, rule),
+				"hooks": cfg.HooksFor(c.ForRepo, rule), "mirror": cfg.MirrorFor(c.ForRepo, rule),
+			}
+			if a := cfg.AccountFor(c.ForRepo, rule); a != nil {
+				doc["account"] = a.Name
+				doc["user.name"], doc["user.email"] = a.Git.Name, a.Git.Email
+			}
+			return ctx.Emit(doc)
+		}
 		fmt.Printf("Resolved config for %s:\n", c.ForRepo)
 		if rule != "" {
 			fmt.Printf("  discovered_by: %s\n", rule)
@@ -197,6 +226,14 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 	out, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
+	}
+	if ctx.JSON {
+		// The config file's own keys, not Go's field names.
+		var doc map[string]any
+		if err := yaml.Unmarshal(out, &doc); err != nil {
+			return err
+		}
+		return ctx.Emit(doc)
 	}
 	fmt.Print(string(out))
 	return nil
@@ -252,7 +289,7 @@ func (c *InitCmd) Run(ctx *Context) error {
 	} else {
 		fmt.Println("Uncomment and edit the provider + discovery stubs, then run 'git-mgr discover'.")
 	}
-	return nil
+	return ctx.finish(map[string]string{"path": path, "github_login": detected}, nil)
 }
 
 // detectGitHubCLI returns the logged-in GitHub user if the gh CLI is installed

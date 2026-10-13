@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -22,50 +23,56 @@ func (c *BootstrapCmd) Run(ctx *Context) error {
 	}
 
 	if c.DryRun {
+		var steps []string
 		if needSetup {
-			fmt.Println("would: setup (asking on a terminal, else taking the recommended answers)")
+			steps = append(steps, "setup")
 		}
-		fmt.Println("would: doctor")
-		fmt.Printf("would: discover --apply%s\n", tagSuffix(c.Profile))
-		fmt.Printf("would: sync%s\n", tagSuffix(c.Profile))
+		steps = append(steps, "doctor", "discover --apply"+tagSuffix(c.Profile), "sync"+tagSuffix(c.Profile))
 		if !c.NoAgent {
-			fmt.Printf("would: install-agent --interval %s%s\n", c.Interval, c.scheduleFlags())
+			steps = append(steps, fmt.Sprintf("install-agent --interval %s%s", c.Interval, c.scheduleFlags()))
 		}
-		return nil
+		for _, s := range steps {
+			fmt.Println("would: " + s)
+		}
+		return ctx.finish(map[string][]string{"would": steps}, nil)
 	}
 
+	// Each step's result, under --json: one document of them all.
+	steps := map[string]json.RawMessage{}
+	step := func(name string, run func(*Context) error) error {
+		fmt.Printf("\n==> %s\n", name)
+		doc, err := ctx.captured(run)
+		if len(doc) > 0 {
+			steps[name] = doc
+		}
+		return err
+	}
+	finish := func(err error) error { return ctx.finish(steps, err) }
+
 	if needSetup {
-		fmt.Println("==> setup")
 		// The agent is installed below, with bootstrap's own interval.
-		s := &SetupCmd{Yes: !term.IsTerminal(int(os.Stdin.Fd())), noSchedule: true}
-		if err := s.Run(ctx); err != nil {
-			return fmt.Errorf("setup: %w", err)
+		s := &SetupCmd{Yes: ctx.JSON || !term.IsTerminal(int(os.Stdin.Fd())), noSchedule: true}
+		if err := step("setup", s.Run); err != nil {
+			return finish(fmt.Errorf("setup: %w", err))
 		}
 	}
 
 	// doctor failures are worth surfacing, but bootstrap should still try to make
 	// progress (e.g. an unreachable provider shouldn't block local setup).
-	fmt.Println("\n==> doctor")
-	if err := (&DoctorCmd{}).Run(ctx); err != nil {
+	if err := step("doctor", (&DoctorCmd{}).Run); err != nil {
 		fmt.Fprintf(os.Stderr, "doctor reported issues (continuing): %v\n", err)
 	}
-
-	fmt.Println("\n==> discover --apply")
-	if err := (&DiscoverCmd{Apply: true, Tag: c.Profile}).Run(ctx); err != nil {
-		return fmt.Errorf("discover: %w", err)
+	if err := step("discover", (&DiscoverCmd{Apply: true, Tag: c.Profile}).Run); err != nil {
+		return finish(fmt.Errorf("discover: %w", err))
 	}
-
-	fmt.Println("\n==> sync")
-	if err := (&SyncCmd{Tag: c.Profile}).Run(ctx); err != nil {
-		return fmt.Errorf("sync: %w", err)
+	if err := step("sync", (&SyncCmd{Tag: c.Profile}).Run); err != nil {
+		return finish(fmt.Errorf("sync: %w", err))
 	}
-
 	if !c.NoAgent {
-		fmt.Println("\n==> install-agent")
 		// A profile gets a schedule of its own that syncs just its repos, so
 		// bootstrapping a second profile doesn't replace the first.
 		agent := &InstallAgentCmd{Name: c.Profile, Tag: c.Profile, Interval: c.Interval, Log: "~/.local/share/git-mgr/git-mgr.log"}
-		if err := agent.Run(ctx); err != nil {
+		if err := step("install-agent", agent.Run); err != nil {
 			fmt.Fprintf(os.Stderr, "install-agent failed (run it later): %v\n", err)
 		}
 	}
@@ -76,7 +83,7 @@ func (c *BootstrapCmd) Run(ctx *Context) error {
 	}
 
 	fmt.Println("\nBootstrap complete.")
-	return nil
+	return finish(nil)
 }
 
 func tagSuffix(tag string) string {

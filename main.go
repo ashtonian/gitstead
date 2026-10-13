@@ -43,7 +43,7 @@ func main() {
 	defer stop()
 
 	ver := fmt.Sprintf("%s (%s, built %s)", version, commit, date)
-	if err := ctx.Run(&cmd.Context{
+	run := &cmd.Context{
 		Config:     cli.Config,
 		State:      cli.State,
 		Verbose:    cli.Verbose,
@@ -51,7 +51,15 @@ func main() {
 		Jobs:       cli.Jobs,
 		VersionStr: ver,
 		Ctx:        rootCtx,
-	}); err != nil {
+		JSON:       cli.JSON,
+	}
+	if cli.JSON {
+		// stdout carries only the result; what commands print for people
+		// goes to stderr, as quietly as --quiet makes it.
+		run.Out, os.Stdout = os.Stdout, os.Stderr
+		run.Quiet = true
+	}
+	if err := ctx.Run(run); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(cmd.ExitCode(err))
 	}

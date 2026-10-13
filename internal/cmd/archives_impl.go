@@ -50,11 +50,17 @@ func (c *ArchivesListCmd) Run(ctx *Context) error {
 		}
 		rows = append(rows, a)
 	}
+	slices.SortFunc(rows, func(a, b state.ArchiveEntry) int { return b.Created.Compare(a.Created) })
+	if ctx.JSON {
+		if rows == nil {
+			rows = []state.ArchiveEntry{}
+		}
+		return ctx.Emit(rows)
+	}
 	if len(rows) == 0 {
 		fmt.Println("No archives on record.")
 		return nil
 	}
-	slices.SortFunc(rows, func(a, b state.ArchiveEntry) int { return b.Created.Compare(a.Created) })
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tCREATED\tFROM\tREPO\tSAVED")
 	for _, a := range rows {
@@ -84,6 +90,12 @@ func (c *ArchivesShowCmd) Run(ctx *Context) error {
 	meta, _, err := gitops.ReadArchive(a.Path)
 	if err != nil {
 		return fmt.Errorf("reading %s: %w (was the archive moved or deleted?)", a.Path, err)
+	}
+	if ctx.JSON {
+		return ctx.Emit(struct {
+			state.ArchiveEntry
+			Description gitops.ArchiveMeta `json:"description"`
+		}{a, meta})
 	}
 	fmt.Printf("Archive %s, made %s\n", a.ID, a.Created.Local().Format(time.DateTime))
 	if a.Workspace != "" {
@@ -163,19 +175,21 @@ func (c *ArchivesRestoreCmd) Run(ctx *Context) error {
 	}
 	logEvent(ctx, "restore", a.Repo, dest)
 	fmt.Printf("Restored %s to %s\n", a.ID, tildify(dest))
+	doc := map[string]any{"id": a.ID, "repo": a.Repo, "path": dest, "tracked": false}
 	if tracked != nil {
 		fmt.Printf("  Not tracked: %s is already tracked at %s\n", a.Repo, tildify(tracked.LocalPath))
-		return nil
+		return ctx.finish(doc, nil)
 	}
 	if a.Repo == "" {
-		return nil
+		return ctx.finish(doc, nil)
 	}
 	// Tracked by hand, its repo is never judged stale again: it is gone
 	// upstream, and you asked for it back.
 	if err := (&AdoptCmd{}).adoptSingle(ctx, cfg, st, dest); err != nil {
-		return fmt.Errorf("restored %s to %s, but tracking it: %w; run git-mgr adopt %s", a.ID, dest, err, dest)
+		return ctx.finish(doc, fmt.Errorf("restored %s to %s, but tracking it: %w; run git-mgr adopt %s", a.ID, dest, err, dest))
 	}
-	return nil
+	doc["tracked"] = true
+	return ctx.finish(doc, nil)
 }
 
 // ArchivesRemoveCmd deletes archives.
@@ -202,7 +216,7 @@ func (c *ArchivesRemoveCmd) Run(ctx *Context) error {
 		doomed = append(doomed, a)
 	}
 	if !c.Yes {
-		if !term.IsTerminal(int(os.Stdin.Fd())) {
+		if ctx.JSON || !term.IsTerminal(int(os.Stdin.Fd())) {
 			return errors.New("deleting archives needs confirmation; pass --yes")
 		}
 		fmt.Printf("Will delete %d archives for good:\n", len(doomed))
@@ -235,7 +249,12 @@ func (c *ArchivesRemoveCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	return outcome(len(failed), len(doomed), "archives could not be deleted: %s", strings.Join(failed, ", "))
+	removed := slices.Sorted(maps.Keys(deleted))
+	if removed == nil {
+		removed = []string{}
+	}
+	return ctx.finish(map[string][]string{"deleted": removed, "failed": failed},
+		outcome(len(failed), len(doomed), "archives could not be deleted: %s", strings.Join(failed, ", ")))
 }
 
 // catalogEntry is the catalog's entry for archive id.

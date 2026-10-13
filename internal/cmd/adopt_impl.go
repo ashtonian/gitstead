@@ -25,9 +25,9 @@ func (c *AdoptCmd) Run(ctx *Context) error {
 	}
 
 	if c.Scan {
-		return c.scanAndAdopt(ctx, cfg, st)
+		return ctx.finishChanges(c.scanAndAdopt(ctx, cfg, st))
 	}
-	return c.adoptSingle(ctx, cfg, st, c.Path)
+	return ctx.finishChanges(c.adoptSingle(ctx, cfg, st, c.Path))
 }
 
 func (c *AdoptCmd) adoptSingle(ctx *Context, cfg *config.Config, st *state.State, repoPath string) error {
@@ -89,6 +89,7 @@ func (c *AdoptCmd) scanAndAdopt(ctx *Context, cfg *config.Config, st *state.Stat
 	for _, repoPath := range found {
 		if err := c.adoptSingle(ctx, cfg, st, repoPath); err != nil {
 			fmt.Fprintf(os.Stderr, "  %s: %v\n", repoPath, err)
+			ctx.noteError(repoPath, err)
 			failed++
 		}
 	}

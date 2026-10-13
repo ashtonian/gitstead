@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -69,7 +70,9 @@ func (c *RunCmd) Run(ctx *Context) error {
 	_ = g.Wait()
 
 	failed := 0
+	doc := make([]runJSON, 0, len(results))
 	for _, r := range results {
+		doc = append(doc, runJSON{Repo: r.key, Path: st.Repos[r.key].LocalPath, OK: r.err == nil, ExitCode: exitStatus(r.err), Output: string(r.out), Error: errString(r.err)})
 		if r.err != nil {
 			failed++
 		}
@@ -87,5 +90,29 @@ func (c *RunCmd) Run(ctx *Context) error {
 		}
 	}
 	fmt.Printf("\nran in %d repos, %d failed\n", len(targets), failed)
-	return outcome(failed, len(targets), "repos failed")
+	return ctx.finish(doc, outcome(failed, len(targets), "repos failed"))
+}
+
+// runJSON is what a command run in one repo did.
+type runJSON struct {
+	Repo     string `json:"repo"`
+	Path     string `json:"path"`
+	OK       bool   `json:"ok"`
+	ExitCode int    `json:"exit_code"`
+	Output   string `json:"output"`
+	Error    string `json:"error,omitempty"`
+}
+
+// exitStatus is the exit status a command's error says, -1 when it didn't
+// run or was killed.
+func exitStatus(err error) int {
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return 0
+	case errors.As(err, &exit):
+		return exit.ExitCode()
+	default:
+		return -1
+	}
 }

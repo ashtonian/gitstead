@@ -44,7 +44,7 @@ func (c *MirrorCmd) Run(ctx *Context) error {
 	jobs, recent := mirrorJobs(cfg, st, pass, c.Force)
 	if len(jobs) == 0 && recent == 0 {
 		fmt.Println("No repo to mirror: turn mirror.enabled on, or mirror some with accounts[].mirror or overrides[].mirror.")
-		return nil
+		return ctx.finish(map[string]any{"mirrors": []mirrorJSON{}, "skipped_recent": 0}, nil)
 	}
 	outcomes := runMirrors(ctx.GoCtx(), jobs, cfg.Concurrency)
 	if err := recordMirrors(cfg, st, outcomes); err != nil {
@@ -66,7 +66,8 @@ func (c *MirrorCmd) Run(ctx *Context) error {
 		fmt.Printf("Mirrors: %d updated, %d skipped (within mirror.interval; --force updates them), %d failed\n", len(outcomes)-failed, recent, failed)
 	}
 	logEvent(ctx, "mirror", "", fmt.Sprintf("updated=%d failed=%d skipped_recent=%d", len(outcomes)-failed, failed, recent))
-	return outcome(failed, len(outcomes), "mirrors failed")
+	return ctx.finish(map[string]any{"mirrors": mirrorsJSON(outcomes), "skipped_recent": recent},
+		outcome(failed, len(outcomes), "mirrors failed"))
 }
 
 // mirrorJob is one repo's mirror to make or update.

@@ -22,7 +22,6 @@ import (
 // WSStatusCmd shows the status of a workspace's copies.
 type WSStatusCmd struct {
 	Name string `arg:"" help:"Workspace name." predictor:"workspace"`
-	JSON bool   `help:"Output JSON."`
 }
 
 func (c *WSStatusCmd) Run(ctx *Context) error {
@@ -32,12 +31,8 @@ func (c *WSStatusCmd) Run(ctx *Context) error {
 	}
 	hs := workspace.Health(ctx.GoCtx(), spec, spec.Targets())
 	runs := agentRuns(st, c.Name)
-	if c.JSON {
-		views := healthViews(spec, hs)
-		for i := range views {
-			views[i].addRun(runs)
-		}
-		return printIndentedJSON(views)
+	if ctx.JSON {
+		return ctx.Emit(statusViews(spec, hs, runs))
 	}
 	printAgents(st, c.Name, runs)
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -58,16 +53,14 @@ func (c *WSStatusCmd) Run(ctx *Context) error {
 
 // WSOverviewCmd shows copy health across every workspace: who is dirty,
 // ahead, stuck or done.
-type WSOverviewCmd struct {
-	JSON bool `help:"Output JSON."`
-}
+type WSOverviewCmd struct{}
 
 func (c *WSOverviewCmd) Run(ctx *Context) error {
 	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}
-	if len(st.Workspaces) == 0 {
+	if len(st.Workspaces) == 0 && !ctx.JSON {
 		fmt.Println("No workspaces created. See 'git-mgr ws create --help'.")
 		return nil
 	}
@@ -85,14 +78,14 @@ func (c *WSOverviewCmd) Run(ctx *Context) error {
 			rows = append(rows, row{spec, h, runs})
 		}
 	}
-	if c.JSON {
+	if ctx.JSON {
 		views := make([]copyStatusJSON, 0, len(rows))
 		for _, r := range rows {
 			v := healthView(r.spec, r.h)
 			v.addRun(r.runs)
 			views = append(views, v)
 		}
-		return printIndentedJSON(views)
+		return ctx.Emit(views)
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -130,6 +123,9 @@ func (c *WSCheckCmd) Run(ctx *Context) error {
 		return err
 	}
 	hs := workspace.Health(ctx.GoCtx(), spec, targets)
+	if ctx.JSON {
+		return ctx.finish(healthViews(spec, hs), problems(workspace.Flagged(hs), "%s: %d copies need attention", c.Name, workspace.Flagged(hs)))
+	}
 	for _, h := range hs {
 		if len(h.Issues) == 0 {
 			if !ctx.Quiet {
@@ -140,7 +136,7 @@ func (c *WSCheckCmd) Run(ctx *Context) error {
 		fmt.Printf("  FLAG  %s: %s\n", shortLabel(spec, h.Located), strings.Join(h.Issues, "; "))
 	}
 	if !workspace.OK(hs) {
-		return fmt.Errorf("%s: %d copies need attention", c.Name, workspace.Flagged(hs))
+		return problems(workspace.Flagged(hs), "%s: %d copies need attention", c.Name, workspace.Flagged(hs))
 	}
 	if !ctx.Quiet {
 		fmt.Printf("%s: all %d copies up to date\n", c.Name, len(hs))
@@ -164,7 +160,7 @@ func (c *WSFetchCmd) Run(ctx *Context) error {
 		return err
 	}
 	results := fetchCopies(ctx.GoCtx(), cfg, st, spec, spec.Targets())
-	return reportOps(spec, "fetched", results, ctx.Quiet)
+	return reportOps(ctx, spec, "fetched", results)
 }
 
 // fetchCopies fetches the repos targets are copies of, each once -- worktrees
@@ -232,7 +228,7 @@ func (c *WSCommitCmd) Run(ctx *Context) error {
 		}
 		return "committed", false, nil
 	})
-	return reportOps(spec, "committed", results, ctx.Quiet)
+	return reportOps(ctx, spec, "committed", results)
 }
 
 // WSPullCmd pulls every copy.
@@ -263,7 +259,7 @@ func (c *WSPullCmd) Run(ctx *Context) error {
 		out, err := gitops.Pull(ctx, t.Path, t.SSHKey, !c.Rebase, c.Rebase)
 		return lastLine(out), false, err
 	})
-	return reportOps(spec, "pulled", results, ctx.Quiet)
+	return reportOps(ctx, spec, "pulled", results)
 }
 
 // backupDirtyCopies backs up every copy with uncommitted work before an
@@ -306,7 +302,7 @@ func (c *WSPushCmd) Run(ctx *Context) error {
 		out, err := gitops.Push(ctx, t.Path, t.SSHKey, c.SetUpstream)
 		return lastLine(out), false, err
 	})
-	return reportOps(spec, "pushed", results, ctx.Quiet)
+	return reportOps(ctx, spec, "pushed", results)
 }
 
 // WSExecCmd runs a command in each copy.
@@ -360,7 +356,7 @@ func (c *WSExecCmd) Run(ctx *Context) error {
 			fmt.Printf("(error: %v)\n", r.Err)
 		}
 	}
-	return outcome(failed, len(results), "copies failed")
+	return ctx.finish(opsJSON(results), outcome(failed, len(results), "copies failed"))
 }
 
 // WSBackupCmd backs up every copy's uncommitted work.
@@ -437,7 +433,7 @@ func (c *WSBackupCmd) Run(ctx *Context) error {
 	if !ctx.Quiet {
 		fmt.Printf("Saved %d new backup(s) for %q\n", saved, c.Name)
 	}
-	return outcome(failed, len(jobs), "copies of %q failed to back up", c.Name)
+	return ctx.finish(copiesJSON(outcomes), outcome(failed, len(jobs), "copies of %q failed to back up", c.Name))
 }
 
 // WSRecoverCmd recovers a copy's backed-up work with the restore machinery.
@@ -467,6 +463,7 @@ func (c *WSRecoverCmd) Run(ctx *Context) error {
 	}
 
 	found, failed, attempted := 0, 0, 0
+	docs := []restoreJSON{}
 	for _, t := range targets {
 		label := t.Label(spec)
 		if !gitops.HasGitDir(t.Path) {
@@ -486,7 +483,9 @@ func (c *WSRecoverCmd) Run(ctx *Context) error {
 			continue
 		}
 		found++
-		if err := restoreBackup(ctx, t.Path, label, b, c.Into, c.Apply, c.Force); err != nil {
+		doc, err := restoreBackup(ctx, t.Path, label, b, c.Into, c.Apply, c.Force)
+		docs = append(docs, doc)
+		if err != nil {
 			failed++
 			fmt.Fprintf(os.Stderr, "  %s: %v\n", label, err)
 		}
@@ -494,7 +493,7 @@ func (c *WSRecoverCmd) Run(ctx *Context) error {
 	if found == 0 {
 		fmt.Println("No local backups found. `git-mgr remote-sync --list` shows what went offsite, and how to restore it.")
 	}
-	return outcome(failed, attempted, "copies could not be recovered")
+	return ctx.finish(docs, outcome(failed, attempted, "copies could not be recovered"))
 }
 
 // --- shared helpers ---
@@ -525,7 +524,8 @@ func shortLabel(spec *workspace.Spec, l workspace.Located) string {
 	return strings.TrimPrefix(l.Label(spec), spec.Name+"/")
 }
 
-func reportOps(spec *workspace.Spec, verb string, results []workspace.OpResult, quiet bool) error {
+func reportOps(ctx *Context, spec *workspace.Spec, verb string, results []workspace.OpResult) error {
+	quiet := ctx.Quiet
 	ok, skipped, failed := 0, 0, 0
 	for _, r := range results {
 		label := shortLabel(spec, r.Located)
@@ -548,7 +548,16 @@ func reportOps(spec *workspace.Spec, verb string, results []workspace.OpResult, 
 	if !quiet {
 		fmt.Printf("%s: %d %s, %d skipped, %d failed\n", spec.Name, ok, verb, skipped, failed)
 	}
-	return outcome(failed, len(results), "copies failed")
+	return ctx.finish(opsJSON(results), outcome(failed, len(results), "copies failed"))
+}
+
+// statusViews is a workspace's copies' health with their agents' runs.
+func statusViews(spec *workspace.Spec, hs []workspace.CopyHealth, runs map[string]agentRun) []copyStatusJSON {
+	views := healthViews(spec, hs)
+	for i := range views {
+		views[i].addRun(runs)
+	}
+	return views
 }
 
 // copyStatusJSON is the stable JSON shape of a copy's health, shared by

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -60,7 +59,6 @@ type RestoreCmd struct {
 
 // StatusCmd shows state of all managed repos.
 type StatusCmd struct {
-	JSON   bool   `help:"JSON output." default:"false"`
 	Live   bool   `help:"Inspect working trees live (dirty + ahead/behind), not the cached state." default:"false"`
 	Repos  string `help:"Filter by glob." default:"" predictor:"repo"`
 	Tag    string `help:"Filter by tag." default:"" predictor:"tag"`
@@ -76,7 +74,7 @@ func (c *StatusCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	if len(st.Repos) == 0 {
+	if len(st.Repos) == 0 && !ctx.JSON {
 		fmt.Println("No repos tracked. Adopt clones you already have ('git-mgr adopt <path>'),")
 		fmt.Println("clone one ('git-mgr clone <url>'), or discover from a provider ('git-mgr discover --apply').")
 		return nil
@@ -94,8 +92,8 @@ func (c *StatusCmd) Run(ctx *Context) error {
 	if c.Live {
 		return c.runLive(ctx, st, pass)
 	}
-	if c.JSON {
-		return c.runJSON(st, pass)
+	if ctx.JSON {
+		return c.runJSON(ctx, st, pass)
 	}
 	return c.runTable(st, pass)
 }
@@ -115,16 +113,14 @@ func (c *StatusCmd) statusFilter(repo *state.RepoState) bool {
 	return true
 }
 
-func (c *StatusCmd) runJSON(st *state.State, pass func(string, *state.RepoState) bool) error {
+func (c *StatusCmd) runJSON(ctx *Context, st *state.State, pass func(string, *state.RepoState) bool) error {
 	filtered := make(map[string]*state.RepoState)
 	for key, repo := range st.Repos {
 		if pass(key, repo) && c.statusFilter(repo) {
 			filtered[key] = repo
 		}
 	}
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(filtered)
+	return ctx.Emit(filtered)
 }
 
 func (c *StatusCmd) runTable(st *state.State, pass func(string, *state.RepoState) bool) error {

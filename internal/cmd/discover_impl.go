@@ -32,7 +32,9 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 			existing++
 		}
 	}
+	doc := discoverJSON{Repos: slices.Sorted(maps.Keys(discovered)), New: len(discovered) - existing, Existing: existing}
 	for _, r := range results {
+		doc.Rules = append(doc.Rules, ruleJSON{Rule: r.Rule, Provider: r.Provider, Found: r.Total, Error: errString(r.Err), Warnings: r.Warnings, Incomplete: r.Incomplete})
 		if r.Err != nil {
 			fmt.Printf("  [%s] %s: ERROR: %v\n", r.Provider, r.Rule, r.Err)
 			continue
@@ -54,8 +56,10 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 	var applyErr error
 	if c.Apply {
 		applyErr = changesOutcome(applyAuto(ctx, cfg, st, plan, reconcile.Safe), plan)
+		doc.Changes = &ctx.changes
 	} else {
 		printPlan(plan, "safe")
+		doc.Plan = plan
 	}
 
 	// Detect stale — but only on a fully successful run. If any rule failed,
@@ -63,6 +67,7 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 	// (or deleting them under remove_and_delete) would be destructive.
 	if discovery.AnyFailed(results) {
 		fmt.Println("\nSkipping stale detection: one or more discovery rules failed.")
+		doc.Stale.Skipped = true
 	} else {
 		cleanup := staleCleanup(ctx, cfg, st)
 		var outcome discovery.CleanupResult
@@ -88,14 +93,47 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 			fmt.Printf("warning: %d stale repos kept their files and stay tracked:\n", len(outcome.Kept))
 			for _, key := range slices.Sorted(maps.Keys(outcome.Kept)) {
 				fmt.Printf("  %s: %v\n", key, outcome.Kept[key])
+				doc.Stale.Kept = append(doc.Stale.Kept, targetError{key, outcome.Kept[key].Error()})
 			}
 		}
+		doc.Stale.NewlyStale, doc.Stale.Reapable, doc.Stale.Reaped = outcome.NewlyStale, outcome.Reapable, outcome.Reaped
 	}
 
 	if !c.Apply {
 		fmt.Println("\nUse --apply to make the changes that move and delete nothing, or `git-mgr apply` for all of them.")
-		return nil
+		return ctx.finish(doc, nil)
 	}
 	fmt.Printf("State updated: %d repos tracked.\n", len(st.Repos))
-	return applyErr
+	return ctx.finish(doc, applyErr)
+}
+
+// discoverJSON is what discover --json prints: what each rule found, the
+// plan, or with --apply what it changed, and what went stale.
+type discoverJSON struct {
+	Rules    []ruleJSON      `json:"rules"`
+	Repos    []string        `json:"repos"`
+	New      int             `json:"new"`
+	Existing int             `json:"existing"`
+	Plan     *reconcile.Plan `json:"plan,omitempty"`
+	Changes  *changesJSON    `json:"changes,omitempty"`
+	Stale    staleJSON       `json:"stale"`
+}
+
+type ruleJSON struct {
+	Rule       string   `json:"rule"`
+	Provider   string   `json:"provider"`
+	Found      int      `json:"found"`
+	Error      string   `json:"error,omitempty"`
+	Warnings   []string `json:"warnings,omitempty"`
+	Incomplete []string `json:"incomplete,omitempty"`
+}
+
+// staleJSON is what judging staleness did.
+type staleJSON struct {
+	// Skipped: a rule failed, so nothing was judged.
+	Skipped    bool          `json:"skipped,omitempty"`
+	NewlyStale int           `json:"newly_stale"`
+	Reapable   int           `json:"past_grace_period"`
+	Reaped     int           `json:"cleaned_up"`
+	Kept       []targetError `json:"kept,omitempty"`
 }

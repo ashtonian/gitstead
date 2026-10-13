@@ -63,6 +63,9 @@ func (c *WSRetireCmd) Run(ctx *Context) error {
 		}
 		names = c.Agents
 	}
+	if !c.Yes && ctx.JSON {
+		return errNeedsYes("ws retire")
+	}
 	if !c.Yes {
 		what := "archive their unique work and remove their copies"
 		if c.Force {
@@ -107,6 +110,7 @@ func (c *WSRetireCmd) Run(ctx *Context) error {
 
 	opts := workspace.RetireOptions{StateDir: st.Dir(), ArchiveDir: cfg.Backup.ArchiveDir, Stop: c.Stop, StopTimeout: c.Timeout, Discard: c.Force}
 	retired := map[string]workspace.Retired{}
+	var doc retiredJSON
 	kept := 0
 	for _, a := range names {
 		if spec.Shared() {
@@ -117,6 +121,7 @@ func (c *WSRetireCmd) Run(ctx *Context) error {
 		retired[a] = r
 		kept += len(r.Kept)
 		reportRetired(spec, r, ctx.Quiet)
+		doc.add(spec, r)
 	}
 	if spec.Shared() {
 		if c.Stop {
@@ -145,12 +150,12 @@ func (c *WSRetireCmd) Run(ctx *Context) error {
 	}
 	logEvent(ctx, "ws_retire", c.Name, strings.Join(names, ","))
 	if kept > 0 {
-		return &exitError{exitPartial, fmt.Errorf("%d copies could not be retired and are still recorded; their agents show as retiring", kept)}
+		return ctx.finish(doc, &exitError{exitPartial, fmt.Errorf("%d copies could not be retired and are still recorded; their agents show as retiring", kept)})
 	}
 	if !ctx.Quiet {
 		fmt.Printf("Retired %s of %q.\n", strings.Join(names, ", "), c.Name)
 	}
-	return nil
+	return ctx.finish(doc, nil)
 }
 
 // WSPublishCmd pushes agents' branches and opens a pull request per repo.
@@ -191,6 +196,16 @@ func (c *WSPublishCmd) Run(ctx *Context) error {
 		pr string
 	}
 	var done []published
+	// What publishing did to one copy, as --json prints it.
+	type publishJSON struct {
+		Copy   string `json:"copy"`
+		Path   string `json:"path"`
+		Branch string `json:"branch,omitempty"`
+		Pushed bool   `json:"pushed"`
+		PR     string `json:"pr,omitempty"`
+		Error  string `json:"error,omitempty"`
+	}
+	doc := []publishJSON{}
 	failed := 0
 	for _, l := range targets {
 		label := l.Label(spec)
@@ -198,6 +213,7 @@ func (c *WSPublishCmd) Run(ctx *Context) error {
 		if err != nil {
 			failed++
 			fmt.Fprintf(os.Stderr, "  %s: not on a branch; nothing to publish\n", label)
+			doc = append(doc, publishJSON{Copy: label, Path: l.Path, Error: "not on a branch"})
 			continue
 		}
 		if rs, err := gitops.GetStatus(ctx.GoCtx(), l.Path); err == nil && (rs.HasStaged || rs.HasUnstaged || rs.HasUntracked) {
@@ -206,12 +222,14 @@ func (c *WSPublishCmd) Run(ctx *Context) error {
 		if _, err := gitops.Push(ctx.GoCtx(), l.Path, l.SSHKey, true); err != nil {
 			failed++
 			fmt.Fprintf(os.Stderr, "  %s: push failed: %v\n", label, err)
+			doc = append(doc, publishJSON{Copy: label, Path: l.Path, Branch: branch, Error: "push failed: " + err.Error()})
 			continue
 		}
 		p := published{l: l}
 		if !c.PR {
 			fmt.Printf("  %s: pushed %s\n", label, branch)
 			done = append(done, p)
+			doc = append(doc, publishJSON{Copy: label, Path: l.Path, Branch: branch, Pushed: true})
 			continue
 		}
 		url, err := c.openPR(ctx.GoCtx(), cfg, st, l, branch)
@@ -219,11 +237,13 @@ func (c *WSPublishCmd) Run(ctx *Context) error {
 			failed++
 			fmt.Fprintf(os.Stderr, "  %s: pushed %s, but %v\n", label, branch, err)
 			done = append(done, p)
+			doc = append(doc, publishJSON{Copy: label, Path: l.Path, Branch: branch, Pushed: true, Error: err.Error()})
 			continue
 		}
 		p.pr = url
 		fmt.Printf("  %s: pushed %s; %s\n", label, branch, url)
 		done = append(done, p)
+		doc = append(doc, publishJSON{Copy: label, Path: l.Path, Branch: branch, Pushed: true, PR: url})
 	}
 
 	err = st.Update(cfg.LockTimeout, func(st *state.State) error {
@@ -241,7 +261,7 @@ func (c *WSPublishCmd) Run(ctx *Context) error {
 		return err
 	}
 	logEvent(ctx, "ws_publish", c.Name, fmt.Sprintf("published=%d failed=%d", len(done), failed))
-	return outcome(failed, len(targets), "copies could not be published")
+	return ctx.finish(doc, outcome(failed, len(targets), "copies could not be published"))
 }
 
 // prTimeout bounds one gh or glab command.

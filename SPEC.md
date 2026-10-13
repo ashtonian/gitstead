@@ -1831,10 +1831,22 @@ The tool is cron-safe because:
 | Code | Meaning |
 | --- | --- |
 | 0 | Everything succeeded. `sync` also exits 0 when another run holds the lock, since overlapping scheduled runs are routine. |
-| 1 | The command failed: bad config, unreadable state, or every target failed. |
+| 1 | The command failed: bad config, unreadable state, every target failed, or it has no `--json` output or needs `--yes`. |
+| 2 | A check ran and found problems: `doctor`, `ws check`. |
 | 3 | Partial failure: some repos, copies or changes failed and the rest succeeded. Each failure is printed to stderr. |
 | 75 | Another git-mgr run holds the lock; try again (EX_TEMPFAIL). |
 | 80 | Usage error: unknown command or flag. |
+
+   `--json` (global) prints one document on stdout: `main` keeps the real
+   stdout for `Context.Emit` and points `os.Stdout` at stderr (and sets
+   `--quiet`), so nothing else reaches it. Commands end with
+   `ctx.finish(doc, err)`, printing doc and returning err for the exit code;
+   plan-applying commands share the change log `noteChanges` fills
+   (`{changes: [action + ok/skipped/info/error], drift, blocked, errors}`);
+   composite commands run steps through `captured`, which returns each step's
+   document for one outer document. Commands without a result refuse
+   `--json`; ones that ask first need `--yes`. `doctor` in a schedule's
+   environment is run with `--json` and its checks decoded.
 6. **All errors include repo context** -- `fmt.Errorf("fetching %s: %w", repo.FullName, err)`
 
 ---

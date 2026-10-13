@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -34,26 +37,48 @@ type DoctorCmd struct {
 // its holder stuck; a write holds it for milliseconds.
 const stuckLockAfter = 5 * time.Second
 
-type doctorReport struct{ warns, fails int }
+// doctorReport prints each check as it is made and keeps them for --json.
+type doctorReport struct {
+	warns, fails int
+	checks       []doctorCheck
+}
 
-func (d *doctorReport) ok(msg string)   { fmt.Printf("  ok   %s\n", msg) }
-func (d *doctorReport) info(msg string) { fmt.Printf("  --   %s\n", msg) }
-func (d *doctorReport) warn(msg string) { d.warns++; fmt.Printf("  WARN %s\n", msg) }
-func (d *doctorReport) fail(msg string) { d.fails++; fmt.Printf("  FAIL %s\n", msg) }
+// doctorCheck is one check: its level -- ok, info, warn or fail -- and what
+// it found.
+type doctorCheck struct {
+	Level   string `json:"level"`
+	Message string `json:"message"`
+}
+
+// doctorJSON is what doctor --json prints.
+type doctorJSON struct {
+	Checks   []doctorCheck `json:"checks"`
+	Problems int           `json:"problems"`
+	Warnings int           `json:"warnings"`
+}
+
+func (d *doctorReport) add(level, tag, msg string) {
+	d.checks = append(d.checks, doctorCheck{level, msg})
+	fmt.Printf("  %s %s\n", tag, msg)
+}
+
+func (d *doctorReport) ok(msg string)   { d.add("ok", "ok  ", msg) }
+func (d *doctorReport) info(msg string) { d.add("info", "--  ", msg) }
+func (d *doctorReport) warn(msg string) { d.warns++; d.add("warn", "WARN", msg) }
+func (d *doctorReport) fail(msg string) { d.fails++; d.add("fail", "FAIL", msg) }
 
 func (c *DoctorCmd) Run(ctx *Context) error {
+	d := &doctorReport{}
 	cfg, err := ctx.LoadConfig()
 	if err != nil {
-		fmt.Printf("  FAIL config: %v\n", err)
-		return fmt.Errorf("config invalid")
+		d.fail(fmt.Sprintf("config: %v", err))
+		return ctx.finish(doctorJSON{Checks: d.checks, Problems: d.fails}, problems(1, "config invalid"))
 	}
 
 	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}
-
-	d := &doctorReport{}
 
 	// --- Tooling ---
 	if path, lerr := exec.LookPath("git"); lerr != nil {
@@ -157,10 +182,8 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 	checkMirrors(cfg, st, d)
 
 	fmt.Printf("\n%d problem(s), %d warning(s)\n", d.fails, d.warns)
-	if d.fails > 0 {
-		return fmt.Errorf("doctor found %d problem(s)", d.fails)
-	}
-	return nil
+	return ctx.finish(doctorJSON{Checks: d.checks, Problems: d.fails, Warnings: d.warns},
+		problems(d.fails, "doctor found %d problem(s)", d.fails))
 }
 
 // checkManifest checks the shared manifest can be read and written, and
@@ -304,7 +327,7 @@ func checkSchedules(ctx *Context, st *state.State, d *doctorReport) {
 func doctorAsScheduled(ctx *Context, s scheduler.Schedule) (fails, warns []string, err error) {
 	runCtx, cancel := context.WithTimeout(ctx.GoCtx(), 2*time.Minute)
 	defer cancel()
-	args := append(slices.Clone(s.Global), "doctor", "--scheduled")
+	args := append(slices.Clone(s.Global), "doctor", "--scheduled", "--json")
 	cmd := exec.CommandContext(runCtx, s.Bin, args...)
 	home, _ := os.UserHomeDir()
 	env := map[string]string{"HOME": home, "USER": os.Getenv("USER"), "LOGNAME": os.Getenv("LOGNAME")}
@@ -321,17 +344,21 @@ func doctorAsScheduled(ctx *Context, s scheduler.Schedule) (fails, warns []strin
 	for _, k := range slices.Sorted(maps.Keys(env)) {
 		cmd.Env = append(cmd.Env, k+"="+env[k])
 	}
-	out, runErr := cmd.CombinedOutput()
-	for _, line := range strings.Split(string(out), "\n") {
-		switch {
-		case strings.HasPrefix(line, "  FAIL "):
-			fails = append(fails, strings.TrimPrefix(line, "  FAIL "))
-		case strings.HasPrefix(line, "  WARN "):
-			warns = append(warns, strings.TrimPrefix(line, "  WARN "))
-		}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	runErr := cmd.Run()
+	var report doctorJSON
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		// No report: it couldn't start, or its config didn't load.
+		return nil, nil, fmt.Errorf("%v: %s", errors.Join(runErr, err), strings.TrimSpace(stderr.String()))
 	}
-	if runErr != nil && len(fails) == 0 {
-		return nil, nil, fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(out)))
+	for _, c := range report.Checks {
+		switch c.Level {
+		case "fail":
+			fails = append(fails, c.Message)
+		case "warn":
+			warns = append(warns, c.Message)
+		}
 	}
 	return fails, warns, nil
 }

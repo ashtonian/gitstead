@@ -27,33 +27,40 @@ func printRestoreSteps(localPath, label string, b gitops.BackupInfo) {
 }
 
 // restoreBackup restores b for the copy at localPath into a scratch directory,
-// onto the copy itself, or prints how to.
-func restoreBackup(ctx *Context, localPath, label string, b gitops.BackupInfo, into string, apply, force bool) error {
-	switch {
-	case into != "":
-		into = config.ExpandHome(into)
-		if err := gitops.RestoreBackupInto(ctx.GoCtx(), localPath, b, into); err != nil {
-			return fmt.Errorf("restoring backup %s of %s into %s: %w", b.ID, label, into, err)
-		}
-		fmt.Printf("Restored backup %s of %s into %s.\n", b.ID, label, into)
-	case apply:
-		if !force {
-			rs, err := gitops.GetStatus(ctx.GoCtx(), localPath)
-			if err != nil {
-				return fmt.Errorf("reading status of %s: %w", label, err)
+// onto the copy itself, or prints how to, and says which.
+func restoreBackup(ctx *Context, localPath, label string, b gitops.BackupInfo, into string, apply, force bool) (restoreJSON, error) {
+	doc := restoreJSON{Target: label, Path: localPath, Backup: backupInfoJSON(b)}
+	err := func() error {
+		switch {
+		case into != "":
+			into = config.ExpandHome(into)
+			if err := gitops.RestoreBackupInto(ctx.GoCtx(), localPath, b, into); err != nil {
+				return fmt.Errorf("restoring backup %s of %s into %s: %w", b.ID, label, into, err)
 			}
-			if rs.StatusString() != "clean" {
-				return fmt.Errorf("%s has uncommitted changes; commit or stash them, use --into, or pass --force", label)
+			doc.Into = into
+			fmt.Printf("Restored backup %s of %s into %s.\n", b.ID, label, into)
+		case apply:
+			if !force {
+				rs, err := gitops.GetStatus(ctx.GoCtx(), localPath)
+				if err != nil {
+					return fmt.Errorf("reading status of %s: %w", label, err)
+				}
+				if rs.StatusString() != "clean" {
+					return fmt.Errorf("%s has uncommitted changes; commit or stash them, use --into, or pass --force", label)
+				}
 			}
+			if err := gitops.ApplyBackup(ctx.GoCtx(), localPath, b); err != nil {
+				return fmt.Errorf("applying backup %s onto %s: %w", b.ID, label, err)
+			}
+			doc.Applied = true
+			fmt.Printf("Applied backup %s onto %s.\n", b.ID, label)
+		default:
+			printRestoreSteps(localPath, label, b)
 		}
-		if err := gitops.ApplyBackup(ctx.GoCtx(), localPath, b); err != nil {
-			return fmt.Errorf("applying backup %s onto %s: %w", b.ID, label, err)
-		}
-		fmt.Printf("Applied backup %s onto %s.\n", b.ID, label)
-	default:
-		printRestoreSteps(localPath, label, b)
-	}
-	return nil
+		return nil
+	}()
+	doc.Error = errString(err)
+	return doc, err
 }
 
 func (c *RestoreCmd) Run(ctx *Context) error {
@@ -74,7 +81,8 @@ func (c *RestoreCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	return restoreBackup(ctx, repo.LocalPath, key, b, c.Into, c.Apply, c.Force)
+	doc, err := restoreBackup(ctx, repo.LocalPath, key, b, c.Into, c.Apply, c.Force)
+	return ctx.finish(doc, err)
 }
 
 // resolveOneRepo finds the single tracked repo matching ref (exact key or glob).

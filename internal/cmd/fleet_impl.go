@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -196,12 +196,16 @@ func openPlan(ctx *Context, cfg *config.Config, st *state.State, plan launch.Pla
 		return err
 	}
 	if flags.Print {
+		if ctx.JSON {
+			return ctx.Emit(plan)
+		}
 		return printLaunch(l, plan)
 	}
 	var muxy *launch.Muxy
 	switch l := l.(type) {
 	case *launch.Tmux:
-		l.NoAttach = flags.NoAttach
+		// Under --json stdout isn't a terminal to attach.
+		l.NoAttach = flags.NoAttach || ctx.JSON
 	case *launch.Muxy:
 		if fs := st.Fleets[plan.Fleet]; fs != nil {
 			l.Recorded = fs.MuxyProjects
@@ -222,11 +226,14 @@ func openPlan(ctx *Context, cfg *config.Config, st *state.State, plan launch.Pla
 		})
 	}
 	logEvent(ctx, "fleet_open", plan.Fleet, l.Name())
+	opened := func(err error) error {
+		return ctx.finish(map[string]any{"fleet": plan.Fleet, "launcher": l.Name(), "agents": plan.Agents()}, err)
+	}
 	if muxy == nil {
 		if err := record(); err != nil {
 			return err
 		}
-		return l.Open(ctx.GoCtx(), plan)
+		return opened(l.Open(ctx.GoCtx(), plan))
 	}
 	if err := l.Open(ctx.GoCtx(), plan); err != nil {
 		if len(muxy.Projects) > 0 {
@@ -234,7 +241,7 @@ func openPlan(ctx *Context, cfg *config.Config, st *state.State, plan launch.Pla
 		}
 		return err
 	}
-	return record()
+	return opened(record())
 }
 
 // printLaunch prints what the launcher would do.
@@ -255,7 +262,6 @@ func printLaunch(l launch.Launcher, plan launch.Plan) error {
 // FleetPlanCmd prints a fleet's launch plan.
 type FleetPlanCmd struct {
 	Name  string `arg:"" help:"Fleet name." predictor:"fleet"`
-	JSON  bool   `help:"Print the plan as JSON, as plugins and remote launches read it."`
 	Agent string `help:"Agent profile every agent runs (default: each workspace's)."`
 	Cmd   string `help:"A command every agent's terminal runs instead of an agent profile."`
 	Fresh bool   `help:"Start every agent afresh."`
@@ -282,8 +288,8 @@ func (c *FleetPlanCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	if c.JSON {
-		return json.NewEncoder(os.Stdout).Encode(plan)
+	if ctx.JSON {
+		return ctx.Emit(plan)
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "WORKSPACE\tAGENT\tSTATE\tPROFILE\tDIR")
@@ -306,6 +312,36 @@ func (c *FleetListCmd) Run(ctx *Context) error {
 	st, err := ctx.LoadState()
 	if err != nil {
 		return err
+	}
+	// A fleet, as fleet ls --json lists it.
+	type listed struct {
+		Name       string    `json:"name"`
+		Workspaces []string  `json:"workspaces"`
+		Launcher   string    `json:"launcher"`
+		Host       string    `json:"host,omitempty"`
+		Running    int       `json:"running"`
+		Agents     int       `json:"agents"`
+		Opened     time.Time `json:"opened,omitzero"`
+		OpenedWith string    `json:"opened_with,omitempty"`
+	}
+	if ctx.JSON {
+		doc := []listed{}
+		for _, f := range cfg.Fleets {
+			l := listed{Name: f.Name, Workspaces: f.Workspaces, Launcher: orDefault(f.Launcher, cfg.Launchers.Default), Host: f.Host}
+			for _, name := range f.Workspaces {
+				for _, ar := range agentRuns(st, name) {
+					l.Agents++
+					if ar.state == workspace.AgentRunning || ar.state == workspace.AgentStopping {
+						l.Running++
+					}
+				}
+			}
+			if fs := st.Fleets[f.Name]; fs != nil {
+				l.Opened, l.OpenedWith = fs.Opened, fs.Launcher
+			}
+			doc = append(doc, l)
+		}
+		return ctx.Emit(doc)
 	}
 	if len(cfg.Fleets) == 0 {
 		fmt.Println("No fleets. Declare one under fleets: in config.")
@@ -355,7 +391,21 @@ func (c *FleetStatusCmd) Run(ctx *Context) error {
 		return fmt.Errorf("no fleet %q in config", c.Name)
 	}
 	if f.Host != "" {
-		return onHost(f, "fleet", "status", c.Name)
+		return onHost(ctx, f, "fleet", "status", c.Name)
+	}
+	if ctx.JSON {
+		// Each workspace's copies, by workspace.
+		doc := map[string][]copyStatusJSON{}
+		var errs []error
+		for _, name := range f.Workspaces {
+			spec, st, err := operationalSpec(ctx, name)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			doc[name] = statusViews(spec, workspace.Health(ctx.GoCtx(), spec, spec.Targets()), agentRuns(st, name))
+		}
+		return ctx.finish(doc, errors.Join(errs...))
 	}
 	for i, name := range f.Workspaces {
 		if i > 0 {
@@ -390,28 +440,45 @@ func (c *FleetStopCmd) Run(ctx *Context) error {
 		if c.Kill {
 			args = append(args, "--kill")
 		}
-		return onHost(f, args...)
+		return onHost(ctx, f, args...)
 	}
+	st, err := ctx.LoadState()
+	if err != nil {
+		return err
+	}
+	doc := []stopJSON{}
 	var errs []error
 	for _, name := range f.Workspaces {
-		if err := (&WSStopCmd{Name: name, Timeout: c.Timeout, Kill: c.Kill}).Run(ctx); err != nil {
+		stopped, err := stopAgents(ctx, cfg, st, name, "", c.Timeout, c.Kill)
+		doc = append(doc, stopped...)
+		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
 		}
 	}
-	return errors.Join(errs...)
+	return ctx.finish(doc, errors.Join(errs...))
 }
 
-// onHost runs git-mgr with args on the fleet's host, on this terminal.
-func onHost(f *config.Fleet, args ...string) error {
+// onHost runs git-mgr with args on the fleet's host, on this terminal; under
+// --json, without one, its JSON passed through as this command's.
+func onHost(ctx *Context, f *config.Fleet, args ...string) error {
 	remote := f.RemoteCommand
 	if remote == "" {
 		remote = "git-mgr"
+	}
+	if ctx.JSON {
+		args = append(args, "--json")
 	}
 	quoted := make([]string, len(args))
 	for i, a := range args {
 		quoted[i] = shellutil.Quote(a)
 	}
-	cmd := exec.Command("ssh", "-t", f.Host, remote+" "+strings.Join(quoted, " "))
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	sshArgs := []string{"-t", f.Host, remote + " " + strings.Join(quoted, " ")}
+	out := io.Writer(os.Stdout)
+	if ctx.JSON {
+		// A terminal would mix the remote's stderr into its JSON.
+		sshArgs, out = sshArgs[1:], ctx.Out
+	}
+	cmd := exec.Command("ssh", sshArgs...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, out, os.Stderr
 	return cmd.Run()
 }

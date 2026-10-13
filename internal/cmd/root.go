@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 
@@ -18,6 +21,7 @@ type CLI struct {
 	Verbose bool   `help:"Verbose output." short:"v"`
 	Quiet   bool   `help:"Suppress non-error output." short:"q"`
 	Jobs    int    `help:"Max concurrent git operations (default 8)." short:"j" name:"concurrency"`
+	JSON    bool   `help:"Print the command's result as one JSON document on stdout; everything else goes to stderr."`
 
 	// Commands
 	Version    VersionCmd    `cmd:"" help:"Print version information."`
@@ -64,11 +68,18 @@ type Context struct {
 	Quiet      bool
 	Jobs       int
 	VersionStr string
+	// JSON asks for the result as JSON, which Emit writes to Out: the real
+	// stdout, while os.Stdout carries everything else to stderr.
+	JSON bool
+	Out  io.Writer
 
 	// Ctx is the root context for the command, cancelled on SIGINT/SIGTERM so
 	// in-flight git and API operations stop cleanly. Use GoCtx() to read it
 	// (it falls back to context.Background() when unset, e.g. in tests).
 	Ctx context.Context
+
+	// changes keeps what the plans the command applied did, for --json.
+	changes changesJSON
 
 	// Lazily loaded
 	cfg    *config.Config
@@ -112,6 +123,25 @@ func (c *Context) ReloadConfig() (*config.Config, error) {
 }
 
 // LoadState loads the state file, creating it if it doesn't exist.
+// Emit writes v, the command's result, as the one JSON document --json
+// prints.
+func (c *Context) Emit(v any) error {
+	out := c.Out
+	if out == nil {
+		out = os.Stdout
+	}
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	return enc.Encode(v)
+}
+
+// errNoJSON is what a command with no result to print as JSON returns under
+// --json: one that takes the terminal, or only changes your shell.
+func errNoJSON(what string) error {
+	return fmt.Errorf("%s has no JSON output", what)
+}
+
 func (c *Context) LoadState() (*state.State, error) {
 	if c.st != nil {
 		return c.st, nil

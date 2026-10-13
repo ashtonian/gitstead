@@ -9,5 +9,5 @@ type VersionCmd struct {
 
 func (v *VersionCmd) Run(ctx *Context) error {
 	fmt.Println("git-mgr " + ctx.VersionStr)
-	return nil
+	return ctx.finish(map[string]string{"version": ctx.VersionStr}, nil)
 }

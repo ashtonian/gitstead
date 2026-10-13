@@ -42,7 +42,12 @@ func (c *WSPruneCmd) Run(ctx *Context) error {
 		names = slices.Sorted(maps.Keys(st.Workspaces))
 	}
 
+	if !c.Yes && !c.DryRun && ctx.JSON {
+		return errNeedsYes("ws prune")
+	}
 	reaped, failedRemovals := 0, 0
+	var doc retiredJSON
+	var would []copyRefJSON
 	for _, name := range names {
 		ws, ok := st.Workspaces[name]
 		if !ok {
@@ -74,6 +79,7 @@ func (c *WSPruneCmd) Run(ctx *Context) error {
 		if c.DryRun {
 			for _, l := range reap {
 				fmt.Printf("  would remove %s\n", l.Label(spec))
+				would = append(would, copyRefJSON{l.Label(spec), l.Path})
 			}
 			reaped += len(reap)
 			continue
@@ -95,6 +101,7 @@ func (c *WSPruneCmd) Run(ctx *Context) error {
 			reaped += len(r.Removed)
 			failedRemovals += len(r.Kept)
 			reportRetired(spec, r, ctx.Quiet)
+			doc.add(spec, r)
 		}
 		if err := recordRetired(cfg, st, name, retired, true); err != nil {
 			return fmt.Errorf("recording %s's removed copies: %w", name, err)
@@ -103,8 +110,14 @@ func (c *WSPruneCmd) Run(ctx *Context) error {
 
 	if c.DryRun {
 		fmt.Printf("%d copies can be removed.\n", reaped)
-		return nil
+		if would == nil {
+			would = []copyRefJSON{}
+		}
+		return ctx.finish(map[string][]copyRefJSON{"would_remove": would}, nil)
 	}
 	fmt.Printf("Removed %d copies.\n", reaped)
-	return outcome(failedRemovals, reaped+failedRemovals, "copies could not be removed")
+	if doc.Removed == nil {
+		doc.Removed = []copyRefJSON{}
+	}
+	return ctx.finish(doc, outcome(failedRemovals, reaped+failedRemovals, "copies could not be removed"))
 }

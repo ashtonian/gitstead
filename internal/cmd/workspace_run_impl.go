@@ -31,6 +31,9 @@ type WSRunCmd struct {
 }
 
 func (c *WSRunCmd) Run(ctx *Context) error {
+	if ctx.JSON {
+		return errNoJSON("ws run, which gives the agent this terminal,")
+	}
 	err := c.run(ctx)
 	if c.NoShell {
 		return err
@@ -229,58 +232,75 @@ func (c *WSStopCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	ws := st.Workspaces[c.Name]
+	doc, err := stopAgents(ctx, cfg, st, c.Name, c.Agent, c.Timeout, c.Kill)
+	return ctx.finish(doc, err)
+}
+
+// stopAgents ends workspace name's running agents -- only agent's, when it
+// isn't "" -- waiting up to timeout for each, and with kill killing what is
+// left.
+func stopAgents(ctx *Context, cfg *config.Config, st *state.State, name, agent string, timeout time.Duration, kill bool) ([]stopJSON, error) {
+	ws := st.Workspaces[name]
 	if ws == nil {
-		return fmt.Errorf("workspace %q is not created", c.Name)
+		return nil, fmt.Errorf("workspace %q is not created", name)
 	}
 	var names []string
 	for _, r := range ws.Replicas {
-		if c.Agent == "" || r.Agent == c.Agent {
+		if agent == "" || r.Agent == agent {
 			names = append(names, r.Agent)
 		}
 	}
 	if len(names) == 0 {
-		return fmt.Errorf("no agent %q in workspace %q", c.Agent, c.Name)
+		return nil, fmt.Errorf("no agent %q in workspace %q", agent, name)
 	}
 
 	failed, tried := 0, 0
-	for _, name := range names {
-		path := agents.LeasePath(st.Dir(), c.Name, name)
+	doc := []stopJSON{}
+	for _, a := range names {
+		path := agents.LeasePath(st.Dir(), name, a)
 		if _, held := agents.Read(path); !held {
-			if c.Agent != "" && !ctx.Quiet {
-				fmt.Printf("  %s: not running\n", name)
+			if agent != "" && !ctx.Quiet {
+				fmt.Printf("  %s: not running\n", a)
 			}
 			continue
 		}
 		tried++
 		err := st.Update(cfg.LockTimeout, func(st *state.State) error {
-			if r := st.Workspaces[c.Name].Replica(name); r != nil && r.Run != nil {
+			if r := st.Workspaces[name].Replica(a); r != nil && r.Run != nil {
 				r.Run.StopRequested = time.Now()
 			}
 			return nil
 		})
 		if err != nil {
-			return err
+			return doc, err
 		}
-		ended, err := agents.Stop(path, c.Timeout, c.Kill)
+		ended, err := agents.Stop(path, timeout, kill)
+		res := stopJSON{Workspace: name, Agent: a, Stopped: err == nil && ended, Error: errString(err)}
 		switch {
 		case err != nil:
 			failed++
-			fmt.Fprintf(os.Stderr, "  %s: %v\n", name, err)
+			fmt.Fprintf(os.Stderr, "  %s: %v\n", a, err)
 		case !ended:
 			failed++
-			fmt.Fprintf(os.Stderr, "  %s: still running after %s; --kill ends it and everything it started\n", name, c.Timeout)
+			res.Error = "still running after " + timeout.String()
+			fmt.Fprintf(os.Stderr, "  %s: still running after %s; --kill ends it and everything it started\n", a, timeout)
 		default:
 			if !ctx.Quiet {
-				fmt.Printf("  %s: stopped\n", name)
+				fmt.Printf("  %s: stopped\n", a)
 			}
 		}
+		doc = append(doc, res)
 	}
 	if tried == 0 && !ctx.Quiet {
-		fmt.Printf("No agent of %q is running.\n", c.Name)
+		fmt.Printf("No agent of %q is running.\n", name)
 	}
-	if failed > 0 {
-		return outcome(failed, tried, "agents of %q are still running", c.Name)
-	}
-	return nil
+	return doc, outcome(failed, tried, "agents of %q are still running", name)
+}
+
+// stopJSON is what stopping one agent's run did.
+type stopJSON struct {
+	Workspace string `json:"workspace"`
+	Agent     string `json:"agent"`
+	Stopped   bool   `json:"stopped"`
+	Error     string `json:"error,omitempty"`
 }

@@ -36,7 +36,7 @@ func (f targetFlags) resolve(ctx *Context) (jump.Target, error) {
 	case len(best) == 1:
 		return best[0].Target, nil
 	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stderr.Fd())) {
+	if ctx.JSON || !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stderr.Fd())) {
 		var labels []string
 		for _, m := range best {
 			labels = append(labels, m.Label)
@@ -67,8 +67,16 @@ func (c *PathCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	if ctx.JSON {
+		return ctx.Emit(targetJSON(t))
+	}
 	fmt.Println(t.Path)
 	return nil
+}
+
+// targetJSON is a place git-mgr knows, as path --json prints it.
+func targetJSON(t jump.Target) map[string]string {
+	return map[string]string{"label": t.Label, "kind": t.Kind, "path": t.Path, "repo": t.Repo}
 }
 
 // CdCmd changes the shell's directory to a place git-mgr knows. A program
@@ -82,6 +90,9 @@ func (c *CdCmd) Run(ctx *Context) error {
 	t, err := c.resolve(ctx)
 	if err != nil {
 		return err
+	}
+	if ctx.JSON {
+		return ctx.Emit(targetJSON(t))
 	}
 	fmt.Println(t.Path)
 	if term.IsTerminal(int(os.Stdout.Fd())) {
@@ -98,6 +109,9 @@ type OpenCmd struct {
 }
 
 func (c *OpenCmd) Run(ctx *Context) error {
+	if ctx.JSON {
+		return errNoJSON("open, which hands the folder to your editor or browser,")
+	}
 	t, err := c.resolve(ctx)
 	if err != nil {
 		return err
@@ -159,7 +173,10 @@ type ShellInitCmd struct {
 	Shell string `arg:"" help:"Your shell: bash, zsh or fish." enum:"bash,zsh,fish"`
 }
 
-func (c *ShellInitCmd) Run(*Context) error {
+func (c *ShellInitCmd) Run(ctx *Context) error {
+	if ctx.JSON {
+		return errNoJSON("shell-init, which prints shell code,")
+	}
 	switch c.Shell {
 	case "fish":
 		fmt.Print(`# git-mgr shell integration: git-mgr cd <query> changes directory.

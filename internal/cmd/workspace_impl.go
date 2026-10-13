@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"text/tabwriter"
 	"time"
 
@@ -80,6 +81,12 @@ func (c *WSCreateCmd) workspace() config.Workspace {
 func (c *WSCreateCmd) Run(ctx *Context) error {
 	// Creating takes the state lock change by change; it is released before
 	// tmux takes over the terminal.
+	if ctx.JSON {
+		if c.Open {
+			return errNoJSON("ws create --open")
+		}
+		return ctx.finishChanges(c.create(ctx))
+	}
 	if err := c.create(ctx); err != nil {
 		return err
 	}
@@ -153,7 +160,7 @@ func (c *WSEnsureCmd) Run(ctx *Context) error {
 	if c.Name != "" && st.Workspaces[c.Name] == nil && cfg.FindWorkspace(c.Name) == nil {
 		return fmt.Errorf("workspace %q is neither declared in config nor recorded", c.Name)
 	}
-	return ensureWorkspaces(ctx, cfg, st, c.Name, nil, true)
+	return ctx.finishChanges(ensureWorkspaces(ctx, cfg, st, c.Name, nil, true))
 }
 
 // ensureWorkspaces makes what is missing of the named workspace, or of all of
@@ -218,7 +225,7 @@ func (c *WSAdoptCmd) Run(ctx *Context) error {
 		}
 		fmt.Printf("  %s: %s\n", r.Agent, repo)
 	}
-	return nil
+	return ctx.finish(ws, nil)
 }
 
 // scanWorkspace builds a workspace from the git checkouts directly in dir:
@@ -285,13 +292,17 @@ func (c *WSListCmd) Run(ctx *Context) error {
 			names[w.Name] = true
 		}
 	}
-	if len(names) == 0 {
-		fmt.Println("No workspaces. Declare one in config, or create one with 'git-mgr ws create <name> --repo <repo>'.")
-		return nil
+	// A workspace, as ws ls --json lists it.
+	type listed struct {
+		Name      string `json:"name"`
+		Isolation string `json:"isolation"`
+		Agents    int    `json:"agents"`
+		Copies    int    `json:"copies"`
+		// Status is created, declared (not created yet) or removed from config.
+		Status string `json:"status"`
+		Dir    string `json:"dir"`
 	}
-
-	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "WORKSPACE\tISOLATION\tAGENTS\tCOPIES\tSTATUS\tDIR")
+	rows := []listed{}
 	for _, n := range slices.Sorted(maps.Keys(names)) {
 		if ws, ok := st.Workspaces[n]; ok {
 			copies := 0
@@ -302,11 +313,27 @@ func (c *WSListCmd) Run(ctx *Context) error {
 			if cfg != nil && cfg.FindWorkspace(n) == nil && ws.Declared {
 				status = "removed from config"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%s\t%s\n", n, ws.Isolation, len(ws.Replicas), copies, status, tildify(ws.Dir))
+			rows = append(rows, listed{n, ws.Isolation, len(ws.Replicas), copies, status, ws.Dir})
 			continue
 		}
 		w := cfg.WithDefaults(*cfg.FindWorkspace(n))
-		fmt.Fprintf(tw, "%s\t%s\t%d\t-\tdeclared\t%s\n", n, w.Isolation, w.Agents, tildify(w.Dir()))
+		rows = append(rows, listed{n, w.Isolation, w.Agents, 0, "declared", w.Dir()})
+	}
+	if ctx.JSON {
+		return ctx.Emit(rows)
+	}
+	if len(rows) == 0 {
+		fmt.Println("No workspaces. Declare one in config, or create one with 'git-mgr ws create <name> --repo <repo>'.")
+		return nil
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "WORKSPACE\tISOLATION\tAGENTS\tCOPIES\tSTATUS\tDIR")
+	for _, r := range rows {
+		copies := strconv.Itoa(r.Copies)
+		if r.Status == "declared" {
+			copies = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\t%s\n", r.Name, r.Isolation, r.Agents, copies, r.Status, tildify(r.Dir))
 	}
 	return tw.Flush()
 }
@@ -340,6 +367,9 @@ func (c *WSRemoveCmd) Run(ctx *Context) error {
 	spec := workspace.FromState(cfg, st, ws)
 	copies := spec.Copies()
 
+	if !c.Yes && ctx.JSON {
+		return errNeedsYes("ws rm")
+	}
 	if !c.Yes {
 		action := "forget"
 		if c.Delete {
@@ -368,7 +398,7 @@ func (c *WSRemoveCmd) Run(ctx *Context) error {
 			}
 			logEvent(ctx, "ws_remove", c.Name, "forgot; files kept")
 		}
-		return err
+		return ctx.finish(map[string]any{"workspace": c.Name, "forgotten": err == nil}, err)
 	}
 
 	machine := ""
@@ -379,6 +409,7 @@ func (c *WSRemoveCmd) Run(ctx *Context) error {
 	}
 	opts := workspace.RetireOptions{StateDir: st.Dir(), ArchiveDir: cfg.Backup.ArchiveDir, Stop: c.Stop, StopTimeout: c.Timeout, Discard: c.Force}
 	retired := map[string]workspace.Retired{}
+	var doc retiredJSON
 	kept := 0
 	for _, r := range ws.Replicas {
 		var paths []string
@@ -390,6 +421,7 @@ func (c *WSRemoveCmd) Run(ctx *Context) error {
 					if errs := runCopies(ctx.GoCtx(), ctx.Logger(), []copyJob{job}, 1)[0].failed(); len(errs) > 0 {
 						kept++
 						fmt.Fprintf(os.Stderr, "  %s: kept, it couldn't be taken offsite: %v\n", l.Label(spec), errors.Join(errs...))
+						doc.Kept = append(doc.Kept, targetError{l.Label(spec), "couldn't be taken offsite: " + errors.Join(errs...).Error()})
 						continue
 					}
 				}
@@ -403,18 +435,22 @@ func (c *WSRemoveCmd) Run(ctx *Context) error {
 		retired[r.Agent] = res
 		kept += len(res.Kept)
 		reportRetired(spec, res, ctx.Quiet)
+		doc.add(spec, res)
 	}
 	if err := recordRetired(cfg, st, c.Name, retired, kept == 0); err != nil {
 		return err
 	}
+	if doc.Removed == nil {
+		doc.Removed = []copyRefJSON{}
+	}
 	if kept > 0 {
-		return outcome(kept, len(copies), "copies of %q could not be removed and are still recorded", c.Name)
+		return ctx.finish(doc, outcome(kept, len(copies), "copies of %q could not be removed and are still recorded", c.Name))
 	}
 	if err := workspace.RemoveCache(spec.Settings.CacheDir); err != nil {
 		ctx.Logger().Warn("workspace removed, but not its agents' cache", "workspace", c.Name, "error", err)
 	}
 	logEvent(ctx, "ws_remove", c.Name, "")
-	return nil
+	return ctx.finish(doc, nil)
 }
 
 // reportRetired prints what a retirement removed and kept.

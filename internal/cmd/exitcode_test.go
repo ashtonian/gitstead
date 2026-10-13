@@ -21,6 +21,8 @@ func TestExitCodes(t *testing.T) {
 		{"a plain error", errors.New("config invalid"), exitFailed},
 		{"another run holds the lock", fmt.Errorf("loading: %w", state.ErrLocked), exitBusy},
 		{"a wrapped outcome keeps its code", fmt.Errorf("sync: %w", outcome(1, 3, "x")), exitPartial},
+		{"a check that found nothing", problems(0, "x"), 0},
+		{"a check that found problems", problems(2, "2 problems"), exitProblems},
 	}
 	for _, tt := range tests {
 		if got := ExitCode(tt.err); got != tt.want {

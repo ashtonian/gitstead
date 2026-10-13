@@ -41,7 +41,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		if !ctx.Quiet {
 			fmt.Fprintln(os.Stderr, "Another sync is running, skipping.")
 		}
-		return nil
+		return ctx.finish(map[string]string{"skipped": "another sync is running"}, nil)
 	}
 	defer release()
 	if err := st.Reload(); err != nil {
@@ -51,6 +51,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	log := ctx.Logger()
 	var failures []syncError
 	tried := 0
+	var doc syncJSON
 
 	// Discover, then bring repos in line with config as far as reconcile.auto
 	// allows. Without discovery only hand-added repos can be judged.
@@ -89,6 +90,10 @@ func (c *SyncCmd) Run(ctx *Context) error {
 			if err != nil {
 				failures = append(failures, syncError{"stale cleanup", err})
 			}
+			doc.Stale = &staleJSON{NewlyStale: outcome.NewlyStale, Reapable: outcome.Reapable, Reaped: outcome.Reaped}
+			for _, key := range slices.Sorted(maps.Keys(outcome.Kept)) {
+				doc.Stale.Kept = append(doc.Stale.Kept, targetError{key, outcome.Kept[key].Error()})
+			}
 			if outcome.Reaped > 0 {
 				log.Info("cleaned up stale repos", "count", outcome.Reaped, "policy", cfg.Cleanup.Policy)
 			}
@@ -125,6 +130,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	if !c.NoFetch {
 		jobs, _ := mirrorJobs(cfg, st, pass, c.Force)
 		mirrors := runMirrors(ctx.GoCtx(), jobs, cfg.Concurrency)
+		doc.Mirrors = mirrorsJSON(mirrors)
 		if err := recordMirrors(cfg, st, mirrors); err != nil {
 			return fmt.Errorf("recording mirrors: %w", err)
 		}
@@ -176,7 +182,26 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	for _, e := range failures {
 		fmt.Fprintf(os.Stderr, "  %s: %v\n", e.repo, e.err)
 	}
-	return outcome(len(failures)+changesFailed, tried+changesTried, "sync operations failed")
+	doc.Changes, doc.Copies = ctx.changes, copiesJSON(outcomes)
+	doc.Fetched, doc.SkippedRecent, doc.SkippedLocked, doc.BackedUp, doc.Mirrored = fetched, skippedRecent, skippedLocked, backedUp, mirrored
+	for _, e := range failures {
+		doc.Failures = append(doc.Failures, targetError{e.repo, e.err.Error()})
+	}
+	return ctx.finish(doc, outcome(len(failures)+changesFailed, tried+changesTried, "sync operations failed"))
+}
+
+// syncJSON is what sync --json prints.
+type syncJSON struct {
+	Changes       changesJSON   `json:"changes"`
+	Stale         *staleJSON    `json:"stale,omitempty"`
+	Copies        []copyJSON    `json:"copies"`
+	Mirrors       []mirrorJSON  `json:"mirrors,omitempty"`
+	Fetched       int           `json:"fetched"`
+	SkippedRecent int           `json:"skipped_recent"`
+	SkippedLocked int           `json:"skipped_locked"`
+	BackedUp      int           `json:"backed_up"`
+	Mirrored      int           `json:"mirrored"`
+	Failures      []targetError `json:"failures,omitempty"`
 }
 
 type syncError struct {
