@@ -89,7 +89,7 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 		d.ok("git found: " + path)
 	}
 
-	d.ok("config valid: " + config.ExpandHome(ctx.Config))
+	d.ok("config valid: " + ctx.ConfigPath())
 
 	// --- base_dir ---
 	if fi, serr := os.Stat(cfg.BaseDir); serr == nil && fi.IsDir() {

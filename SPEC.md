@@ -93,7 +93,7 @@ git-mgr [global flags] <command> [command flags] [args]
 
 | Flag | Default | Description |
 |---|---|---|
-| `--config` | `~/.config/git-mgr/config.yaml` | Config file path |
+| `--config` | `~/.config/git-mgr/config.yaml` if it exists, else the defaults | Config file path; one given here or by `GIT_MGR_CONFIG` must exist |
 | `--state` | `~/.local/share/git-mgr/state.yaml` | State file path |
 | `--verbose` / `-v` | false | Verbose output |
 | `--quiet` / `-q` | false | Suppress non-error output |
@@ -412,7 +412,7 @@ Print resolved configuration.
 
 | Flag | Description |
 |---|---|
-| `--edit` | Open config in `$EDITOR` |
+| `--edit` | Open config in the editor `open` uses -- config's `editor`, else `$VISUAL`, else `$EDITOR`, else `vi` -- run by the shell with the path as an argument of its own, so a path with spaces or shell characters is passed whole |
 | `--validate` | Validate config and exit |
 | `--path` | Print config file path |
 

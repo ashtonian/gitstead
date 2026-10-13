@@ -6,8 +6,6 @@ import (
 	"os"
 
 	"golang.org/x/term"
-
-	"github.com/ashtonian/git-mgr/internal/config"
 )
 
 // Run sets up a fresh machine end to end by orchestrating the existing commands
@@ -18,7 +16,7 @@ import (
 // safe. --profile scopes discovery rules and sync to a tag.
 func (c *BootstrapCmd) Run(ctx *Context) error {
 	needSetup := false
-	if _, err := os.Stat(config.ExpandHome(ctx.Config)); os.IsNotExist(err) {
+	if _, err := os.Stat(ctx.ConfigPath()); os.IsNotExist(err) {
 		needSetup = true
 	}
 
@@ -79,7 +77,7 @@ func (c *BootstrapCmd) Run(ctx *Context) error {
 
 	// Nudge when there's nothing to manage yet (e.g. a freshly init'd config).
 	if cfg, cerr := ctx.LoadConfig(); cerr == nil && len(cfg.Providers) == 0 {
-		fmt.Printf("\nNo providers configured yet — add providers + discovery rules to %s, then re-run bootstrap.\n", config.ExpandHome(ctx.Config))
+		fmt.Printf("\nNo providers configured yet — add providers + discovery rules to %s, then re-run bootstrap.\n", ctx.ConfigPath())
 	}
 
 	fmt.Println("\nBootstrap complete.")

@@ -279,7 +279,8 @@ accounts:
 
 `layout` names a common `path_template`; set one or the other. With `name`,
 two repos with the same name can't both be placed and are reported as blocked. A path you choose with `--config` or `GIT_MGR_CONFIG`
-must exist and parse: a missing, unreadable or malformed file is an error rather
+-- even `~/.config/git-mgr/config.yaml` itself -- must exist and parse; only
+with neither may the default file be missing, meaning the defaults: a missing, unreadable or malformed file is an error rather
 than a silent fall back to defaults, which would otherwise run with no discovery
 rules and mark every discovered repo stale. A key that isn't a setting -- a typo,
 or one renamed since -- is an error too, with the closest setting suggested:
@@ -1531,7 +1532,7 @@ All config fields can be overridden via `GIT_MGR_*` env vars (e.g.
 
 | Variable | Effect |
 |---|---|
-| `GIT_MGR_CONFIG` | Config file path (same as `--config`). |
+| `GIT_MGR_CONFIG` | Config file path (same as `--config`), which must exist; unset, `~/.config/git-mgr/config.yaml` is read if it exists. |
 | `GIT_MGR_STATE` | State file path (same as `--state`). |
 | `GIT_MGR_BASE_DIR` | Override `base_dir`. |
 | `GITHUB_TOKEN` / `GITLAB_TOKEN` / `GITEA_TOKEN` / `FORGEJO_TOKEN` | Default provider tokens. |

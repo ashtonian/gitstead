@@ -164,8 +164,8 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 
 func (c *ConfigCmd) Run(ctx *Context) error {
 	if c.ShowPath {
-		fmt.Println(ctx.Config)
-		return ctx.finish(map[string]string{"path": config.ExpandHome(ctx.Config)}, nil)
+		fmt.Println(ctx.ConfigPath())
+		return ctx.finish(map[string]string{"path": ctx.ConfigPath()}, nil)
 	}
 	if c.Validate {
 		_, err := ctx.LoadConfig()
@@ -173,18 +173,20 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 			return fmt.Errorf("config validation failed: %w", err)
 		}
 		fmt.Println("Config is valid.")
-		return ctx.finish(map[string]any{"path": config.ExpandHome(ctx.Config), "valid": true}, nil)
+		return ctx.finish(map[string]any{"path": ctx.ConfigPath(), "valid": true}, nil)
 	}
 	if c.Edit && ctx.JSON {
 		return errNoJSON("config --edit")
 	}
 	if c.Edit {
-		editor := os.Getenv("EDITOR")
+		// A config that doesn't load is what you'd be editing to fix.
+		cfg, _ := ctx.LoadConfig()
+		editor := editorFor(cfg)
 		if editor == "" {
 			editor = "vi"
 		}
-		cmd := fmt.Sprintf("%s %s", editor, ctx.Config)
-		return runShell(cmd)
+		path := ctx.ConfigPath()
+		return runEditor(editor, path, filepath.Dir(path))
 	}
 
 	cfg, err := ctx.LoadConfig()
@@ -262,7 +264,7 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 }
 
 func (c *InitCmd) Run(ctx *Context) error {
-	path := config.ExpandHome(ctx.Config)
+	path := ctx.ConfigPath()
 
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("config file already exists: %s", path)
@@ -359,15 +361,3 @@ const initExamples = `
 #     repos: ["github.com/your-username/app"]
 #     agents: 4
 `
-
-func runShell(cmd string) error {
-	c := commandContext(cmd)
-	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	return c.Run()
-}
-
-func commandContext(cmd string) *exec.Cmd {
-	return exec.Command("sh", "-c", cmd)
-}

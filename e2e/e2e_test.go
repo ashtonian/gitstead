@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1756,5 +1757,62 @@ func TestE2E_ManifestKeepsAccounts(t *testing.T) {
 				t.Errorf("export exit %d, without the binding:\n%s", code, out)
 			}
 		})
+	}
+}
+
+// TestE2E_ConfigPath: only the default config, when none is named, may be
+// missing; one named -- even at the default path -- must exist. config --edit
+// hands the editor the path as one argument, whatever it holds.
+func TestE2E_ConfigPath(t *testing.T) {
+	bin := gitMgrBin(t)
+	home := t.TempDir()
+	run := func(env []string, args ...string) (string, int) {
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
+			return strings.HasPrefix(kv, "GIT_MGR_CONFIG=") || strings.HasPrefix(kv, "HOME=")
+		}), append([]string{"HOME=" + home, "GIT_MGR_STATE=" + filepath.Join(home, "state.yaml")}, env...)...)
+		out, err := cmd.CombinedOutput()
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return string(out), ee.ExitCode()
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out), 0
+	}
+	if out, code := run(nil, "config", "--validate"); code != 0 {
+		t.Errorf("no config named, none at the default path: exit %d\n%s", code, out)
+	}
+	defaultPath := filepath.Join(home, ".config", "git-mgr", "config.yaml")
+	if out, code := run(nil, "--config", defaultPath, "config", "--validate"); code == 0 {
+		t.Errorf("a named config that's missing must fail, even at the default path:\n%s", out)
+	}
+	if out, code := run([]string{"GIT_MGR_CONFIG=" + defaultPath}, "config", "--validate"); code == 0 {
+		t.Errorf("$GIT_MGR_CONFIG naming a missing file must fail:\n%s", out)
+	}
+
+	dir := filepath.Join(t.TempDir(), "my configs $(touch pwned)")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfg, []byte("concurrency: 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := filepath.Join(t.TempDir(), "args")
+	editor := filepath.Join(t.TempDir(), "editor")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$#\" \"$1\" > %q\n", got)
+	if err := os.WriteFile(editor, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := run([]string{"EDITOR=" + editor, "VISUAL="}, "--config", cfg, "config", "--edit"); code != 0 {
+		t.Fatalf("config --edit exit %d:\n%s", code, out)
+	}
+	if b, _ := os.ReadFile(got); string(b) != "1\n"+cfg+"\n" {
+		t.Errorf("the editor got %q, want the path as one argument", b)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "pwned")); err == nil {
+		t.Error("the path was run as shell")
 	}
 }

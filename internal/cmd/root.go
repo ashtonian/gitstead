@@ -18,7 +18,7 @@ import (
 // CLI defines the top-level command structure.
 type CLI struct {
 	// Global flags
-	Config  string `help:"Config file path." default:"~/.config/git-mgr/config.yaml" env:"GIT_MGR_CONFIG" type:"path"`
+	Config  string `help:"Config file path ($GIT_MGR_CONFIG); without it, ~/.config/git-mgr/config.yaml if it exists, else the defaults." env:"GIT_MGR_CONFIG" type:"path"`
 	State   string `help:"State file path." default:"~/.local/share/git-mgr/state.yaml" env:"GIT_MGR_STATE" type:"path"`
 	Verbose bool   `help:"Verbose output." short:"v"`
 	Quiet   bool   `help:"Suppress non-error output." short:"q"`
@@ -98,16 +98,26 @@ func (c *Context) GoCtx() context.Context {
 	return context.Background()
 }
 
-// LoadConfig loads and validates the config file.
+// ConfigPath is the config file's path: the one given, else the default.
+func (c *Context) ConfigPath() string {
+	if c.Config == "" {
+		return config.ExpandHome(config.DefaultPath)
+	}
+	return config.ExpandHome(c.Config)
+}
+
+// LoadConfig loads and validates the config file. Only the default file may
+// be missing, when none was given: one given by --config or $GIT_MGR_CONFIG,
+// whatever its path, must exist.
 func (c *Context) LoadConfig() (*config.Config, error) {
 	if c.cfg != nil {
 		return c.cfg, nil
 	}
 	var opts []config.Option
-	if config.IsDefaultPath(c.Config) {
+	if c.Config == "" {
 		opts = append(opts, config.WithOptionalFile())
 	}
-	cfg, err := config.Load(c.Config, opts...)
+	cfg, err := config.Load(c.ConfigPath(), opts...)
 	if err != nil {
 		return nil, err
 	}

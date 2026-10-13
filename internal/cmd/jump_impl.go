@@ -11,6 +11,7 @@ import (
 	"charm.land/huh/v2"
 	"golang.org/x/term"
 
+	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/jump"
 	"github.com/ashtonian/git-mgr/internal/repourl"
 )
@@ -123,19 +124,34 @@ func (c *OpenCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	editor := cfg.Editor
+	editor := editorFor(cfg)
+	if editor == "" {
+		return errors.New("no editor: set editor in config, or $VISUAL or $EDITOR")
+	}
+	return runEditor(editor, t.Path, t.Path)
+}
+
+// editorFor is the editor to open things in: config's editor, else $VISUAL,
+// else $EDITOR; "" when none is set. cfg may be nil.
+func editorFor(cfg *config.Config) string {
+	editor := ""
+	if cfg != nil {
+		editor = cfg.Editor
+	}
 	for _, v := range []string{"VISUAL", "EDITOR"} {
 		if editor == "" {
 			editor = os.Getenv(v)
 		}
 	}
-	if editor == "" {
-		return errors.New("no editor: set editor in config, or $VISUAL or $EDITOR")
-	}
-	// The editor setting is a shell command, so "code -n" works; the path
-	// goes in as an argument, never re-parsed.
-	cmd := exec.Command("/bin/sh", "-c", editor+` "$1"`, "git-mgr-open", t.Path)
-	cmd.Dir = t.Path
+	return editor
+}
+
+// runEditor runs editor on path, from dir, on this terminal. The editor is a
+// shell command, so "code -n" works; the path goes in as an argument of its
+// own, never read by the shell.
+func runEditor(editor, path, dir string) error {
+	cmd := exec.Command("/bin/sh", "-c", editor+` "$1"`, "git-mgr-edit", path)
+	cmd.Dir = dir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s: %w", editor, err)

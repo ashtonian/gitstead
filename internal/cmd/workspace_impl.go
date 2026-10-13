@@ -121,7 +121,7 @@ func (c *WSCreateCmd) create(ctx *Context) error {
 		return err
 	}
 	if c.Save {
-		if err := config.SaveWorkspace(ctx.Config, w, c.Force); err != nil {
+		if err := config.SaveWorkspace(ctx.ConfigPath(), w, c.Force); err != nil {
 			return err
 		}
 		if cfg, err = ctx.ReloadConfig(); err != nil {
