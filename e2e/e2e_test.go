@@ -111,6 +111,8 @@ type testEnv struct {
 	baseDir    string
 	stateFile  string
 	configFile string
+	// extraEnv is added to git-mgr's environment.
+	extraEnv []string
 }
 
 func setupTestEnv(t *testing.T) *testEnv {
@@ -145,7 +147,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 func (e *testEnv) run(t *testing.T, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(e.bin, args...)
-	cmd.Env = binEnv("GIT_MGR_CONFIG="+e.configFile, "GIT_MGR_STATE="+e.stateFile)
+	cmd.Env = binEnv(append([]string{"GIT_MGR_CONFIG=" + e.configFile, "GIT_MGR_STATE=" + e.stateFile}, e.extraEnv...)...)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -168,7 +170,7 @@ func (e *testEnv) run(t *testing.T, args ...string) (string, int) {
 func (e *testEnv) runJSON(t *testing.T, v any, args ...string) (stderr string, code int) {
 	t.Helper()
 	cmd := exec.Command(e.bin, append([]string{"--json"}, args...)...)
-	cmd.Env = binEnv("GIT_MGR_CONFIG="+e.configFile, "GIT_MGR_STATE="+e.stateFile)
+	cmd.Env = binEnv(append([]string{"GIT_MGR_CONFIG=" + e.configFile, "GIT_MGR_STATE=" + e.stateFile}, e.extraEnv...)...)
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	if err := cmd.Run(); err != nil {
@@ -379,6 +381,12 @@ func TestE2E_DiscoverApplyHTTPS(t *testing.T) {
 	cfg := fmt.Sprintf(`base_dir: %s
 clone_protocol: https
 concurrency: 2
+accounts:
+  - name: me
+    hosts: [localhost]
+    git:
+      name: Discovered Me
+      email: me@forgejo.example
 providers:
   - name: forgejo
     type: gitea
@@ -392,19 +400,28 @@ discovery:
 	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
-	// The clone is attempted over HTTP (not SSH), proving HTTPURL capture and the
-	// clone_protocol: https selection through the real binary. We assert the
-	// transport rather than a successful clone because the Forgejo container
-	// advertises an unreachable internal ROOT_URL (localhost:3000) instead of its
-	// mapped port -- a container quirk, not a git-mgr behavior. That failed clone
-	// makes discover --apply exit non-zero, as any failed change does.
-	out, _ := env.run(t, "discover", "--apply")
-	if !strings.Contains(out, "git clone http") || !strings.Contains(out, "http-repo") {
-		t.Errorf("expected an http clone attempt for http-repo, got:\n%s", out)
+	// The container advertises its internal URL, localhost:3000, in clone
+	// URLs; git -- not git-mgr -- is told where that is mapped to.
+	env.extraEnv = []string{
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=url." + strings.TrimSuffix(env.httpURL, "/") + "/.insteadOf",
+		"GIT_CONFIG_VALUE_0=http://localhost:3000/",
 	}
-	if strings.Contains(out, "git@") || strings.Contains(out, "ssh://") {
-		t.Errorf("clone must not use SSH under clone_protocol: https:\n%s", out)
+
+	out, code := env.run(t, "discover", "--apply")
+	if code != 0 {
+		t.Fatalf("discover --apply exit %d:\n%s", code, out)
+	}
+	clone := filepath.Join(env.baseDir, "localhost", env.adminUser, "http-repo")
+	origin := gitCmd(t, clone, "remote", "get-url", "origin")
+	if !strings.HasPrefix(origin, "http://") {
+		t.Errorf("origin = %s, want the HTTP URL under clone_protocol: https", origin)
+	}
+	if got := gitCmd(t, clone, "config", "--local", "user.email"); got != "me@forgejo.example" {
+		t.Errorf("user.email = %q, want the account's", got)
+	}
+	if st := env.statusJSON(t)["localhost/"+env.adminUser+"/http-repo"]; st == nil || st["cloned"] != true {
+		t.Errorf("status: %v", st)
 	}
 }
 
@@ -1612,7 +1629,7 @@ exit $rc
 func (e *testEnv) start(t *testing.T, path string, args ...string) func() (string, int) {
 	t.Helper()
 	cmd := exec.Command(e.bin, args...)
-	cmd.Env = binEnv("GIT_MGR_CONFIG="+e.configFile, "GIT_MGR_STATE="+e.stateFile, "PATH="+path)
+	cmd.Env = binEnv(append([]string{"GIT_MGR_CONFIG=" + e.configFile, "GIT_MGR_STATE=" + e.stateFile, "PATH=" + path}, e.extraEnv...)...)
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	if err := cmd.Start(); err != nil {
