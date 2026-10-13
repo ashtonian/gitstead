@@ -44,6 +44,10 @@ type CLI struct {
 	Workspace  WorkspaceCmd  `cmd:"" aliases:"ws,wg" help:"Manage workspaces: repos worked on by several agents, each in a copy of its own."`
 	Fleet      FleetCmd      `cmd:"" help:"Open fleets: several workspaces' agents side by side, with one launcher."`
 	Archives   ArchivesCmd   `cmd:"" help:"The catalog of unique work saved before copies and repos were deleted."`
+	Path       PathCmd       `cmd:"" help:"Print the path of a repo, workspace or agent's folder from part of its name."`
+	Cd         CdCmd         `cmd:"" help:"Change directory to a repo, workspace or agent's folder (needs shell-init)."`
+	Open       OpenCmd       `cmd:"" help:"Open a repo, workspace or agent's folder in your editor; --web opens the repo's page."`
+	ShellInit  ShellInitCmd  `cmd:"" name:"shell-init" help:"Print the shell function that makes git-mgr cd change directory."`
 
 	InstallAgent       InstallAgentCmd              `cmd:"" name:"install-agent" help:"Install/remove a periodic sync agent (launchd/systemd/cron)."`
 	InstallCompletions kongplete.InstallCompletions `cmd:"" name:"install-completions" help:"Output a shell completion script (bash/zsh/fish)."`

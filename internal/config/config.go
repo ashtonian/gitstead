@@ -30,6 +30,9 @@ type Config struct {
 	RemoteSync  RemoteSyncConfig `koanf:"remote_sync"   yaml:"remote_sync"`
 	Reconcile   ReconcileConfig  `koanf:"reconcile"     yaml:"reconcile"`
 	Notify      NotifyConfig     `koanf:"notify"        yaml:"notify"`
+	// Editor is the command `git-mgr open` opens a path with; empty for
+	// $VISUAL, then $EDITOR.
+	Editor string `koanf:"editor" yaml:"editor,omitempty"`
 	Log         LogConfig        `koanf:"log"           yaml:"log"`
 
 	Agents            []AgentProfile    `koanf:"agents"             yaml:"agents,omitempty"     validate:"dive"`

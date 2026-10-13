@@ -138,6 +138,8 @@ writes a config without asking anything.
 | `git-mgr workspace` (`ws`, `wg`) | Manage workspaces: repos × agents, each agent in a copy of its own. See [Workspaces](#workspaces). |
 | `git-mgr fleet` | Open several workspaces' agents side by side with tmux, iTerm, Muxy or a plugin; `open`, `plan`, `ls`, `status`, `stop`. See [Fleets](#fleets-and-launchers). |
 | `git-mgr archives ls\|show` | The catalog of unique work saved before copies and repos were deleted, and how to restore each. |
+| `git-mgr cd\|path\|open <query>` | Jump to, print, or open in your editor (`--web`: the repo's page) a repo, workspace or agent's folder from part of its name. See [Jump and open](#jump-and-open). |
+| `git-mgr shell-init bash\|zsh\|fish` | Print the shell function that makes `git-mgr cd` change directory. |
 | `git-mgr install-agent` | Install, list (`--list`) or remove (`--uninstall`) background syncs (launchd/systemd/cron); `--name` and `--repos`/`--tag`/`--set` for several. |
 | `git-mgr install-completions` | Print a shell completion script (bash/zsh/fish). See [Shell completions](#shell-completions). |
 | `git-mgr version` | Print version, commit, build date. |
@@ -145,10 +147,39 @@ writes a config without asking anything.
 Global flags: `--config`, `--state`, `--verbose`/`-v`, `--quiet`/`-q`,
 `--concurrency`/`-j`.
 
+## Jump and open
+
+```bash
+eval "$(git-mgr shell-init zsh)"     # in ~/.zshrc (or bash; fish: git-mgr shell-init fish | source)
+git-mgr cd app                        # the repo app
+git-mgr cd acme/api                   # by owner/name, when two repos share a name
+git-mgr cd app 2                      # workspace app, agent-2's folder
+git-mgr open platform worker          # agent-1's worker copy in platform, in your editor
+git-mgr open app --web                # the repo's page on its host
+vim "$(git-mgr path app)/go.mod"
+```
+
+A query is part of a name. It is matched against every tracked repo (by key,
+`owner/name`, name and folder), workspace, agent's folder and copy: a whole
+name fits best, then a path suffix (`acme/api`), a prefix, a substring, and last
+the letters in order (`wkr` for `worker`). Several words must all fit. When a
+repo and a workspace fit equally, the repo wins (`--kind workspace` picks the
+workspace); when two things of one kind do, git-mgr asks which on a terminal,
+and otherwise lists them and exits 1. A program can't change its shell's
+directory, so `cd` comes from the function `shell-init` prints; without it,
+`git-mgr cd` prints the path. `open` runs `editor` from config, else `$VISUAL`,
+else `$EDITOR`, with the path as its last argument (so `editor: code -n`
+works), in the target's directory.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `editor` | `$VISUAL`, then `$EDITOR` | The command `git-mgr open` runs, a shell command with the path added as its last argument. |
+
 ## Shell completions
 
 Tab-completion for commands, flags, and dynamic values — repo keys, tags, named
-sets, workspace and fleet names are pulled live from your state/config.
+sets, workspace and fleet names, and `cd`/`path`/`open` targets are pulled live
+from your state/config.
 
 ```bash
 # zsh / bash — add to your rc file
