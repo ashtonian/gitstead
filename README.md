@@ -1427,8 +1427,9 @@ it to (`reconcile.auto: all`, `cleanup.policy: remove_and_delete` or
 With `sync.update: ff-only-clean` (off by default; `setup` offers it), sync
 fast-forwards each tracked clone it fetched to its upstream, when that loses
 nothing: the branch is behind and not ahead, no tracked file has changes, and
-no git command, rebase or merge is under way in it. Untracked files stay, and
-git refuses rather than overwrite one. A clone left behind is reported with
+no git command, rebase or merge is under way in it. Untracked and ignored
+files stay: git refuses rather than overwrite one, an ignored file the
+upstream starts tracking included. A clone left behind is reported with
 why (`update_skipped` under `--json`); workspace copies, on agents' own
 branches, are never updated. `overrides[].sync.update` sets it per repo.
 
