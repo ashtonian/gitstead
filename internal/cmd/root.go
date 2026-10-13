@@ -40,6 +40,7 @@ type CLI struct {
 	Status     StatusCmd     `cmd:"" help:"Show state of all managed repos."`
 	Top        TopCmd        `cmd:"" help:"A live view of every repo and workspace copy: working trees, agents, activity."`
 	Doctor     DoctorCmd     `cmd:"" help:"Diagnose tooling, auth, config, and repo health."`
+	Accounts   AccountsCmd   `cmd:"" help:"List accounts, and make their identities your git's own under their folders (includeIf)."`
 	Run        RunCmd        `cmd:"" help:"Run a command in each matching repo (after --)."`
 	Clone      CloneCmd      `cmd:"" help:"Manually clone and track a repo."`
 	Adopt      AdoptCmd      `cmd:"" help:"Import existing local repos into management."`

@@ -143,6 +143,7 @@ writes a config without asking anything.
 | `git-mgr fleet` | Open several workspaces' agents side by side with tmux, iTerm, Muxy or a plugin; `open`, `plan`, `ls`, `status`, `stop`. See [Fleets](#fleets-and-launchers). |
 | `git-mgr mirror` | Make or update full mirrors of repos' upstreams now; `sync` does it every `mirror.interval`. `--repos`/`--tag`/`--set`, `--force`. See [Mirrors](#mirrors-surviving-the-host). |
 | `git-mgr hooks post-clone\|post-create` | Run repos' `post_clone` or a workspace's `post_create` hooks again, output on the terminal. See [Hooks](#hooks). |
+| `git-mgr accounts ls\|gitconfig` | List accounts and their folders; make each account's identity your git's own under its folders with `includeIf` (`--write`, `--install`). See [Accounts](#accounts). |
 | `git-mgr archives ls\|show\|restore\|rm` | The catalog of what was saved before copies and repos were taken away -- bundles of unique work, and whole clones -- and how to restore each; `restore` moves an archived clone back or rebuilds a clone from a bundle, `rm` deletes archives for good. |
 | `git-mgr cd\|path\|open <query>` | Jump to, print, or open in your editor (`--web`: the repo's page) a repo, workspace or agent's folder from part of its name. See [Jump and open](#jump-and-open). |
 | `git-mgr shell-init bash\|zsh\|fish` | Print the shell function that makes `git-mgr cd` change directory. |
@@ -474,6 +475,31 @@ Workspace clones get the same keys as the repo they come from, so agents
 commit as the right account; worktrees share their repo's config. If you set one of these keys in a repo yourself, git-mgr leaves it and
 reports the difference (see [Config changes](#config-changes-plan-and-apply)).
 Changing an account updates every repo it covers on the next `sync` or `apply`.
+
+git-mgr writes those keys into the repos it tracks. For repos you clone
+yourself into an account's folders, `git-mgr accounts gitconfig` makes the
+same settings your git's own, with
+[`includeIf`](https://git-scm.com/docs/git-config#_conditional_includes):
+
+```bash
+git-mgr accounts ls                    # accounts, what they cover, their folders
+git-mgr accounts gitconfig             # print what it would write
+git-mgr accounts gitconfig --write     # write it to ~/.config/git-mgr/
+git-mgr accounts gitconfig --install   # and include it from your global git config
+```
+
+An account's folders are where config puts its repos: for each of its hosts
+and owners, the leading part of their path that doesn't depend on the repo's
+name (`~/repos/github.com/acme` under the default layout, `~/work/acme` with
+a `base_dir` of its own). Each account with something to set gets
+`~/.config/git-mgr/accounts/<name>.gitconfig`, and
+`~/.config/git-mgr/accounts.gitconfig` holds an `[includeIf "gitdir:<folder>/"]`
+for each folder, deeper folders last so an owner's account wins over its
+host's. A folder two accounts share is left out with a warning, and under
+`layout: name`, where every repo sits directly in `base_dir`, there are no
+folders to tell accounts apart by. `--install` adds one `include.path` line
+to your global git config, once; nothing else touches it. Run it again after
+changing accounts.
 
 ### Clone options
 
