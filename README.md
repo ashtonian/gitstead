@@ -1287,7 +1287,8 @@ as `ws ensure` does (`--no-ensure` skips it). Each agent's terminal runs
 so an agent that is already running elsewhere says so and leaves a shell.
 When an account the workspaces' repos need has `signing.mode: required`, a
 test signature is made first, and nothing opens if it fails: an agent that
-can't sign headless would stall on its first commit.
+can't sign headless would stall on its first commit. `ws run` makes the same
+check for its agent's copies (`--no-check` skips it, with the copy checks).
 
 **Workspaces on another machine.** With `host:` set, `fleet open` asks git-mgr
 on that machine for the launch plan (`ssh <host> git-mgr fleet plan <name>

@@ -23,7 +23,7 @@ type WSRunCmd struct {
 	Profile string `help:"Agent profile to run (default: the workspace's agent, else the first)."`
 	Command string `help:"Run this command instead of an agent profile."`
 	Fresh   bool   `help:"Start afresh even when the profile can resume a session."`
-	NoCheck bool   `name:"no-check" help:"Skip checking the agent's copies first."`
+	NoCheck bool   `name:"no-check" help:"Skip checking the agent's copies first, and the test signature for accounts that require signing."`
 	NoShell bool   `name:"no-shell" help:"Exit when the agent does instead of leaving a shell."`
 
 	// env is the agent's environment, which the shell left behind keeps.
@@ -71,6 +71,11 @@ func (c *WSRunCmd) run(ctx *Context) error {
 	}
 	if _, err := os.Stat(r.Path); err != nil {
 		return fmt.Errorf("%s/%s's folder %s is missing; 'git-mgr ws ensure %s' makes it again", c.Name, c.Agent, r.Path, c.Name)
+	}
+	if !c.NoCheck {
+		if err := checkSigning(ctx, cfg, st, r.Copies); err != nil {
+			return fmt.Errorf("%s/%s not started: %w", c.Name, c.Agent, err)
+		}
 	}
 
 	profile, command, err := c.command(cfg, r)

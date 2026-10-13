@@ -2091,7 +2091,8 @@ A fleet (`fleets:`) is workspaces opened side by side with one launcher;
    `ws ensure` does (`--no-ensure` skips it).
 2. Makes a test signature (`gitops.TestSign`, no terminal, 20 s) for each
    account with `signing.mode: required` covering a repo the workspaces have
-   copies of, and refuses to open if one fails.
+   copies of, and refuses to open if one fails. `ws run` makes the same check
+   for its agent's copies before taking the lease, unless `--no-check`.
 3. Builds the launch plan (`launch.Build`): per workspace its directory, and
    per agent its replica, title (`launchers.title`), profile, state, and
    command: `<git-mgr> --config <c> --state <s> ws run <ws> <agent>
