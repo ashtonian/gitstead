@@ -998,6 +998,47 @@ What install does, so a background run behaves like one from your shell:
   file before each change. Only lines ending in the schedule's own marker
   (`# com.ashtonian.git-mgr[.<name>]`) are touched.
 
+### With Nix: home-manager
+
+`install-agent` refuses a binary in `/nix/store`; with home-manager, declare
+the schedules instead, and they are rebuilt with the package on every switch.
+The flake exposes the module as `homeManagerModules.default`:
+
+```nix
+{
+  inputs.git-mgr.url = "github:ashtonian/git-mgr";
+  # in your home-manager configuration:
+  imports = [ inputs.git-mgr.homeManagerModules.default ];
+  programs.git-mgr = {
+    enable = true;
+    package = pkgs.git-mgr;                       # your build of git-mgr
+    path = with pkgs; [ git openssh gh ];         # what the background sync runs
+    sshAuthSock = "%t/ssh-agent";                 # optional
+    schedules.default.interval = "15m";
+    schedules.work = { interval = "5m"; tag = "work"; };
+    settings = { base_dir = "~/projects"; layout = "owner/name"; };   # optional
+  };
+}
+```
+
+| `programs.git-mgr` | Default | Meaning |
+| --- | --- | --- |
+| `enable` | `false` | Install git-mgr and its schedules. |
+| `package` | required | The git-mgr package. |
+| `settings` | `{}` | Written to `~/.config/git-mgr/config.yaml` when set; the file is then read-only, so `setup` and `ws create --save` can't edit it. |
+| `configFile`, `stateFile` | git-mgr's defaults | Passed to the schedules as `--config`, `--state`. |
+| `path` | `[ git openssh ]` | The schedules' `PATH`, with git-mgr itself. |
+| `sshAuthSock` | none | The schedules' `SSH_AUTH_SOCK` (systemd specifiers work). |
+| `logFile` | `~/.local/share/git-mgr/git-mgr.log` | launchd agents' output; systemd logs to the journal. |
+| `schedules.<name>` | none | A background sync: `interval` (`15m`; dividing an hour or a day), `repos`, `tag`, `set`, `extraArgs`, `environment`. |
+
+Each schedule is a systemd user service and timer (`git-mgr` for `default`,
+else `git-mgr-<name>`) with `OnCalendar=`, `Persistent=true`, `Nice=10` and
+idle I/O on Linux, and a launchd agent with the same priority on macOS: the
+units `install-agent` writes. `git-mgr doctor` checks only schedules
+`install-agent` recorded; check these with `systemctl --user list-timers` or
+`launchctl list`.
+
 `git-mgr doctor` checks each recorded schedule: still installed, its binary
 present, lingering on (systemd), and it runs its own checks again in the
 schedule's environment -- recorded PATH and agent, nothing else -- so a `gh`
@@ -1096,6 +1137,7 @@ go build -ldflags="-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD)" .
 | `internal/pathtemplate`, `internal/pathutil`, `internal/shellutil`, `internal/ctxutil` | Path templates, deletion guards, shell quoting, optional deadlines. |
 | `internal/scheduler` | launchd, systemd and cron installation. |
 | `internal/oplog`, `internal/notify` | The operation log and desktop notifications. |
+| `nix/home-manager.nix`, `flake.nix` | The home-manager module: package, config and schedules as systemd timers or launchd agents. |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow and
 [SECURITY.md](SECURITY.md) for the security model and how to report issues.
