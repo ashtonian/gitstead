@@ -32,8 +32,8 @@ type Config struct {
 	Notify      NotifyConfig     `koanf:"notify"        yaml:"notify"`
 	// Editor is the command `git-mgr open` opens a path with; empty for
 	// $VISUAL, then $EDITOR.
-	Editor string `koanf:"editor" yaml:"editor,omitempty"`
-	Log         LogConfig        `koanf:"log"           yaml:"log"`
+	Editor string    `koanf:"editor" yaml:"editor,omitempty"`
+	Log    LogConfig `koanf:"log"           yaml:"log"`
 
 	Agents            []AgentProfile    `koanf:"agents"             yaml:"agents,omitempty"     validate:"dive"`
 	WorkspaceDefaults WorkspaceDefaults `koanf:"workspace_defaults" yaml:"workspace_defaults"`
