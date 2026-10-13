@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -171,7 +172,7 @@ func (c *Context) Emit(v any) error {
 func (c *Context) relay(data []byte, from string) error {
 	var doc json.RawMessage
 	dec := json.NewDecoder(bytes.NewReader(data))
-	if err := dec.Decode(&doc); err != nil || dec.More() {
+	if err := dec.Decode(&doc); err != nil || !errors.Is(dec.Decode(new(json.RawMessage)), io.EOF) {
 		return fmt.Errorf("git-mgr on %s didn't print one JSON document (is it older than this one?): %s", from, firstLineOf(string(data)))
 	}
 	return c.Emit(doc)

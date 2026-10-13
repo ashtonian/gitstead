@@ -197,8 +197,8 @@ Whatever happens, stdout holds exactly one document. A command that fails
 before it has a result to print -- a config that doesn't load, a repo that
 doesn't match, a refused `--json` -- prints `{"error": "...", "exit_code": N}`;
 so does a command line that doesn't parse (exit 80), whose usage goes to
-stderr, as `--help` does under `--json`. A command with nothing to report
-prints `{}`.
+stderr. `--help` under `--json` prints `{"help": "..."}`, the text it prints
+on stderr. A command with nothing to report prints `{}`.
 
 ## Live view: git-mgr top
 
