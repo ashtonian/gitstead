@@ -1315,6 +1315,94 @@ func TestE2E_JSON(t *testing.T) {
 	}
 }
 
+// TestE2E_RemoteFleetJSON: a fleet on another host is planned, shown and
+// stopped by git-mgr there, over ssh -- here an ssh that runs the command on
+// this machine with the "remote" config -- and under --json its document
+// comes through as this command's, alone on stdout.
+func TestE2E_RemoteFleetJSON(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+	remote := filepath.Join(tmp, "remotes", "app.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	seed := filepath.Join(tmp, "seed")
+	gitCmd(t, tmp, "clone", "-q", remote, seed)
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("# app"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, seed, "add", ".")
+	gitCmd(t, seed, "-c", "user.name=e2e", "-c", "user.email=e2e@test.local", "commit", "-qm", "init")
+	gitCmd(t, seed, "push", "-q", "origin", "HEAD:main")
+
+	// The host's own config: the workspace lives there, its fleet is local.
+	root := filepath.Join(tmp, "box", "workspaces")
+	hostConfig, hostState := filepath.Join(tmp, "box", "config.yaml"), filepath.Join(tmp, "box", "state.yaml")
+	hostYAML := fmt.Sprintf(`base_dir: %s
+workspace_defaults: {root: %s}
+repos:
+  - url: %s
+workspaces:
+  - {name: app, repos: [local/remotes/app], agents: 2}
+fleets:
+  - {name: far, workspaces: [app], launcher: tmux}
+`, filepath.Join(tmp, "box", "repos"), root, remote)
+	if err := os.MkdirAll(filepath.Dir(hostConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hostConfig, []byte(hostYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	box := &testEnv{bin: env.bin, configFile: hostConfig, stateFile: hostState}
+	if out, code := box.run(t, "sync"); code != 0 {
+		t.Fatalf("sync on the host exit %d:\n%s", code, out)
+	}
+	if out, code := box.run(t, "apply", "--yes"); code != 0 {
+		t.Fatalf("apply on the host exit %d:\n%s", code, out)
+	}
+
+	// An ssh that runs the remote line here: options and the host dropped.
+	bin := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeSSH := "#!/bin/sh\nwhile [ $# -gt 0 ]; do case $1 in -t) shift;; -o) shift 2;; *) break;; esac; done\nshift\nexec sh -c \"$*\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(fakeSSH), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	localYAML := fmt.Sprintf("fleets:\n  - {name: far, workspaces: [app], host: box, remote_command: '%s --config %s --state %s'}\n", env.bin, hostConfig, hostState)
+	if err := os.WriteFile(env.configFile, []byte(localYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var status map[string][]struct {
+		Agent string `json:"agent"`
+		Path  string `json:"path"`
+	}
+	if stderr, code := env.runJSON(t, &status, "fleet", "status", "far"); code != 0 {
+		t.Fatalf("fleet status exit %d:\n%s", code, stderr)
+	}
+	if len(status["app"]) != 2 || !strings.HasPrefix(status["app"][0].Path, root) {
+		t.Errorf("the host's copies, through ssh: %+v", status)
+	}
+	var plan struct {
+		Fleet      string
+		Workspaces []struct {
+			Name   string
+			Agents []struct{ Name, Dir string }
+		}
+	}
+	if stderr, code := env.runJSON(t, &plan, "fleet", "open", "far", "--print", "--cmd", "echo hi"); code != 0 {
+		t.Fatalf("fleet open --print exit %d:\n%s", code, stderr)
+	}
+	if len(plan.Workspaces) != 1 || len(plan.Workspaces[0].Agents) != 2 || !strings.HasPrefix(plan.Workspaces[0].Agents[0].Dir, root) {
+		t.Errorf("the plan the host made: %+v", plan)
+	}
+	var stopped []map[string]any
+	if stderr, code := env.runJSON(t, &stopped, "fleet", "stop", "far"); code != 0 || len(stopped) != 0 {
+		t.Errorf("fleet stop with nothing running: exit %d, %v:\n%s", code, stopped, stderr)
+	}
+}
+
 // TestE2E_PublishAndRetire: publish pushes an agent's branch to its remote;
 // retire archives the copy's uncommitted work, removes it, and catalogs the
 // archive.
