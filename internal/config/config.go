@@ -392,9 +392,11 @@ type BackupCfg struct {
 	// Untracked files over these limits are left out of a backup and reported.
 	MaxUntrackedFileMB  int `koanf:"max_untracked_file_mb"  yaml:"max_untracked_file_mb"  default:"50"  validate:"min=0"`
 	MaxUntrackedTotalMB int `koanf:"max_untracked_total_mb" yaml:"max_untracked_total_mb" default:"500" validate:"min=0"`
-	// ArchiveDir receives a git bundle of any unique work (uncommitted changes,
-	// untracked files, stashes, unpushed commits) before git-mgr deletes a
-	// clone or worktree, so no deletion loses work.
+	// ArchiveDir receives what git-mgr keeps of a clone or worktree before
+	// deleting it -- a verified bundle of its unique work: uncommitted
+	// changes, untracked files, stashes, commits no remote has -- and whole
+	// clones archived instead of deleted. A clone it can't inspect or archive
+	// isn't deleted, unless asked to discard its work.
 	ArchiveDir string `koanf:"archive_dir" yaml:"archive_dir"`
 }
 
