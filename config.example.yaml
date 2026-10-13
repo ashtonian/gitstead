@@ -207,11 +207,14 @@ exclude: []
 # Named Sets
 # =============================================================================
 # Reusable repo selections, usable as `--set <name>` on status/sync/backup/run/
-# remove/remote-sync. A repo is in a set if its key matches any `repos` glob OR
-# it carries any of `tags` (both empty = all repos); `exclude_archived` then
+# remove/remote-sync. A repo is in a set if its key matches any `repos` glob,
+# it carries any of `tags`, an account in `accounts` covers it, or a discovery
+# rule in `rules` found it (all empty = all repos); `exclude_archived` then
 # drops archived repos. --set composes with (AND) inline --repos/--tag.
 
 sets: []
+  # - name: work
+  #   accounts: ["work"]
   # - name: core
   #   repos:
   #     - "github.com/acme/api"

@@ -256,7 +256,7 @@ func RepoKeys(cfg *config.Config, st *state.State, decl config.Workspace) ([]str
 		}
 		for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
 			r := st.Repos[key]
-			if set.Matches(key, r.HasTag, r.IsArchived) {
+			if set.Matches(cfg.MemberOf(key, r.DiscoveredBy, r.HasTag, r.IsArchived)) {
 				add(key)
 			}
 		}

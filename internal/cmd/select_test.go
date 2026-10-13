@@ -13,14 +13,19 @@ func TestSelectRepos(t *testing.T) {
 		"github.com/acme/api": {Tags: []string{"backend"}},
 		"github.com/acme/web": {Tags: []string{"frontend"}},
 		"github.com/acme/old": {Tags: []string{"backend"}, IsArchived: true},
-		"gitlab.com/x/tool":   {Tags: []string{"backend"}},
+		"gitlab.com/x/tool":   {Tags: []string{"backend"}, DiscoveredBy: "lab"},
 	}}
-	cfg := &config.Config{Sets: []config.RepoSet{
-		{Name: "acme", Repos: []string{"github.com/acme/*"}},
-		{Name: "backend", Tags: []string{"backend"}},
-		{Name: "active-backend", Tags: []string{"backend"}, ExcludeArchived: true},
-		{Name: "mix", Repos: []string{"gitlab.com/*/*"}, Tags: []string{"frontend"}}, // glob is per-segment (filepath.Match)
-	}}
+	cfg := &config.Config{
+		Accounts: []config.Account{{Name: "work", Hosts: []string{"github.com"}, Owners: []string{"acme"}}},
+		Sets: []config.RepoSet{
+			{Name: "acme", Repos: []string{"github.com/acme/*"}},
+			{Name: "backend", Tags: []string{"backend"}},
+			{Name: "active-backend", Tags: []string{"backend"}, ExcludeArchived: true},
+			{Name: "mix", Repos: []string{"gitlab.com/*"}, Tags: []string{"frontend"}},
+			{Name: "work", Accounts: []string{"work"}, ExcludeArchived: true},
+			{Name: "found-on-lab", Rules: []string{"lab"}},
+		},
+	}
 
 	cases := []struct {
 		name string
@@ -34,6 +39,8 @@ func TestSelectRepos(t *testing.T) {
 		{"set-exclude-archived", selection{set: "active-backend"}, []string{"github.com/acme/api", "gitlab.com/x/tool"}},
 		{"set-union", selection{set: "mix"}, []string{"github.com/acme/web", "gitlab.com/x/tool"}},
 		{"set-AND-inline-tag", selection{set: "acme", tag: "frontend"}, []string{"github.com/acme/web"}},
+		{"set-account", selection{set: "work"}, []string{"github.com/acme/api", "github.com/acme/web"}},
+		{"set-rule", selection{set: "found-on-lab"}, []string{"gitlab.com/x/tool"}},
 	}
 	for _, c := range cases {
 		got, err := selectRepos(cfg, st, c.sel)

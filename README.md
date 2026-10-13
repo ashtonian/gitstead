@@ -615,7 +615,10 @@ that host, `github.com/acme/*` every repo of acme, subgroups included, and
 
 Tags come from discovery rules or manual entries and filter any command. For
 recurring selections, define a **named set** and use `--set` (it composes with
-`--repos`/`--tag`):
+`--repos`/`--tag`). A repo is in a set when any of its `repos` globs, `tags`,
+`accounts` (the account covering the repo) or `rules` (the discovery rule that
+found it) selects it, or when the set names none of them; `exclude_archived`
+then drops archived repos. An unknown account or rule fails validation.
 
 ```yaml
 sets:
@@ -624,6 +627,10 @@ sets:
   - name: active-backend
     tags: ["backend"]
     exclude_archived: true
+  - name: work
+    accounts: [work]
+  - name: from-gitlab
+    rules: [gitlab-groups]
 ```
 
 ```bash
