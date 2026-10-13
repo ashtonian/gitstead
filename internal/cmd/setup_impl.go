@@ -41,7 +41,7 @@ func (c *SetupCmd) Run(ctx *Context) error {
 		return errors.New("setup asks questions, so it needs a terminal; use --yes to accept the recommended answers, or --answers <file>")
 	}
 	home := setup.HomeDir()
-	configPath := config.ExpandHome(ctx.Config)
+	configPath := ctx.ConfigPath()
 	existing, err := existingConfig(configPath)
 	if err != nil {
 		return err

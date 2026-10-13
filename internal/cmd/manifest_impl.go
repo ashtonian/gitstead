@@ -163,7 +163,7 @@ func keepBinding(ctx *Context, cfg *config.Config, key string, mr config.ManualR
 			return nil
 		})
 	}
-	doc, err := config.OpenDocument(ctx.Config)
+	doc, err := config.OpenDocument(ctx.ConfigPath())
 	if err != nil {
 		return err
 	}
@@ -171,9 +171,9 @@ func keepBinding(ctx *Context, cfg *config.Config, key string, mr config.ManualR
 		return err
 	}
 	if err := doc.Save(); err != nil {
-		return fmt.Errorf("its account or key must be kept in config, but adding it to %s's repos: failed (%w); add the entry there yourself, or point manifest: at a file to keep it in", ctx.Config, err)
+		return fmt.Errorf("its account or key must be kept in config, but adding it to %s's repos: failed (%w); add the entry there yourself, or point manifest: at a file to keep it in", ctx.ConfigPath(), err)
 	}
-	fmt.Printf("  Added %s to %s's repos:, for its account or key\n", key, ctx.Config)
+	fmt.Printf("  Added %s to %s's repos:, for its account or key\n", key, ctx.ConfigPath())
 	return nil
 }
 
