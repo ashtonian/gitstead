@@ -248,27 +248,31 @@ func Occupied(path string, c Copy) string {
 
 // recordRepo stores what this run observed of a tracked repo: that it is on
 // disk, its copy ID (created if missing), its provider ID and whether the
-// provider has archived it.
-func recordRepo(d Repo, here Copy) func(context.Context, *state.State) {
-	return func(ctx context.Context, st *state.State) {
-		a := st.Repos[d.Key]
-		if a == nil {
-			return
-		}
-		a.Cloned = true
-		if d.ProviderID != "" {
-			a.ProviderID = d.ProviderID
-		}
-		switch {
-		case here.CopyID != "":
-			a.CopyID = here.CopyID
-		default:
-			if id, err := gitops.CopyID(ctx, a.LocalPath); err == nil {
-				a.CopyID = id
+// provider has archived it. A repo moved meanwhile is left to the run that
+// moved it.
+func recordRepo(d Repo, here Copy) Observation {
+	return func(ctx context.Context) func(*state.State) {
+		copyID := here.CopyID
+		if copyID == "" {
+			if id, err := gitops.CopyID(ctx, here.Path); err == nil {
+				copyID = id
 			}
 		}
-		if d.Found != nil {
-			a.IsArchived = d.Found.IsArchived
+		return func(st *state.State) {
+			a := st.Repos[d.Key]
+			if a == nil || a.LocalPath != here.Path {
+				return
+			}
+			a.Cloned = true
+			if d.ProviderID != "" {
+				a.ProviderID = d.ProviderID
+			}
+			if copyID != "" {
+				a.CopyID = copyID
+			}
+			if d.Found != nil {
+				a.IsArchived = d.Found.IsArchived
+			}
 		}
 	}
 }
