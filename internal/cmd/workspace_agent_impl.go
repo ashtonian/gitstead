@@ -163,15 +163,17 @@ func readStdin(r io.Reader, limit int64, wait time.Duration) []byte {
 }
 
 // waitingMessage is what an agent's notification says it waits for: Claude
-// Code's hook input ({"message": ...} from a Notification hook,
-// {"hook_event_name": "Stop"} when it has finished) or Codex's notify
-// payload ({"type": "agent-turn-complete", "last-assistant-message": ...}).
+// Code's hook input ({"message": ...} from a Notification hook;
+// {"hook_event_name": "Stop", "last_assistant_message": ...} when it has
+// finished) or Codex's notify payload ({"type": "agent-turn-complete",
+// "last-assistant-message": ...}).
 func waitingMessage(payload []byte) string {
 	var n struct {
-		Message string `json:"message"`
-		Event   string `json:"hook_event_name"`
-		Type    string `json:"type"`
-		Last    string `json:"last-assistant-message"`
+		Message    string `json:"message"`
+		Event      string `json:"hook_event_name"`
+		Type       string `json:"type"`
+		ClaudeLast string `json:"last_assistant_message"`
+		CodexLast  string `json:"last-assistant-message"`
 	}
 	if len(payload) == 0 || json.Unmarshal(payload, &n) != nil {
 		return ""
@@ -180,7 +182,7 @@ func waitingMessage(payload []byte) string {
 	case n.Message != "":
 		return n.Message
 	case n.Event == "Stop" || n.Type == "agent-turn-complete":
-		line, _, _ := strings.Cut(strings.TrimSpace(n.Last), "\n")
+		line, _, _ := strings.Cut(strings.TrimSpace(n.ClaudeLast+n.CodexLast), "\n")
 		if r := []rune(line); len(r) > 100 {
 			line = string(r[:99]) + "…"
 		}

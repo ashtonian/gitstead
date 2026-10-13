@@ -18,6 +18,7 @@ func TestWaitingMessage(t *testing.T) {
 	for payload, want := range map[string]string{
 		`{"hook_event_name":"Notification","message":"Claude needs your permission to use Bash"}`: "Claude needs your permission to use Bash",
 		`{"hook_event_name":"Stop","stop_hook_active":false}`:                                     "finished",
+		`{"hook_event_name":"Stop","last_assistant_message":"Refactor done.\nDetails."}`:          "finished: Refactor done.",
 		`{"type":"agent-turn-complete","last-assistant-message":"Done: tests pass.\nMore."}`:      "finished: Done: tests pass.",
 		`{"type":"agent-turn-complete","last-assistant-message":"` + long + `"}`:                  "finished: " + long[:99] + "…",
 		`not json`: "",

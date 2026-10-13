@@ -1077,10 +1077,13 @@ and `git-mgr top`, and with `notify.enabled` sends a desktop notification
   }
   ```
 
-  Codex, in `~/.codex/config.toml`: `notify = ["git-mgr", "ws", "waiting"]`.
-  The message comes from what the agent passes (Claude's on stdin, Codex's as
-  an argument): "Claude needs your permission to use Bash", or "finished: …"
-  when it ends its turn. `--message` sets one yourself.
+  Codex, at the top of `~/.codex/config.toml`, before any `[table]`:
+  `notify = ["git-mgr", "ws", "waiting"]`. The message comes from what the
+  agent passes (Claude's on stdin, Codex's as an argument): "Claude needs your
+  permission to use Bash", or "finished: …" and the first line of its last
+  reply when it ends its turn. `--message` sets one yourself. `ws waiting`
+  prints nothing on stdout -- Claude Code would add it to the prompt -- and
+  always exits 0, so it never blocks an agent.
 - **Its pane goes quiet.** For agents in tmux, `ws run` watches its own pane:
   output for 5s or more -- working -- then none for `notify.waiting_after`
   (30s) counts as waiting, and output again clears it. The screen an agent
