@@ -198,6 +198,21 @@ func ResolveBase(ctx context.Context, repo, base string) (string, error) {
 	return "", fmt.Errorf("base ref %q is neither a ref nor a branch of origin in %s", base, repo)
 }
 
+// DefaultBase names the branch a repo's work is compared with when no base
+// ref is configured: origin's default branch, else the upstream of source's
+// checked-out branch -- for a workspace copy, source is the repo it was made
+// from. "" when neither is known.
+func DefaultBase(ctx context.Context, source string) string {
+	if GitExitCode(ctx, source, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/HEAD") == 0 {
+		return "origin/HEAD"
+	}
+	upstream, err := Git(ctx, source, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "HEAD@{upstream}")
+	if err != nil {
+		return ""
+	}
+	return upstream
+}
+
 func remoteBranchExists(ctx context.Context, repo, branch string) bool {
 	return GitExitCode(ctx, repo, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branch) == 0
 }

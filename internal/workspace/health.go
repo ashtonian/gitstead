@@ -125,22 +125,25 @@ func copyHealth(ctx context.Context, spec *Spec, t Located) CopyHealth {
 	}
 
 	// An agent's branch usually has no upstream until it is published, so
-	// without one it is compared with what it was branched from.
+	// without one it is compared with what it was branched from. A copy whose
+	// repo names no default branch has nothing to compare with.
 	h.Upstream = gitops.Upstream(ctx, t.Path)
 	compare := h.Upstream
 	if compare == "" && !spec.Shared() {
 		compare = spec.BaseRef
 		if compare == "" {
-			compare = "origin/HEAD"
+			compare = gitops.DefaultBase(ctx, SourceOf(ctx, t.Copy))
 		}
 	}
 	if compare != "" {
-		if ahead, behind, err := gitops.AheadBehind(ctx, t.Path, compare); err == nil {
-			h.Ahead, h.Behind = ahead, behind
-			if behind > 0 {
-				h.Issues = append(h.Issues, fmt.Sprintf("behind %s by %d", compare, behind))
-			}
+		ahead, behind, err := gitops.AheadBehind(ctx, t.Path, compare)
+		switch {
+		case err != nil:
+			h.Issues = append(h.Issues, fmt.Sprintf("can't compare with %s: %v", compare, err))
+		case behind > 0:
+			h.Issues = append(h.Issues, fmt.Sprintf("behind %s by %d", compare, behind))
 		}
+		h.Ahead, h.Behind = ahead, behind
 	}
 	return h
 }
