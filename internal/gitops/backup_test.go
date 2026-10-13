@@ -190,6 +190,46 @@ func TestBackup_RestoresExactly(t *testing.T) {
 	}
 }
 
+// An edit that keeps a file's size, made in the same second as git's last
+// write of the index, leaves the index's cached stat data matching. git sees
+// the edit only because the index is not older than the file; a backup must
+// see it too.
+func TestBackup_SeesSameSizeEditInTheIndexsSecond(t *testing.T) {
+	dir := setupTestRepo(t)
+	file := filepath.Join(dir, "f")
+	writeFile(t, file, []byte("a\nb\n"))
+	mustGit(t, dir, "add", "f")
+	mustGit(t, dir, "commit", "-qm", "base")
+	// Compare only what timestamps can pin down, so the fixture doesn't
+	// depend on when it runs.
+	mustGit(t, dir, "config", "core.trustctime", "false")
+	mustGit(t, dir, "config", "core.checkstat", "minimal")
+
+	stamp := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(file, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, dir, "update-index", "--refresh")
+	if err := os.Chtimes(filepath.Join(dir, ".git", "index"), stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, file, []byte("a\nB\n"))
+	if err := os.Chtimes(file, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	if gitops.GitExitCode(context.Background(), dir, "diff", "--quiet") != 1 {
+		t.Fatal("fixture: git doesn't see the edit")
+	}
+
+	snap, err := gitops.TakeSnapshot(context.Background(), dir, gitops.SnapshotLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGit(t, dir, "show", snap.Commit+":f"); got != "a\nB" {
+		t.Errorf("snapshot holds %q, want the edit", got)
+	}
+}
+
 // A backup taken while an agent's git command holds index.lock must succeed
 // and leave the index and the lock exactly as they were.
 func TestBackup_WorksWhileAgentHoldsIndexLock(t *testing.T) {

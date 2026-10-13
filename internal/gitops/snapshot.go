@@ -306,8 +306,23 @@ func currentBranchLabel(ctx context.Context, repoPath string) string {
 // tempIndex copies the real index to path and returns the environment that
 // points git at the copy. Without a real index (an unborn repo) git creates
 // the temporary one itself, because an empty file is not a valid index.
+//
+// The copy keeps the index's modification time: git trusts an entry's cached
+// stat data only for a file older than the index, so a copy stamped now would
+// hide an edit made in the second the index was last written.
 func tempIndex(realIndex, path string) ([]string, error) {
-	if err := copyFile(realIndex, path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	err := copyFile(realIndex, path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return []string{"GIT_INDEX_FILE=" + path}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("copying index: %w", err)
+	}
+	info, err := os.Stat(realIndex)
+	if err != nil {
+		return nil, fmt.Errorf("copying index: %w", err)
+	}
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
 		return nil, fmt.Errorf("copying index: %w", err)
 	}
 	return []string{"GIT_INDEX_FILE=" + path}, nil
