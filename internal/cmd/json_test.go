@@ -6,6 +6,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ashtonian/git-mgr/internal/config"
 )
 
 // A command run as a step of another hands back its document instead of
@@ -104,5 +107,17 @@ func TestWantsJSON(t *testing.T) {
 		if got := WantsJSON(strings.Fields(args)); got != want {
 			t.Errorf("WantsJSON(%q) = %v, want %v", args, got, want)
 		}
+	}
+}
+
+// A resolved section prints as config spells it, keys and durations alike.
+func TestAsConfigValue(t *testing.T) {
+	v, err := asConfigValue(config.SyncConfig{TimeoutPerRepo: 5 * time.Minute, Retries: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(v)
+	if got := string(data); !strings.Contains(got, `"timeout_per_repo":"5m0s"`) || !strings.Contains(got, `"retries":2`) {
+		t.Errorf("sync section = %s", got)
 	}
 }

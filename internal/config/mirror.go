@@ -33,7 +33,8 @@ type MirrorOverride struct {
 
 // RepoMirror is how a repo is mirrored: whether, and its LFS content too.
 type RepoMirror struct {
-	Enabled, LFS bool
+	Enabled bool `yaml:"enabled"`
+	LFS     bool `yaml:"lfs"`
 }
 
 // MirrorFor resolves whether a repo is mirrored: the top-level setting, then
