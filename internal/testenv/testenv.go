@@ -41,7 +41,10 @@ func Main(m *testing.M) int {
 		"XDG_CONFIG_HOME":         filepath.Join(home, ".config"),
 		"XDG_DATA_HOME":           filepath.Join(home, ".local", "share"),
 	} {
-		os.Setenv(k, v)
+		if err := os.Setenv(k, v); err != nil {
+			fmt.Fprintln(os.Stderr, "testenv:", err)
+			return 1
+		}
 	}
 	return m.Run()
 }

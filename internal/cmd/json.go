@@ -306,10 +306,10 @@ func Conclude(c *Context, err error) int {
 // the parse error is the one document on stdout.
 func WantsJSON(args []string) bool {
 	for _, a := range args {
-		switch {
-		case a == "--":
+		switch a {
+		case "--":
 			return false
-		case a == "--json", a == "--json=true":
+		case "--json", "--json=true":
 			return true
 		}
 	}
