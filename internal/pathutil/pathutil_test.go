@@ -29,3 +29,24 @@ func TestSafeRemoveAll(t *testing.T) {
 		t.Error("dir should be gone after SafeRemoveAll")
 	}
 }
+
+// A read-only directory doesn't leave the tree half deleted.
+func TestSafeRemoveAll_ReadOnlyDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "repo")
+	locked := filepath.Join(dir, "vendor", "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "f"), []byte("f"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	if err := pathutil.SafeRemoveAll(dir); err != nil {
+		t.Fatalf("SafeRemoveAll: %v", err)
+	}
+	if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+		t.Errorf("%s should be gone: %v", dir, err)
+	}
+}
