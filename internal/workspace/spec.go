@@ -270,7 +270,7 @@ func RepoKeys(cfg *config.Config, st *state.State, decl config.Workspace) ([]str
 		case RefGlob:
 			var matched []string
 			for key := range st.Repos {
-				if m, _ := filepath.Match(entry, key); m {
+				if repourl.MatchKey(entry, key) {
 					matched = append(matched, key)
 				}
 			}

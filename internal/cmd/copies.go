@@ -188,7 +188,7 @@ func repoJob(cfg *config.Config, key string, repo *state.RepoState, backup *gito
 
 func fetchWithRetry(ctx context.Context, repoPath, sshKey string, cfg config.SyncConfig) error {
 	var lastErr error
-	for attempt := 0; attempt <= cfg.Retries; attempt++ {
+	for attempt := 0; attempt <= max(cfg.Retries, 0); attempt++ {
 		if attempt > 0 {
 			backoff := cfg.RetryBackoff * time.Duration(1<<uint(attempt-1))
 			select {

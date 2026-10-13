@@ -142,11 +142,12 @@ func (c *Config) RemoteSyncInWorkspace(repoKey, ruleName, workspace string) Remo
 }
 
 // CloneProtocolFor resolves the clone transport for a repo, in order: a per-repo
-// override, the provider that discovered it (via the discovery rule), then the
-// top-level clone_protocol default.
+// override (the last that sets it, as later overrides win), the provider that
+// discovered it (via the discovery rule), then the top-level clone_protocol
+// default.
 func (c *Config) CloneProtocolFor(repoKey, discoveredBy string) string {
-	for _, o := range c.Overrides {
-		if matchesOverride(repoKey, o.Repos) && o.CloneProtocol != "" {
+	for i := len(c.Overrides) - 1; i >= 0; i-- {
+		if o := c.Overrides[i]; matchesOverride(repoKey, o.Repos) && o.CloneProtocol != "" {
 			return o.CloneProtocol
 		}
 	}
@@ -360,14 +361,5 @@ func ownerCovers(accountOwner, repoOwner string) bool {
 }
 
 func matchesOverride(repoKey string, patterns []string) bool {
-	for _, pat := range patterns {
-		matched, err := filepath.Match(pat, repoKey)
-		if err == nil && matched {
-			return true
-		}
-		if pat == repoKey {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(patterns, func(pat string) bool { return repourl.MatchKey(pat, repoKey) })
 }

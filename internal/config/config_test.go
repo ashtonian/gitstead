@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -336,5 +337,56 @@ overrides:
 	other := cfg.CloneFor("github.com/acme/other", "")
 	if len(other.Sparse) != 1 || other.Depth != 1 || other.SkipLFS() || other.LFS != "auto" {
 		t.Errorf("acme/other = %+v", other)
+	}
+}
+
+// An override's settings are checked as the settings themselves are, and a
+// malformed glob is reported rather than matching nothing.
+func TestLoad_OverridesAreValidated(t *testing.T) {
+	for name, override := range map[string]string{
+		"negative retries":    "sync: {retries: -1}",
+		"negative timeout":    "sync: {timeout_per_repo: -1s}",
+		"too many retries":    "sync: {retries: 50}",
+		"negative keep_daily": "backup: {keep_daily: -1h}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			yaml := "overrides:\n  - repos: [\"github.com/acme/*\"]\n    " + override + "\n"
+			if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := config.Load(path); err == nil {
+				t.Errorf("Load accepted %s", override)
+			}
+		})
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("overrides:\n  - repos: [\"github.com/[acme/*\"]\n    clone_protocol: https\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(path); err == nil || !strings.Contains(err.Error(), "overrides[0].repos") {
+		t.Errorf("Load = %v, want the malformed glob named", err)
+	}
+}
+
+// One glob grammar: * crosses slashes, so a host-wide or name-only pattern
+// covers what it says, and later overrides win for every setting.
+func TestResolve_OverrideGlobsAndPrecedence(t *testing.T) {
+	retries := func(n int) *int { return &n }
+	cfg := &config.Config{
+		CloneProtocol: "ssh",
+		Overrides: []config.Override{
+			{Repos: []string{"ghes.company.com/*"}, CloneProtocol: "https", Sync: &config.SyncOverride{Retries: retries(1)}},
+			{Repos: []string{"*/api"}, CloneProtocol: "ssh", Sync: &config.SyncOverride{Retries: retries(5)}},
+		},
+	}
+	if got := cfg.CloneProtocolFor("ghes.company.com/team/web", ""); got != "https" {
+		t.Errorf("host-wide override: protocol %s", got)
+	}
+	if got := cfg.CloneProtocolFor("ghes.company.com/team/api", ""); got != "ssh" {
+		t.Errorf("the later override's protocol should win, got %s", got)
+	}
+	if got := cfg.ResolveForRepo("ghes.company.com/team/api").Sync.Retries; got != 5 {
+		t.Errorf("the later override's retries should win, got %d", got)
 	}
 }

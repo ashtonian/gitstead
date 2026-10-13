@@ -224,7 +224,10 @@ sets: []
 # Per-Repo Overrides
 # =============================================================================
 # Override settings for specific repos. Matched by full key (host/owner/name)
-# or glob pattern. Later entries take precedence.
+# or glob, in which * matches any run of characters, slashes included (so
+# "ghes.company.com/*" is every repo on that host and "*/api" every repo named
+# api), ? one character and [...] one of a class. Later entries take
+# precedence, for every setting.
 
 overrides: []
   # Override by glob - all company repos

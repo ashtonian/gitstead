@@ -2,17 +2,17 @@ package cmd
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 
 	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
 // selection narrows tracked repos by a glob over keys, a tag, and/or a named
 // set. The three filters all narrow (AND): a repo must satisfy each one given.
 type selection struct {
-	repos string // glob over repo keys (filepath.Match)
+	repos string // glob over repo keys (repourl.MatchKey)
 	tag   string
 	set   string // name of a config.RepoSet
 }
@@ -38,7 +38,7 @@ func (sel selection) predicate(cfg *config.Config) (func(key string, repo *state
 			return false
 		}
 		if sel.repos != "" {
-			if m, _ := filepath.Match(sel.repos, key); !m {
+			if !repourl.MatchKey(sel.repos, key) {
 				return false
 			}
 		}

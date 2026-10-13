@@ -9,6 +9,8 @@ import (
 	"text/template"
 
 	"github.com/go-playground/validator/v10"
+
+	"github.com/ashtonian/git-mgr/internal/repourl"
 )
 
 // --- Validation ---
@@ -30,6 +32,10 @@ func Validate(cfg *Config) error {
 			return formatValidationErrors(validationErrors)
 		}
 		return fmt.Errorf("validation: %w", err)
+	}
+
+	if err := validatePatterns(cfg); err != nil {
+		return err
 	}
 
 	// Cross-field validation
@@ -288,6 +294,35 @@ func validateAccounts(cfg *Config) error {
 	}
 	for _, o := range cfg.Overrides {
 		if err := check(fmt.Sprintf("override %v", o.Repos), o.Account); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validatePatterns checks every glob over repo keys config holds: overrides',
+// sets' and workspaces' (see repourl.MatchKey).
+func validatePatterns(cfg *Config) error {
+	check := func(where string, patterns []string) error {
+		for _, p := range patterns {
+			if err := repourl.ValidatePattern(p); err != nil {
+				return fmt.Errorf("%s: %w", where, err)
+			}
+		}
+		return nil
+	}
+	for i, o := range cfg.Overrides {
+		if err := check(fmt.Sprintf("overrides[%d].repos", i), o.Repos); err != nil {
+			return err
+		}
+	}
+	for _, s := range cfg.Sets {
+		if err := check("set "+s.Name, s.Repos); err != nil {
+			return err
+		}
+	}
+	for _, w := range cfg.Workspaces {
+		if err := check("workspace "+w.Name, w.Repos); err != nil {
 			return err
 		}
 	}

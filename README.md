@@ -587,7 +587,15 @@ overrides:
 
 Everything has a per-repo escape hatch: `base_dir`/`path_template` (destination),
 `ssh_key`/`clone_protocol` (auth/transport), and `sync`/`backup`/`remote_sync`
-behavior. The operation log can be turned off with `log: { events: false }`.
+behavior. Every setting an override sets is checked as the setting itself is,
+and when several overrides match a repo the later one wins, for every setting.
+
+Repo patterns -- in `overrides`, `sets`, workspaces' `repos` and `--repos` --
+are a repo key (`host/owner/name`) or a glob over keys, in which `*` matches
+any run of characters, slashes included, `?` one character and `[...]`
+(`[!...]`) one in (or out of) a class: `ghes.company.com/*` is every repo on
+that host, `github.com/acme/*` every repo of acme, subgroups included, and
+`*/api` every repo named api. A malformed pattern fails config validation. The operation log can be turned off with `log: { events: false }`.
 
 Tags come from discovery rules or manual entries and filter any command. For
 recurring selections, define a **named set** and use `--set` (it composes with

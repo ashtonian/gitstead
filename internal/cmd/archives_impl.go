@@ -17,6 +17,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/pathutil"
+	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
@@ -49,7 +50,7 @@ func (c *ArchivesListCmd) Run(ctx *Context) error {
 			continue
 		}
 		if c.Repo != "" {
-			if ok, _ := filepath.Match(c.Repo, a.Repo); !ok {
+			if !repourl.MatchKey(c.Repo, a.Repo) {
 				continue
 			}
 		}
