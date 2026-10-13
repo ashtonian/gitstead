@@ -878,8 +878,8 @@ git-mgr ws open app --agent claude                     # tmux session, a pane pe
 current terminal; every pane `ws open` makes runs it. It checks the agent's
 copies, then types the agent profile's command into an interactive shell there
 (`$SHELL -i -c`), so shell functions such as a `claudemore` wrapper work, with
-`GIT_MGR_WORKSPACE`, `GIT_MGR_AGENT`, `GIT_MGR_REPLICA` and the profile's `env`
-set. When the agent ran in the replica before, the profile's `resume` command
+the profile's `env` and then the agent's environment set (see below). When the
+agent ran in the replica before, the profile's `resume` command
 is typed instead (`--fresh` to start over). When the agent exits, its exit
 status is recorded and a shell is left in the replica (`--no-shell` to exit
 too).
@@ -893,9 +893,97 @@ ends runs the way closing their terminal would -- SIGHUP to the agent and its
 shell -- waiting up to `--timeout` (30s); `--kill` then kills what is left.
 
 `ws status` shows each agent's state: `ready` (copies made, never run),
-`running`, `stopping`, `stopped` (with its last exit status), `missing` (a
-copy gone from disk) or `retiring` (a retire that didn't finish), then the
-pull requests its copies opened and the agents recently retired.
+`running` (and since when it has been waiting for you, if it is), `stopping`,
+`stopped` (with its last exit status), `missing` (a copy gone from disk) or
+`retiring` (a retire that didn't finish), then the pull requests its copies
+opened and the agents recently retired.
+
+### Agent environment: ports, env and shared caches
+
+Agents working side by side collide on the same port, database and build
+output. Each agent's commands -- the agent `ws run` starts, the shell it
+leaves, `ws exec`, `post_create` hooks -- run with an environment of its own:
+
+| Variable | Value |
+| --- | --- |
+| `GIT_MGR_WORKSPACE`, `GIT_MGR_AGENT`, `GIT_MGR_AGENT_N`, `GIT_MGR_REPLICA` | The workspace, the agent, its number (from 1) and its folder |
+| `GIT_MGR_PORT`, `GIT_MGR_PORTS` | The first of the agent's own block of ports, and how many |
+| `GIT_MGR_CACHE` | A directory the workspace's agents share for build caches |
+
+Then comes the workspace's `env`, whose values are templates of the same:
+`{{.Workspace}}`, `{{.Agent}}`, `{{.N}}`, `{{.Replica}}`, `{{.Port}}`,
+`{{.Ports}}`, `{{.Cache}}`, and `{{add .Port 1}}` for the next port.
+
+```yaml
+workspace_defaults:
+  ports: {base: 41000, count: 10}       # agent-1 41000-41009, agent-2 41010-41019, ...
+  env:
+    PORT: "{{.Port}}"                   # the dev server
+    API_PORT: "{{add .Port 1}}"
+    DATABASE_URL: "postgres://localhost/app_{{.N}}"
+    TURBO_CACHE_DIR: "{{.Cache}}/turbo"
+    SCCACHE_DIR: "{{.Cache}}/sccache"
+workspaces:
+  - name: app
+    repos: [github.com/acme/app]
+    agents: 4
+    env: {NODE_ENV: test}               # added to the defaults', name by name
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `workspace_defaults.ports.base` | `41000` | The lowest port handed out; 0 hands out none. |
+| `workspace_defaults.ports.count` | `10` | Ports per agent. `workspaces[].ports` overrides either. |
+| `workspace_defaults.env` | `{}` | Env templates for every agent; a workspace's `env` adds to them, name by name. `GIT_MGR_*` names are git-mgr's. |
+| `workspace_defaults.cache_root` | `$XDG_CACHE_HOME/git-mgr/workspaces` | Holds `<workspace>/`, the cache its agents share. |
+
+An agent gets its block the first time it needs one, the lowest block from
+`base` that no other agent on the machine holds and nothing is listening on,
+and keeps it for its folder's life, so a dev server's URL doesn't change
+between runs. The shared cache directory goes when the workspace does
+(`ws rm --delete`, or a declared workspace removed on apply); point
+tools that share a cache safely between concurrent builds at it -- ccache,
+sccache, Turborepo, Nx -- rather than at a build output directory.
+
+`git-mgr ws env` prints an agent's environment as shell exports, for a shell
+or editor of your own in its folder: `eval "$(git-mgr ws env)"` in an agent's
+folder works out which agent it is (`ws env <workspace> <agent>` names one;
+`--json` for an object). With direnv, `.envrc` in a replica can hold that
+line.
+
+### When an agent is waiting for you
+
+git-mgr notices an agent waiting for you two ways, records it for `ws status`
+and `git-mgr top`, and with `notify.enabled` sends a desktop notification
+(`notify.on_waiting`, on by default).
+
+- **The agent says so.** Agents can run a command when they need you; point
+  it at `git-mgr ws waiting`, which reads which agent from the environment
+  `ws run` sets and does nothing outside one, so it is safe in your global
+  agent settings. Claude Code, in `~/.claude/settings.json`:
+
+  ```json
+  {
+    "hooks": {
+      "Notification": [{"hooks": [{"type": "command", "command": "git-mgr ws waiting"}]}],
+      "Stop": [{"hooks": [{"type": "command", "command": "git-mgr ws waiting"}]}],
+      "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "git-mgr ws waiting --clear"}]}]
+    }
+  }
+  ```
+
+  Codex, in `~/.codex/config.toml`: `notify = ["git-mgr", "ws", "waiting"]`.
+  The message comes from what the agent passes (Claude's on stdin, Codex's as
+  an argument): "Claude needs your permission to use Bash", or "finished: …"
+  when it ends its turn. `--message` sets one yourself.
+- **Its pane goes quiet.** For agents in tmux, `ws run` watches its own pane:
+  output for 5s or more -- working -- then none for `notify.waiting_after`
+  (30s) counts as waiting, and output again clears it. The screen an agent
+  prints as it starts doesn't count. `waiting_after: 0` turns watching off.
+  Muxy tracks and notifies about its agents itself.
+
+A wait the agent reported isn't reported again by its pane, and one reported
+twice within 10 seconds notifies once.
 
 ### Publishing and retiring
 
@@ -1313,6 +1401,7 @@ go build -ldflags="-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD)" .
 | `internal/hook` | Running `post_clone` and `post_create` hooks: environment, timeouts, logs. |
 | `internal/agent` | Running agents: profile commands, the lease that marks an agent running, and `ws run` itself. |
 | `internal/launch` | Fleets' terminals: the launch plan, and the tmux, iTerm, Muxy and plugin launchers. |
+| `internal/activity` | Reading agents' terminal activity (tmux panes, Muxy), and watching a pane for an agent waiting. |
 | `internal/view` | `git-mgr top`: collecting every repo and copy's state and terminal activity, and laying it out. |
 | `internal/jump` | Matching a short query to a repo, workspace, agent or copy, for `cd`, `path` and `open`. |
 | `internal/setup` | `git-mgr setup`'s logic: detecting what the machine has, proposing answers, rendering them into config. |

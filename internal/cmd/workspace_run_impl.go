@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -24,6 +25,9 @@ type WSRunCmd struct {
 	Fresh   bool   `help:"Start afresh even when the profile can resume a session."`
 	NoCheck bool   `name:"no-check" help:"Skip checking the agent's copies first."`
 	NoShell bool   `name:"no-shell" help:"Exit when the agent does instead of leaving a shell."`
+
+	// env is the agent's environment, which the shell left behind keeps.
+	env []string
 }
 
 func (c *WSRunCmd) Run(ctx *Context) error {
@@ -34,7 +38,7 @@ func (c *WSRunCmd) Run(ctx *Context) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "git-mgr: %v\n", err)
 	}
-	return execShell(c.dir(ctx), nil)
+	return execShell(c.dir(ctx), c.env)
 }
 
 func (c *WSRunCmd) run(ctx *Context) error {
@@ -70,6 +74,14 @@ func (c *WSRunCmd) run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	vars, err := agentEnv(cfg, st, c.Name, c.Agent)
+	if err != nil {
+		return err
+	}
+	c.env = vars
+	// The profile's env comes first: the workspace's says what this agent's
+	// is, such as its port.
+	env := append(envList(profile.Env), vars...)
 	now := time.Now()
 	launcher, session, socket := terminal()
 	run := state.RunState{
@@ -87,9 +99,11 @@ func (c *WSRunCmd) run(ctx *Context) error {
 		return err
 	}
 
-	env := append(envList(profile.Env),
-		"GIT_MGR_WORKSPACE="+c.Name, "GIT_MGR_AGENT="+c.Agent, "GIT_MGR_REPLICA="+r.Path)
+	// Not ctx.GoCtx(): a Ctrl-C is the agent's, and mustn't end the watch.
+	watchCtx, stopWatch := context.WithCancel(context.Background())
+	go watchPane(watchCtx, cfg, ctx.State, c.Name, c.Agent, agents.Holder{Launcher: launcher, Session: session, Socket: socket})
 	code, runErr := agents.Run(agents.RunOptions{Dir: r.Path, Command: command, Env: env})
+	stopWatch()
 	err = c.record(cfg, st, func(rs *state.ReplicaState) {
 		if rs.Run != nil && rs.Run.PID == run.PID && rs.Run.Started.Equal(run.Started) {
 			rs.Run.Ended, rs.Run.ExitCode = time.Now(), code

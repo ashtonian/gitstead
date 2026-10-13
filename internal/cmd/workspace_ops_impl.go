@@ -324,7 +324,7 @@ func (c *WSExecCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	spec, _, err := operationalSpec(ctx, c.Name)
+	spec, st, err := operationalSpec(ctx, c.Name)
 	if err != nil {
 		return err
 	}
@@ -332,9 +332,20 @@ func (c *WSExecCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	// Each agent's environment, made before the commands run at once: giving
+	// an agent its ports writes the state.
+	envs := map[string][]string{}
+	for _, t := range targets {
+		if _, ok := envs[t.Agent]; !ok {
+			if envs[t.Agent], err = agentEnv(cfg, st, spec.Name, t.Agent); err != nil {
+				return err
+			}
+		}
+	}
 	results := workspace.ForEach(ctx.GoCtx(), targets, cfg.Concurrency, func(ctx context.Context, t workspace.Located) (string, bool, error) {
 		cmd := exec.CommandContext(ctx, c.Command[0], c.Command[1:]...)
 		cmd.Dir = t.Path
+		cmd.Env = append(os.Environ(), envs[t.Agent]...)
 		out, err := cmd.CombinedOutput()
 		return strings.TrimRight(string(out), "\n"), false, err
 	})
@@ -606,6 +617,9 @@ func printAgents(st *state.State, name string, runs map[string]agentRun) {
 			switch ar.state {
 			case workspace.AgentRunning, workspace.AgentStopping:
 				last = fmt.Sprintf("since %s (pid %d)", run.Started.Local().Format(time.DateTime), run.PID)
+				if since, what, ok := workspace.WaitingFor(&r); ok {
+					last += fmt.Sprintf("; waiting since %s: %s", since.Local().Format(time.TimeOnly), what)
+				}
 			default:
 				if !run.Ended.IsZero() {
 					last = fmt.Sprintf("exit %d at %s", run.ExitCode, run.Ended.Local().Format(time.DateTime))

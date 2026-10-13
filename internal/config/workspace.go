@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -52,6 +53,15 @@ type WorkspaceDefaults struct {
 	Agent string `koanf:"agent" yaml:"agent,omitempty"`
 	// Hooks are every workspace's own hooks, unless it sets its own.
 	Hooks WorkspaceHooks `koanf:"hooks" yaml:"hooks,omitempty"`
+	// Env is set for each agent's commands, after its profile's env; values
+	// are templates of AgentVars ({{.Port}}, {{add .Port 1}}, {{.Cache}}).
+	// A workspace's own env adds to it, name by name.
+	Env map[string]string `koanf:"env" yaml:"env,omitempty"`
+	// Ports gives each agent a block of ports of its own.
+	Ports PortsConfig `koanf:"ports" yaml:"ports"`
+	// CacheRoot holds a directory per workspace that its agents share for
+	// build caches; empty for $XDG_CACHE_HOME/git-mgr/workspaces.
+	CacheRoot string `koanf:"cache_root" yaml:"cache_root,omitempty"`
 }
 
 // Workspace is one repo, or several related ones, worked on by a number of
@@ -75,6 +85,8 @@ type Workspace struct {
 	Agent      string              `koanf:"agent"       yaml:"agent,omitempty"`
 	RemoteSync *RemoteSyncOverride `koanf:"remote_sync" yaml:"remote_sync,omitempty"`
 	Hooks      WorkspaceHooks      `koanf:"hooks"       yaml:"hooks,omitempty"`
+	Env        map[string]string   `koanf:"env"         yaml:"env,omitempty"`
+	Ports      PortsOverride       `koanf:"ports"       yaml:"ports,omitempty"`
 }
 
 // FindWorkspace returns the declared workspace with name, or nil.
@@ -128,8 +140,28 @@ func (c *Config) WithDefaults(w Workspace) Workspace {
 	if w.Hooks.PostCreate == nil {
 		w.Hooks.PostCreate = d.Hooks.PostCreate
 	}
+	if len(d.Env) > 0 {
+		env := maps.Clone(d.Env)
+		maps.Copy(env, w.Env)
+		w.Env = env
+	}
+	if w.Ports.Base == nil {
+		w.Ports.Base = &d.Ports.Base
+	}
+	if w.Ports.Count == nil {
+		w.Ports.Count = &d.Ports.Count
+	}
 	w.Root, w.Path = ExpandHome(w.Root), ExpandHome(w.Path)
 	return w
+}
+
+// PortBlock is where the agents' port blocks start and how big each is; a
+// count of 0 hands out none. w must have its defaults.
+func (w Workspace) PortBlock() (base, count int) {
+	if w.Ports.Base == nil || w.Ports.Count == nil || *w.Ports.Base == 0 {
+		return 0, 0
+	}
+	return *w.Ports.Base, *w.Ports.Count
 }
 
 // Dir is the workspace's directory under its root. w must have its defaults.
@@ -231,6 +263,9 @@ func validateWorkspaces(cfg *Config) error {
 	if a := cfg.WorkspaceDefaults.Agent; a != "" && len(cfg.Agents) > 0 && cfg.FindAgent(a) == nil {
 		return fmt.Errorf("workspace_defaults.agent: unknown agent %q (declare it under agents:)", a)
 	}
+	if err := checkEnv("workspace_defaults", cfg.WorkspaceDefaults.Env); err != nil {
+		return err
+	}
 	names := map[string]bool{}
 	for _, decl := range cfg.Workspaces {
 		if names[decl.Name] {
@@ -257,6 +292,9 @@ func (c *Config) CheckWorkspace(decl Workspace) error {
 }
 
 func validateWorkspace(cfg *Config, decl Workspace) error {
+	if err := checkEnv("env", decl.Env); err != nil {
+		return err
+	}
 	sources := 0
 	for _, set := range []bool{len(decl.Repos) > 0, decl.Set != "", decl.Path != ""} {
 		if set {

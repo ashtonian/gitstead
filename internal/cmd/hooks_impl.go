@@ -102,7 +102,11 @@ func (c *HooksPostCreateCmd) Run(ctx *Context) error {
 		}
 		ran++
 		fmt.Printf("== %s\n", label)
-		if err := runner.Run(ctx.GoCtx(), workspace.PostCreateHook(spec.Name, l.Agent, l.Copy)); err != nil {
+		vars, err := agentEnv(cfg, st, spec.Name, l.Agent)
+		if err == nil {
+			err = runner.Run(ctx.GoCtx(), workspace.PostCreateHook(spec.Name, l.Agent, l.Copy, vars))
+		}
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", label, err)
 			failed++
 		}

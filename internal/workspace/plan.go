@@ -64,7 +64,7 @@ func Compute(ctx context.Context, cfg *config.Config, st *state.State, scope Sco
 	seen := reconcile.Observe(ctx, paths, cfg.Concurrency)
 	overwrite := cfg.Reconcile.Drift == "overwrite"
 	p := reconcile.PlanRepos(desired, st, seen, overwrite)
-	p.Merge(Plan(specs, projected, seen, scope.covers, overwrite))
+	p.Merge(Plan(specs, projected, seen, scope.covers, overwrite, cfg.WorkspaceCacheDir))
 	p.Blocked = append(p.Blocked, blocked...)
 	return p
 }
@@ -214,8 +214,9 @@ func Paths(specs map[string]*Spec, st *state.State) []string {
 }
 
 // Plan compares what specs want of each workspace covers accepts with what
-// st records and seen found on disk.
-func Plan(specs map[string]*Spec, st *state.State, seen reconcile.Seen, covers func(string) bool, overwrite bool) *reconcile.Plan {
+// st records and seen found on disk; cacheDir says where a workspace's
+// agents' shared cache is, which removing it deletes.
+func Plan(specs map[string]*Spec, st *state.State, seen reconcile.Seen, covers func(string) bool, overwrite bool, cacheDir func(workspace string) string) *reconcile.Plan {
 	p := &reconcile.Plan{}
 	names := map[string]bool{}
 	for name := range specs {
@@ -239,7 +240,7 @@ func Plan(specs map[string]*Spec, st *state.State, seen reconcile.Seen, covers f
 				n += len(r.Copies)
 			}
 			pl.add(reconcile.Action{Kind: KindRemoveWorkspace, Target: name, From: ws.Dir, Disruptive: true,
-				Note: fmt.Sprintf("no longer declared; %d copies archived and removed", n), Run: removeWorkspace(name)})
+				Note: fmt.Sprintf("no longer declared; %d copies archived and removed", n), Run: removeWorkspace(name, cacheDir(name))})
 		case ws == nil:
 			pl.add(reconcile.Action{Kind: KindCreateWorkspace, Target: name, To: spec.Dir,
 				Note: fmt.Sprintf("%s, %d agent(s)", spec.Isolation, len(spec.Replicas)), Run: createWorkspace(spec)})

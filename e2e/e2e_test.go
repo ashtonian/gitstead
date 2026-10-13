@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -941,6 +942,105 @@ repos:
 	}
 	if out, _ := env.run(t, "ws", "ls"); !strings.Contains(out, "other") {
 		t.Errorf("the workspace must be recorded:\n%s", out)
+	}
+}
+
+// TestE2E_AgentEnvironment: each agent gets ports of its own, kept, and its
+// workspace's env rendered for it -- in ws env, ws exec, post_create hooks
+// and its run, where `ws waiting` records it waiting for you; ws rm --delete
+// takes the workspace's shared cache with it.
+func TestE2E_AgentEnvironment(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+	t.Setenv("SHELL", "/bin/sh") // ws run's interactive shell, not the developer's
+	remote := filepath.Join(tmp, "remotes", "app.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	seed := filepath.Join(tmp, "seed")
+	gitCmd(t, tmp, "clone", "-q", remote, seed)
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("# app"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, seed, "add", ".")
+	gitCmd(t, seed, "-c", "user.name=e2e", "-c", "user.email=e2e@test.local", "commit", "-qm", "init")
+	gitCmd(t, seed, "push", "-q", "origin", "HEAD:main")
+
+	root, cache := filepath.Join(tmp, "workspaces"), filepath.Join(tmp, "cache")
+	cfg := fmt.Sprintf(`base_dir: %s
+workspace_defaults:
+  root: %s
+  cache_root: %s
+  ports: {base: 47100, count: 5}
+  env:
+    PORT: "{{.Port}}"
+    API_PORT: "{{add .Port 1}}"
+    DB: "app_{{.N}}"
+  hooks:
+    post_create: ['echo "$PORT $DB" > hooked']
+repos:
+  - url: %s
+`, env.baseDir, root, cache, remote)
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := env.run(t, "sync"); code != 0 {
+		t.Fatalf("sync exit %d:\n%s", code, out)
+	}
+	if out, code := env.run(t, "ws", "create", "app", "--repo", "local/remotes/app", "--agents", "2"); code != 0 {
+		t.Fatalf("ws create exit %d:\n%s", code, out)
+	}
+
+	exports := func(agent string) map[string]string {
+		t.Helper()
+		out, code := env.run(t, "ws", "env", "app", agent, "--json")
+		if code != 0 {
+			t.Fatalf("ws env exit %d:\n%s", code, out)
+		}
+		var vars map[string]string
+		if err := json.Unmarshal([]byte(out), &vars); err != nil {
+			t.Fatalf("ws env --json: %v\n%s", err, out)
+		}
+		return vars
+	}
+	one, two := exports("agent-1"), exports("agent-2")
+	if one["PORT"] == two["PORT"] || one["PORT"] == "" || one["GIT_MGR_PORT"] != one["PORT"] {
+		t.Errorf("each agent needs ports of its own: %v / %v", one, two)
+	}
+	if p, _ := strconv.Atoi(two["PORT"]); two["API_PORT"] != strconv.Itoa(p+1) || two["DB"] != "app_2" {
+		t.Errorf("agent-2's env = %v", two)
+	}
+	if again := exports("agent-1"); again["PORT"] != one["PORT"] {
+		t.Errorf("an agent keeps its ports: %s then %s", one["PORT"], again["PORT"])
+	}
+	copy2 := filepath.Join(root, "app", "agent-2")
+	if got, _ := os.ReadFile(filepath.Join(copy2, "hooked")); strings.TrimSpace(string(got)) != two["PORT"]+" app_2" {
+		t.Errorf("post_create saw %q, want %q", got, two["PORT"]+" app_2")
+	}
+	out, code := env.run(t, "ws", "exec", "app", "--agent", "agent-1", "--", "sh", "-c", "echo port=$PORT")
+	if code != 0 || !strings.Contains(out, "port="+one["PORT"]) {
+		t.Errorf("ws exec exit %d:\n%s", code, out)
+	}
+
+	// Inside its run, the agent says it waits; ws status shows it.
+	script := fmt.Sprintf("%s ws waiting --message 'needs a decision' && %s ws status app > status.txt", env.bin, env.bin)
+	if out, code := env.run(t, "ws", "run", "app", "agent-1", "--no-check", "--no-shell", "--command", script); code != 0 {
+		t.Fatalf("ws run exit %d:\n%s", code, out)
+	}
+	status, _ := os.ReadFile(filepath.Join(root, "app", "agent-1", "status.txt"))
+	if !strings.Contains(string(status), "waiting since") || !strings.Contains(string(status), "needs a decision") {
+		t.Errorf("ws status during the run:\n%s", status)
+	}
+	if out, code := env.run(t, "ws", "waiting", "--message", "x"); code != 0 || strings.TrimSpace(out) != "" {
+		t.Errorf("outside a run, ws waiting does nothing, quietly: exit %d %q", code, out)
+	}
+
+	if _, err := os.Stat(filepath.Join(cache, "app")); err != nil {
+		t.Fatalf("the shared cache should exist: %v", err)
+	}
+	if out, code := env.run(t, "ws", "rm", "app", "--delete", "--yes"); code != 0 {
+		t.Fatalf("ws rm exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(cache, "app")); !os.IsNotExist(err) {
+		t.Errorf("ws rm --delete should take the cache: %v", err)
 	}
 }
 

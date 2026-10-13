@@ -38,6 +38,8 @@ type Spec struct {
 	// Folder is the folder a workspace over a path shares; "" otherwise.
 	Folder   string
 	Replicas []Replica
+	// Settings are what config says of its agents' commands.
+	Settings AgentSettings
 }
 
 // Replica is one agent's folder.
@@ -121,7 +123,7 @@ func Resolve(cfg *config.Config, st *state.State, decl config.Workspace) (*Spec,
 	if err != nil {
 		return nil, err
 	}
-	spec := &Spec{Name: w.Name, Dir: w.Dir(), Isolation: w.Isolation, BaseRef: w.BaseRef, Declared: true}
+	spec := &Spec{Name: w.Name, Dir: w.Dir(), Isolation: w.Isolation, BaseRef: w.BaseRef, Declared: true, Settings: SettingsFor(cfg, w.Name)}
 
 	if w.Path != "" {
 		spec.Folder, spec.Dir = w.Path, w.Path
@@ -181,6 +183,7 @@ func FromState(cfg *config.Config, st *state.State, ws *state.WorkspaceState) *S
 	spec := &Spec{Name: ws.Name, Dir: ws.Dir, Isolation: ws.Isolation, BaseRef: ws.BaseRef, Declared: ws.Declared}
 	var decl config.Workspace
 	if cfg != nil {
+		spec.Settings = SettingsFor(cfg, ws.Name)
 		decl = config.Workspace{Name: ws.Name}
 		if d := cfg.FindWorkspace(ws.Name); d != nil {
 			decl = *d
@@ -220,15 +223,16 @@ func postCreate(cfg *config.Config, key, rule string, w config.Workspace) []stri
 }
 
 // PostCreateHook is the post_create hook of copy c of agent's replica in
-// workspace ws.
-func PostCreateHook(ws, agent string, c Copy) hook.Hook {
+// workspace ws, whose commands run with the agent's environment, vars.
+func PostCreateHook(ws, agent string, c Copy, vars []string) hook.Hook {
 	name := ws + "/" + agent
 	if c.Repo != "" {
 		name += "/" + c.Repo
 	}
 	return hook.Hook{
 		Event: hook.PostCreate, Commands: c.PostCreate, Dir: c.Path, Name: name,
-		Env: hook.Env{Repo: c.Repo, Source: c.Source, Workspace: ws, Agent: agent, Branch: c.Branch},
+		Env:  hook.Env{Repo: c.Repo, Source: c.Source, Workspace: ws, Agent: agent, Branch: c.Branch},
+		Vars: vars,
 	}
 }
 

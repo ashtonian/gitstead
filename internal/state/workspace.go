@@ -44,6 +44,10 @@ type ReplicaState struct {
 	// Retiring is when retiring the agent began; it stays set when retiring
 	// was interrupted, until a retire finishes.
 	Retiring time.Time `yaml:"retiring,omitempty" json:"retiring,omitzero"`
+	// Port is the first of the Ports ports the agent was given, kept for
+	// the replica's life; 0 before it needs them.
+	Port  int `yaml:"port,omitempty"  json:"port,omitempty"`
+	Ports int `yaml:"ports,omitempty" json:"ports,omitempty"`
 }
 
 // RunState is an agent's latest run in its replica.
@@ -60,6 +64,11 @@ type RunState struct {
 	StopRequested time.Time `yaml:"stop_requested,omitempty" json:"stop_requested,omitzero"`
 	Ended         time.Time `yaml:"ended,omitempty"          json:"ended,omitzero"`
 	ExitCode      int       `yaml:"exit_code"                json:"exit_code"`
+	// Waiting is when the agent was last seen waiting for you -- it said
+	// so, or its pane went quiet after working -- and WaitingFor what it
+	// said; zero once it works again.
+	Waiting    time.Time `yaml:"waiting,omitempty"     json:"waiting,omitzero"`
+	WaitingFor string    `yaml:"waiting_for,omitempty" json:"waiting_for,omitempty"`
 }
 
 // CopyState is one checkout of a repo in a replica.

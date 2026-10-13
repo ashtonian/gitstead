@@ -418,6 +418,12 @@ type NotifyConfig struct {
 	OnError      bool `koanf:"on_error"      yaml:"on_error"      default:"true"`
 	OnCompletion bool `koanf:"on_completion" yaml:"on_completion"`
 	OnStale      bool `koanf:"on_stale"      yaml:"on_stale"      default:"true"`
+	// OnWaiting notifies when an agent is waiting for you.
+	OnWaiting bool `koanf:"on_waiting" yaml:"on_waiting" default:"true"`
+	// WaitingAfter is how long an agent in a tmux pane must be quiet, after
+	// working, to count as waiting for you; 0 stops watching panes, leaving
+	// only what agents say themselves (`git-mgr ws waiting`).
+	WaitingAfter time.Duration `koanf:"waiting_after" yaml:"waiting_after" default:"30s" validate:"min=0"`
 }
 
 // LogConfig controls logging.

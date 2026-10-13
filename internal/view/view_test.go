@@ -2,7 +2,6 @@ package view
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ashtonian/git-mgr/internal/activity"
 	agents "github.com/ashtonian/git-mgr/internal/agent"
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/state"
@@ -69,8 +69,8 @@ func TestCollectAndRender(t *testing.T) {
 	now := backup.Add(2 * time.Hour)
 	snap := Collect(context.Background(), &config.Config{}, st, Options{
 		Concurrency: 4, Now: func() time.Time { return now },
-		Activity: func(_ context.Context, hs []agents.Holder) map[string]Activity {
-			return map[string]Activity{activityKey(hs[0]): {Text: "printed 5m ago", Idle: 5 * time.Minute}}
+		Activity: func(_ context.Context, hs []agents.Holder) map[string]activity.Activity {
+			return map[string]activity.Activity{activity.Key(hs[0]): {Text: "printed 5m ago", Idle: 5 * time.Minute}}
 		},
 	})
 	if len(snap.Repos) != 3 {
@@ -124,52 +124,18 @@ func stripANSI(s string) string {
 	return b.String()
 }
 
-func TestParseMuxyActivity(t *testing.T) {
-	out := ParseMuxyActivity([]byte("123\tp1\tclaude\twaiting\te9\tneeds input\n456\tp1\tcodex\tworking\t\t\n\n"))
-	if out["123"] != "waiting: needs input" || out["456"] != "working" {
-		t.Errorf("activity = %v", out)
+// A running agent waiting for you says so, and what for.
+func TestRender_Waiting(t *testing.T) {
+	now := time.Now()
+	s := Snapshot{Taken: now, Copies: []CopyRow{
+		{Label: "app/agent-1", AgentState: "running", Waiting: now.Add(-time.Minute), WaitingFor: "Claude needs your permission to use Bash", State: "clean"},
+		{Label: "app/agent-2", AgentState: "running", State: "clean"},
+	}}
+	out := Render(s, RenderOptions{})
+	if !strings.Contains(out, "2 agents running, 1 waiting for you") {
+		t.Errorf("summary:\n%s", out)
 	}
-}
-
-func TestAgo(t *testing.T) {
-	for d, want := range map[time.Duration]string{12 * time.Second: "12s ago", 4 * time.Minute: "4m ago", 3 * time.Hour: "3h ago", 72 * time.Hour: "3d ago"} {
-		if got := Ago(d); got != want {
-			t.Errorf("Ago(%s) = %s", d, got)
-		}
-	}
-}
-
-// An agent alone in its tmux window gets the window's last output time; one
-// sharing a window gets the time its screen was last seen to change.
-func TestTracker(t *testing.T) {
-	now := time.Unix(1_000_000, 0)
-	screens := map[string]string{"%2": "a"}
-	tr := NewTracker()
-	tr.now = func() time.Time { return now }
-	tr.tmux = func(_ context.Context, args ...string) ([]byte, error) {
-		if args[2] == "list-panes" {
-			return []byte(fmt.Sprintf("%%1\t%d\t1\n%%2\t%d\t2\n%%9\t1\t1\n", now.Unix()-90, now.Unix())), nil
-		}
-		return []byte(screens[args[len(args)-1]]), nil
-	}
-	hs := []agents.Holder{{Launcher: "tmux", Socket: "/s", Session: "%1"}, {Launcher: "tmux", Socket: "/s", Session: "%2"}}
-	key := func(pane string) string {
-		return activityKey(agents.Holder{Launcher: "tmux", Socket: "/s", Session: pane})
-	}
-
-	got := tr.Read(context.Background(), hs)
-	if got[key("%1")].Text != "printed 1m ago" || got[key("%2")].Text != "" || len(got) != 2 {
-		t.Fatalf("first look = %v", got)
-	}
-	now = now.Add(30 * time.Second)
-	if got := tr.Read(context.Background(), hs); got[key("%2")].Text != "quiet ≥ 30s" {
-		t.Errorf("an unchanged screen = %v", got[key("%2")])
-	}
-	screens["%2"] = "b"
-	now = now.Add(10 * time.Second)
-	tr.Read(context.Background(), hs)
-	now = now.Add(20 * time.Second)
-	if got := tr.Read(context.Background(), hs); got[key("%2")].Text != "printed 20s ago" || got[key("%2")].Idle != 20*time.Second {
-		t.Errorf("after a change = %v", got[key("%2")])
+	if !strings.Contains(out, "waiting") || !strings.Contains(out, "Claude needs your permission to use Bash") {
+		t.Errorf("rows:\n%s", out)
 	}
 }

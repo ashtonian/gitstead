@@ -470,6 +470,10 @@ notify:
   on_error: true           # Notify when repos fail to sync
   on_completion: false     # Notify on every sync (noisy for cron)
   on_stale: true           # Notify when new stale repos detected
+  on_waiting: true         # Notify when an agent is waiting for you
+  # An agent in a tmux pane that printed for a while and then nothing for this
+  # long counts as waiting; 0 = only what agents report (git-mgr ws waiting).
+  waiting_after: "30s"
 
 # =============================================================================
 # Logging
@@ -530,6 +534,19 @@ workspace_defaults:
   branch: "agents/{{.Workspace}}/{{.Agent}}"
   base_ref: ""                      # new branches start here; "" = upstream's default branch
   agent: ""                         # the profile agents run; "" = the first one
+  # Each agent's own block of ports: GIT_MGR_PORT .. GIT_MGR_PORT+count-1,
+  # kept for its folder's life. base 0 = none.
+  ports: {base: 41000, count: 10}
+  # Set for each agent's commands (its run, ws exec, post_create hooks). Values
+  # are templates: {{.Workspace}} {{.Agent}} {{.N}} {{.Replica}} {{.Port}}
+  # {{.Ports}} {{.Cache}} {{add .Port 1}}. A workspace's env adds to these.
+  env: {}
+  #   PORT: "{{.Port}}"
+  #   DATABASE_URL: "postgres://localhost/app_{{.N}}"
+  #   SCCACHE_DIR: "{{.Cache}}/sccache"
+  # Holds <workspace>/, a cache directory its agents share (GIT_MGR_CACHE);
+  # deleted with the workspace. "" = $XDG_CACHE_HOME/git-mgr/workspaces.
+  cache_root: ""
   # Run in each new copy after its repo's post_create hooks, unless a
   # workspace sets its own (hooks: {post_create: [...]}; [] for none).
   hooks:

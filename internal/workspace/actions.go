@@ -73,10 +73,17 @@ func updateWorkspace(spec *Spec) reconcile.RunFunc {
 			}
 			ws.Dir, ws.BaseRef, ws.Declared = spec.Dir, spec.BaseRef, spec.Declared
 			if spec.Shared() {
-				ws.Replicas = nil
+				// An agent kept keeps its record: its runs and its ports.
+				var replicas []state.ReplicaState
 				for _, r := range spec.Replicas {
-					ws.Replicas = append(ws.Replicas, state.ReplicaState{Agent: r.Agent, Path: r.Path})
+					rs := state.ReplicaState{Agent: r.Agent}
+					if old := ws.Replica(r.Agent); old != nil {
+						rs = *old
+					}
+					rs.Path = r.Path
+					replicas = append(replicas, rs)
 				}
+				ws.Replicas = replicas
 			}
 			return nil
 		}}, nil
@@ -106,17 +113,23 @@ func createCopy(spec *Spec, r Replica, c Copy, replaces string) reconcile.RunFun
 			return reconcile.Outcome{}, err
 		}
 		cs, err := copyState(ctx, spec.Isolation, c)
-		if err != nil {
-			return reconcile.Outcome{Record: recordCopyState(spec.Name, r, cs, replaces)}, errors.Join(partly, err)
+		out := reconcile.Outcome{Record: recordCopyState(spec.Name, r, cs, replaces)}
+		if err != nil || len(c.PostCreate) == 0 {
+			return out, errors.Join(partly, err)
 		}
-		var info string
-		if len(c.PostCreate) > 0 {
-			info = "ran post_create hooks"
-			if err := env.Hooks.Run(ctx, PostCreateHook(spec.Name, r.Agent, c)); err != nil {
-				partly = errors.Join(partly, fmt.Errorf("made, but %w\n(`git-mgr hooks post-create %s %s` runs them again)", err, spec.Name, r.Agent))
+		// Hooks run once the copy is recorded: they are told the agent's
+		// ports, which its replica's record keeps.
+		out.After = func(ctx context.Context) (string, error) {
+			vars, err := AgentEnv(env.State, env.Update, spec.Settings, spec.Name, r.Agent)
+			if err == nil {
+				err = env.Hooks.Run(ctx, PostCreateHook(spec.Name, r.Agent, c, vars))
 			}
+			if err != nil {
+				return "", fmt.Errorf("made, but %w\n(`git-mgr hooks post-create %s %s` runs them again)", err, spec.Name, r.Agent)
+			}
+			return "ran post_create hooks", nil
 		}
-		return reconcile.Outcome{Info: info, Record: recordCopyState(spec.Name, r, cs, replaces)}, partly
+		return out, partly
 	}
 }
 
@@ -313,7 +326,9 @@ func removeCopy(name, agent, path string) reconcile.RunFunc {
 
 // removeWorkspace retires every copy of a workspace no longer declared, and
 // forgets the workspace once none is left.
-func removeWorkspace(name string) reconcile.RunFunc {
+// removeWorkspace retires every copy of workspace name and, once none is
+// left, forgets it and deletes the cache its agents shared at cacheDir.
+func removeWorkspace(name, cacheDir string) reconcile.RunFunc {
 	return func(ctx context.Context, env *reconcile.Env) (reconcile.Outcome, error) {
 		ws, err := recorded(env.State, name)
 		if err != nil {
@@ -339,6 +354,11 @@ func removeWorkspace(name string) reconcile.RunFunc {
 				delete(st.Workspaces, name)
 			}
 			return nil
+		}
+		if len(errs) == 0 {
+			if err := RemoveCache(cacheDir); err != nil {
+				errs = append(errs, err)
+			}
 		}
 		return out, errors.Join(errs...)
 	}
