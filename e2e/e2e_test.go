@@ -1422,7 +1422,8 @@ fleets:
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	localYAML := fmt.Sprintf("fleets:\n  - {name: far, workspaces: [app], host: box, remote_command: '%s --config %s --state %s'}\n", env.bin, hostConfig, hostState)
+	// The launcher is named, not detected: the test needs no tmux installed.
+	localYAML := fmt.Sprintf("fleets:\n  - {name: far, workspaces: [app], host: box, launcher: tmux, remote_command: '%s --config %s --state %s'}\n", env.bin, hostConfig, hostState)
 	if err := os.WriteFile(env.configFile, []byte(localYAML), 0o600); err != nil {
 		t.Fatal(err)
 	}
