@@ -6,9 +6,11 @@ import (
 	"io/fs"
 	"os"
 	"slices"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ashtonian/git-mgr/internal/ctxutil"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/state"
@@ -53,7 +55,7 @@ func (s Seen) At(path string) Copy {
 }
 
 // Observe reads every path in paths, using up to concurrency git processes.
-func Observe(ctx context.Context, paths []string, concurrency int) Seen {
+func Observe(ctx context.Context, paths []string, concurrency int, timeout time.Duration) Seen {
 	paths = slices.DeleteFunc(slices.Clone(paths), func(p string) bool { return p == "" })
 	slices.Sort(paths)
 	paths = slices.Compact(paths)
@@ -62,7 +64,12 @@ func Observe(ctx context.Context, paths []string, concurrency int) Seen {
 	g.SetLimit(max(concurrency, 1))
 	for i, p := range paths {
 		g.Go(func() error {
-			copies[i] = ObserveCopy(gctx, p)
+			octx, cancel := ctxutil.WithTimeout(gctx, timeout)
+			defer cancel()
+			copies[i] = ObserveCopy(octx, p)
+			if copies[i].Err != nil {
+				copies[i].Err = ctxutil.TimedOut(octx, copies[i].Err, "reading "+p, timeout, "sync.inspect_timeout")
+			}
 			return nil
 		})
 	}

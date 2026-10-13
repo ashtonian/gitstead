@@ -69,6 +69,7 @@ func main() {
 		run.Out, os.Stdout = os.Stdout, os.Stderr
 		run.Quiet = true
 	}
+	run.Logger() // before the command, so everything logs by config's log settings
 	err = ctx.Run(run)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

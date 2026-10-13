@@ -1385,16 +1385,40 @@ Nothing waits on a person or hangs forever:
 | --- | --- | --- |
 | `sync.backup_timeout` | `2m` | One working copy's backup (taken before its fetch, on its own budget) and status read. |
 | `sync.timeout_per_repo` | `5m` | One repo's fetch, retries included. |
-| `sync.clone_timeout` | `30m` | One clone. |
+| `sync.clone_timeout` | `30m` | One clone; one archive of a clone or copy, and its deletion, before it is removed (stale cleanup, `remove --delete`/`--archive`, `ws retire`, `ws prune`). |
+| `sync.inspect_timeout` | `1m` | One look at a working copy -- its git config and identity -- while planning (`plan`, `apply`, `sync`, `ws ensure`). |
 | `sync.api_timeout` | `60s` | One provider API request attempt. |
 | `sync.discovery_timeout` | `5m` | One discovery rule: listing plus language/topic lookups, retries and rate-limit waits. |
 | `lock_timeout` | `2m` | How long a command waits for another run's state write, or for a repo another command is deleting, moving or making a workspace copy of, before exiting 75. |
 | `token_command` | `30s` (fixed) | Running a provider's `token_command`. |
+| `notify.timeout` | `10s` | Sending one desktop notification, which can hang without a desktop session. |
 
 A clone is made in a hidden `.git-mgr-clone-*` directory beside its
 destination and renamed into place when complete. A failed or killed clone
 never leaves half a repository where the repo belongs, and the next clone of
 the same repo removes what a killed run left behind.
+
+### Logging and notifications
+
+Logs go to stderr as JSON (`slog`), and to `log.file` as well when it is set;
+the operation log, `events.jsonl` beside the state file, is what `git-mgr
+report` and `git-mgr log` read. `--verbose` logs debug on the terminal and in
+the file; `--quiet` (and `--json`) keeps only errors on the terminal, while the
+file keeps `log.level`.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
+| `log.format` | `json` | `json` or `text`. |
+| `log.file` | `""` | Also append logs here (made `0600`, its directory `0700`); empty for stderr only. A file that can't be opened leaves logging on stderr and says so. |
+| `log.events` | `true` | Write the operation log. |
+| `notify.enabled` | `false` | Desktop notifications (`osascript` on macOS, `notify-send` on Linux); nothing elsewhere. |
+| `notify.on_error` | `true` | When a sync has failures. |
+| `notify.on_stale` | `true` | When a sync finds repos gone upstream and marks them stale. |
+| `notify.on_completion` | `false` | After every sync, with what it fetched, backed up and failed. |
+| `notify.on_waiting` | `true` | When an agent is waiting for you (see [When an agent is waiting](#when-an-agent-is-waiting-for-you)). |
+| `notify.waiting_after` | `30s` | How long a working agent's pane must be quiet to count as waiting. |
+| `notify.timeout` | `10s` | How long a notification may take to send; a notification is never worth stalling a run. |
 
 ### Installing a schedule
 

@@ -303,8 +303,10 @@ sync:
   # One working copy's backup. It runs before the fetch, on its own budget,
   # so a slow remote can't starve it.
   backup_timeout: "2m"
-  # One clone.
+  # One clone; and archiving a clone or copy before it is removed.
   clone_timeout: "30m"
+  # One look at a working copy -- its git config and identity -- while planning.
+  inspect_timeout: "1m"
   # One provider API request attempt. Retries, and the waits a rate limit
   # asks for, are bounded by discovery_timeout instead.
   api_timeout: "60s"
@@ -504,6 +506,7 @@ notify:
   # An agent in a tmux pane that printed for a while and then nothing for this
   # long counts as waiting; 0 = only what agents report (git-mgr ws waiting).
   waiting_after: "30s"
+  timeout: "10s"           # how long sending one notification may take
 
 # =============================================================================
 # Logging
@@ -512,7 +515,7 @@ notify:
 log:
   level: "info"            # debug, info, warn, error
   format: "json"           # json or text
-  file: ""                 # Log to file in addition to stderr
+  file: ""                 # Log to file in addition to stderr, at level (--quiet only quiets stderr)
                            # e.g., "~/.local/share/git-mgr/git-mgr.log"
   events: true             # write the operation log (events.jsonl, read by report/log); false to disable
 

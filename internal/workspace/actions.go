@@ -375,7 +375,7 @@ func removeWorkspace(name, cacheDir string) reconcile.RunFunc {
 }
 
 func retireOptions(env *reconcile.Env) RetireOptions {
-	return RetireOptions{StateDir: env.StateDir, ArchiveDir: env.ArchiveDir}
+	return RetireOptions{StateDir: env.StateDir, ArchiveDir: env.ArchiveDir, Timeout: env.CloneTimeout}
 }
 
 // retiredOutcome records retirements: the copies dropped, their tombstones

@@ -116,15 +116,16 @@ func reconcileEnv(cfg *config.Config, st *state.State) *reconcile.Env {
 		}
 	}
 	return &reconcile.Env{
-		State:        st,
-		Update:       stateUpdater(cfg, st),
-		Concurrency:  cfg.Concurrency,
-		ArchiveDir:   cfg.Backup.ArchiveDir,
-		StateDir:     st.Dir(),
-		KeepDirs:     keep,
-		CloneTimeout: cfg.Sync.CloneTimeout,
-		LockWait:     cfg.LockTimeout,
-		Hooks:        hookRunner(cfg, st, nil),
+		State:          st,
+		Update:         stateUpdater(cfg, st),
+		Concurrency:    cfg.Concurrency,
+		ArchiveDir:     cfg.Backup.ArchiveDir,
+		StateDir:       st.Dir(),
+		KeepDirs:       keep,
+		CloneTimeout:   cfg.Sync.CloneTimeout,
+		LockWait:       cfg.LockTimeout,
+		InspectTimeout: cfg.Sync.InspectTimeout,
+		Hooks:          hookRunner(cfg, st, nil),
 	}
 }
 

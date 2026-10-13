@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agents "github.com/ashtonian/git-mgr/internal/agent"
+	"github.com/ashtonian/git-mgr/internal/ctxutil"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
@@ -23,6 +24,8 @@ type RetireOptions struct {
 	StopTimeout time.Duration
 	// Discard deletes unique work instead of archiving it.
 	Discard bool
+	// Timeout bounds archiving and removing each copy; 0 means none.
+	Timeout time.Duration
 }
 
 // Retired is what retiring copies did, and what to record of it.
@@ -78,7 +81,10 @@ func Retire(ctx context.Context, spec *Spec, ws *state.WorkspaceState, agent str
 
 	now := time.Now()
 	for _, l := range targets {
-		archived, err := RemoveCopy(ctx, spec.Isolation, l.Copy, opts.ArchiveDir, ArchiveName(l), opts.Discard)
+		rctx, cancel := ctxutil.WithTimeout(ctx, opts.Timeout)
+		archived, err := RemoveCopy(rctx, spec.Isolation, l.Copy, opts.ArchiveDir, ArchiveName(l), opts.Discard)
+		err = ctxutil.TimedOut(rctx, err, "archiving and removing "+l.Path, opts.Timeout, "sync.clone_timeout")
+		cancel()
 		if err != nil {
 			out.Kept = append(out.Kept, KeptCopy{l, err})
 			continue

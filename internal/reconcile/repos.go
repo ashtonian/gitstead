@@ -297,7 +297,9 @@ func cloneRepo(d Repo, adopt bool) RunFunc {
 				}}, err
 			}
 		}
-		c := ObserveCopy(ctx, d.Path)
+		octx, cancel := ctxutil.WithTimeout(ctx, env.InspectTimeout)
+		c := ObserveCopy(octx, d.Path)
+		cancel()
 		if !c.IsRepo || c.Err != nil {
 			return Outcome{}, fmt.Errorf("%s is not a readable git repository", d.Path)
 		}

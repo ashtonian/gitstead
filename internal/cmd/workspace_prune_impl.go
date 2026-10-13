@@ -94,7 +94,7 @@ func (c *WSPruneCmd) Run(ctx *Context) error {
 			byAgent[l.Agent] = append(byAgent[l.Agent], l.Path)
 		}
 		retired := map[string]workspace.Retired{}
-		opts := workspace.RetireOptions{StateDir: st.Dir(), ArchiveDir: cfg.Backup.ArchiveDir}
+		opts := workspace.RetireOptions{StateDir: st.Dir(), ArchiveDir: cfg.Backup.ArchiveDir, Timeout: cfg.Sync.CloneTimeout}
 		for _, agent := range slices.Sorted(maps.Keys(byAgent)) {
 			r := workspace.Retire(ctx.GoCtx(), spec, ws, agent, byAgent[agent], opts)
 			retired[agent] = r

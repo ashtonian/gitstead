@@ -190,6 +190,8 @@ type Env struct {
 	// LockWait is how long an action waits for a repo another git-mgr
 	// command is using (see gitops.LockRepo).
 	LockWait time.Duration
+	// InspectTimeout bounds each look at a working copy; 0 means none.
+	InspectTimeout time.Duration
 	// Hooks runs the hooks of checkouts the plan makes.
 	Hooks hook.Runner
 	// ArchiveDir receives the unique work of anything removed.

@@ -217,7 +217,7 @@ func noteWaiting(cfg *config.Config, st *state.State, ws, agent, what string, wa
 		return nil
 	})
 	if err == nil && notifyNow && cfg.Notify.Enabled && cfg.Notify.OnWaiting {
-		notify.Send("git-mgr", fmt.Sprintf("%s/%s is waiting: %s", ws, agent, what))
+		notify.Send(context.Background(), cfg.Notify.Timeout, "git-mgr", fmt.Sprintf("%s/%s is waiting: %s", ws, agent, what))
 	}
 	return err
 }
