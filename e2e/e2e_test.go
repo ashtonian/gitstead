@@ -124,22 +124,46 @@ func (e *testEnv) run(t *testing.T, args ...string) (string, int) {
 	return buf.String(), code
 }
 
+// runJSON runs git-mgr with --json and returns its stdout, which must be one
+// JSON document, decoded into v; its stderr; and its exit code.
+func (e *testEnv) runJSON(t *testing.T, v any, args ...string) (stderr string, code int) {
+	t.Helper()
+	cmd := exec.Command(e.bin, append([]string{"--json"}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_MGR_CONFIG="+e.configFile, "GIT_MGR_STATE="+e.stateFile)
+	var out, errOut bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	if err := cmd.Run(); err != nil {
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) {
+			t.Fatalf("running git-mgr %v: %v", args, err)
+		}
+		code = ee.ExitCode()
+	}
+	if v == nil && out.Len() == 0 {
+		return errOut.String(), code
+	}
+	if v == nil {
+		v = new(json.RawMessage)
+	}
+	text := out.String()
+	dec := json.NewDecoder(&out)
+	if err := dec.Decode(v); err != nil {
+		t.Fatalf("git-mgr %v --json: stdout isn't JSON: %v\nstdout: %s\nstderr: %s", args, err, text, errOut.String())
+	}
+	if dec.More() {
+		t.Fatalf("git-mgr %v --json printed more than one document:\n%s", args, text)
+	}
+	return errOut.String(), code
+}
+
 // statusJSON runs `git-mgr status --json` and decodes it into a map keyed by
 // repo key. Asserting via the CLI's own JSON output keeps the tests decoupled
 // from the on-disk state format.
 func (e *testEnv) statusJSON(t *testing.T) map[string]map[string]any {
 	t.Helper()
-	out, code := e.run(t, "status", "--json")
-	if code != 0 {
-		t.Fatalf("status --json exit %d:\n%s", code, out)
-	}
-	out = strings.TrimSpace(out)
-	if !strings.HasPrefix(out, "{") {
-		return map[string]map[string]any{} // "no repos tracked" human line
-	}
-	var m map[string]map[string]any
-	if err := json.Unmarshal([]byte(out), &m); err != nil {
-		t.Fatalf("decoding status json: %v\n%s", err, out)
+	m := map[string]map[string]any{}
+	if stderr, code := e.runJSON(t, &m, "status"); code != 0 {
+		t.Fatalf("status --json exit %d:\n%s", code, stderr)
 	}
 	return m
 }
@@ -1185,6 +1209,109 @@ func TestE2E_Mirror(t *testing.T) {
 	}
 	if got := gitCmd(t, mirror, "rev-parse", "refs/heads/main"); got != tip {
 		t.Errorf("a failed update must leave the mirror as it was: %s", got)
+	}
+}
+
+// TestE2E_JSON: under --json each command prints one JSON document on
+// stdout -- people's output goes to stderr -- with exit codes that say what
+// happened: 0, 2 for a check that found problems, 3 for a partial failure,
+// 1 for a command that has no JSON output or needs --yes.
+func TestE2E_JSON(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+	remote := filepath.Join(tmp, "remotes", "app.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	seed := filepath.Join(tmp, "seed")
+	gitCmd(t, tmp, "clone", "-q", remote, seed)
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("# app"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, seed, "add", ".")
+	gitCmd(t, seed, "-c", "user.name=e2e", "-c", "user.email=e2e@test.local", "commit", "-qm", "init")
+	gitCmd(t, seed, "push", "-q", "origin", "HEAD:main")
+	root := filepath.Join(tmp, "workspaces")
+	cfg := fmt.Sprintf("base_dir: %s\nworkspace_defaults: {root: %s}\nrepos:\n  - url: %s\n", env.baseDir, root, remote)
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var sync struct {
+		Changes struct {
+			Changes []struct {
+				Kind, Target string
+				OK           bool
+			}
+		}
+		Copies  []map[string]any
+		Fetched int
+	}
+	if stderr, code := env.runJSON(t, &sync, "sync"); code != 0 {
+		t.Fatalf("sync exit %d:\n%s", code, stderr)
+	}
+	if len(sync.Changes.Changes) != 1 || sync.Changes.Changes[0].Kind != "clone" || !sync.Changes.Changes[0].OK || len(sync.Copies) != 1 {
+		t.Errorf("sync --json = %+v", sync)
+	}
+
+	var created struct{ Changes []map[string]any }
+	if stderr, code := env.runJSON(t, &created, "ws", "create", "app", "--repo", "local/remotes/app", "--agents", "2"); code != 0 || len(created.Changes) != 3 {
+		t.Fatalf("ws create exit %d, %+v:\n%s", code, created, stderr)
+	}
+	var listed []struct {
+		Name   string
+		Agents int
+		Status string
+	}
+	env.runJSON(t, &listed, "ws", "ls")
+	if len(listed) != 1 || listed[0].Name != "app" || listed[0].Agents != 2 || listed[0].Status != "created" {
+		t.Errorf("ws ls --json = %+v", listed)
+	}
+	var target map[string]string
+	env.runJSON(t, &target, "path", "app", "agent-2")
+	if target["path"] != filepath.Join(root, "app", "agent-2") || target["kind"] != "agent" {
+		t.Errorf("path --json = %v", target)
+	}
+
+	var checked []map[string]any
+	if _, code := env.runJSON(t, &checked, "ws", "check", "app"); code != 0 || len(checked) != 2 {
+		t.Errorf("ws check: exit %d, %d copies; want 0 and 2", code, len(checked))
+	}
+	// A copy gone from disk: the check ran, and found a problem.
+	if err := os.RemoveAll(filepath.Join(root, "app", "agent-2")); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := env.runJSON(t, &checked, "ws", "check", "app"); code != 2 {
+		t.Errorf("ws check with a copy gone: exit %d, want 2", code)
+	}
+	if out, code := env.run(t, "ws", "ensure", "app"); code != 0 {
+		t.Fatalf("ws ensure exit %d:\n%s", code, out)
+	}
+
+	// One copy fails, the other succeeds: a partial failure.
+	var ran []struct {
+		Path string
+		OK   bool
+	}
+	if _, code := env.runJSON(t, &ran, "ws", "exec", "app", "--", "sh", "-c", `test "$GIT_MGR_AGENT" = agent-1`); code != 3 || len(ran) != 2 {
+		t.Errorf("ws exec: exit %d, %+v; want 3", code, ran)
+	}
+
+	var doctor struct {
+		Checks   []struct{ Level, Message string }
+		Problems int
+	}
+	env.runJSON(t, &doctor, "doctor")
+	if len(doctor.Checks) == 0 {
+		t.Errorf("doctor --json = %+v", doctor)
+	}
+	if stderr, code := env.runJSON(t, nil, "ws", "run", "app", "agent-1"); code != 1 || !strings.Contains(stderr, "no JSON output") {
+		t.Errorf("ws run --json: exit %d:\n%s", code, stderr)
+	}
+	if stderr, code := env.runJSON(t, nil, "remove", "local/remotes/app"); code != 1 || !strings.Contains(stderr, "--yes") {
+		t.Errorf("remove --json without --yes: exit %d:\n%s", code, stderr)
+	}
+	var version map[string]string
+	if _, code := env.runJSON(t, &version, "version"); code != 0 || version["version"] == "" {
+		t.Errorf("version --json = %v", version)
 	}
 }
 

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -19,7 +18,6 @@ import (
 
 // PlanCmd shows what applying config would change, without changing anything.
 type PlanCmd struct {
-	JSON bool `help:"Print the plan as JSON."`
 }
 
 // ApplyCmd makes repos and workspaces match config, including moves and
@@ -41,10 +39,8 @@ func (c *PlanCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	if c.JSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(plan)
+	if ctx.JSON {
+		return ctx.Emit(plan)
 	}
 	printPlan(plan, cfg.Reconcile.Auto)
 	return nil
@@ -68,18 +64,22 @@ func (c *ApplyCmd) Run(ctx *Context) error {
 	}
 	printPlan(plan, "all")
 	if len(plan.Actions) == 0 {
-		return blockedErr(plan)
+		ctx.noteChanges(plan, nil)
+		return ctx.finishChanges(blockedErr(plan))
 	}
 	if n := plan.Disruptive(); n > 0 && !c.Yes {
+		if ctx.JSON {
+			return fmt.Errorf("%d changes move or remove directories; --json needs --yes to make them", n)
+		}
 		if !confirm(fmt.Sprintf("Move or remove the %d %s marked > and - above?", n, plural(n, "directory", "directories"))) {
 			fmt.Println("Cancelled; nothing changed.")
 			return nil
 		}
 	}
 	results := workspace.Apply(ctx.GoCtx(), cfg, reconcileEnv(cfg, st), plan, scope, reconcile.All)
-	logResults(ctx, results)
+	ctx.noteChanges(plan, results)
 	printResults(results, resultsSummary)
-	return changesOutcome(results, plan)
+	return ctx.finishChanges(changesOutcome(results, plan))
 }
 
 // fullPlan discovers and plans every repo and workspace.
@@ -138,7 +138,7 @@ func applyAuto(ctx *Context, cfg *config.Config, st *state.State, plan *reconcil
 // reportApplied logs and prints the results of applying what include
 // selects of plan, and what is left.
 func reportApplied(ctx *Context, plan *reconcile.Plan, results []reconcile.Result, include func(reconcile.Action) bool) {
-	logResults(ctx, results)
+	ctx.noteChanges(plan, results)
 	if ctx.Quiet {
 		printResults(results, resultsQuiet)
 		return

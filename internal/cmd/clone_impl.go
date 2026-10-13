@@ -41,7 +41,7 @@ func (c *CloneCmd) Run(ctx *Context) error {
 	} else if dest, err = filepath.Abs(config.ExpandHome(dest)); err != nil {
 		return err
 	}
-	return addByHand(ctx, cfg, st, reconcile.HandAdded(cfg, id, dest, splitTags(c.Tag)), false)
+	return ctx.finishChanges(addByHand(ctx, cfg, st, reconcile.HandAdded(cfg, id, dest, splitTags(c.Tag)), false))
 }
 
 // addByHand plans tracking one repo added by hand -- cloning it, or adopting
@@ -58,7 +58,7 @@ func addByHand(ctx *Context, cfg *config.Config, st *state.State, d reconcile.Re
 	}
 	printDriftAndBlocked(plan)
 	results := plan.Apply(ctx.GoCtx(), reconcileEnv(cfg, st), reconcile.All)
-	logResults(ctx, results)
+	ctx.noteChanges(plan, results)
 	printResults(results, resultsEach)
 	return errors.Join(changesOutcome(results, plan), recordInManifest(cfg, st, d.Key))
 }

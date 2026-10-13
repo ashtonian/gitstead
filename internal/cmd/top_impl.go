@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -24,7 +23,6 @@ type TopCmd struct {
 	Every time.Duration `help:"How often to look again." default:"10s"`
 	All   bool          `help:"Show every repo, not only those needing attention."`
 	Once  bool          `help:"Print one view and exit, instead of refreshing."`
-	JSON  bool          `help:"Print one view as JSON and exit."`
 	Repos string        `help:"Only repos matching this glob." predictor:"repo"`
 	Tag   string        `help:"Only repos with this tag." predictor:"tag"`
 	Set   string        `help:"Only repos in this named set." predictor:"set"`
@@ -54,14 +52,12 @@ func (c *TopCmd) Run(ctx *Context) error {
 		return view.Collect(goCtx, cfg, st, view.Options{Repos: pass, Concurrency: cfg.Concurrency, Activity: tracker.Read}), nil
 	}
 
-	if c.JSON {
+	if ctx.JSON {
 		snap, err := collect(ctx.GoCtx())
 		if err != nil {
 			return err
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(snap)
+		return ctx.Emit(snap)
 	}
 	tty := term.IsTerminal(int(os.Stdout.Fd()))
 	if c.Once || !tty {

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -92,10 +91,8 @@ func (c *StatusCmd) runLive(ctx *Context, st *state.State, pass func(string, *st
 	}
 	sort.Slice(filtered, func(i, j int) bool { return filtered[i].Key < filtered[j].Key })
 
-	if c.JSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(filtered)
+	if ctx.JSON {
+		return ctx.Emit(filtered)
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)

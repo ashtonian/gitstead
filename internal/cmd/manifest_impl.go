@@ -34,11 +34,17 @@ func (c *ManifestExportCmd) Run(ctx *Context) error {
 		}
 	}
 
+	if m.Repos == nil {
+		m.Repos = []config.ManualRepo{}
+	}
 	out, err := yaml.Marshal(m)
 	if err != nil {
 		return err
 	}
 	if c.Out == "" {
+		if ctx.JSON {
+			return ctx.Emit(m)
+		}
 		_, err = os.Stdout.Write(out)
 		return err
 	}
@@ -47,6 +53,9 @@ func (c *ManifestExportCmd) Run(ctx *Context) error {
 	}
 	if !ctx.Quiet {
 		fmt.Printf("Exported %d repos to %s\n", len(m.Repos), c.Out)
+	}
+	if ctx.JSON {
+		return ctx.Emit(map[string]any{"path": config.ExpandHome(c.Out), "repos": len(m.Repos)})
 	}
 	return nil
 }
@@ -107,8 +116,9 @@ func (c *ManifestImportCmd) Run(ctx *Context) error {
 	}
 	for _, err := range errs {
 		fmt.Fprintf(os.Stderr, "  %v\n", err)
+		ctx.noteError(c.File, err)
 	}
-	return outcome(len(errs), added+len(errs), "manifest entries could not be imported")
+	return ctx.finishChanges(outcome(len(errs), added+len(errs), "manifest entries could not be imported"))
 }
 
 // manifestEntry is repo key's manifest entry: its URL, tags, and its path
@@ -195,11 +205,20 @@ func (c *ManifestSaveCmd) Run(ctx *Context) error {
 			keys, entries = append(keys, key), append(entries, e)
 		}
 	}
+	doc := struct {
+		Manifest string              `json:"manifest,omitempty"`
+		Saved    bool                `json:"saved"`
+		Repos    []config.ManualRepo `json:"repos"`
+	}{cfg.Manifest, false, entries}
 	if len(entries) == 0 {
 		fmt.Println("Every repo tracked by hand is already in config or the manifest.")
-		return nil
+		doc.Repos = []config.ManualRepo{}
+		return ctx.finish(doc, nil)
 	}
 	if cfg.Manifest == "" || c.DryRun {
+		if ctx.JSON {
+			return ctx.Emit(doc)
+		}
 		if cfg.Manifest == "" {
 			fmt.Fprintln(os.Stderr, "No manifest: in config; these repos: entries make other machines track them too:")
 		}
@@ -214,5 +233,6 @@ func (c *ManifestSaveCmd) Run(ctx *Context) error {
 		return err
 	}
 	fmt.Printf("Saved %d repos in %s\n", len(entries), tildify(cfg.Manifest))
-	return nil
+	doc.Saved = true
+	return ctx.finish(doc, nil)
 }

@@ -57,41 +57,67 @@ func (c *InstallAgentCmd) Run(ctx *Context) error {
 
 	switch {
 	case c.List:
-		return listSchedules(st)
+		return ctx.finish(scheduleList(st), listSchedules(st))
 	case c.Uninstall:
-		return c.uninstall(cfg, st, host)
+		doc, err := c.uninstall(cfg, st, host)
+		return ctx.finish(doc, err)
 	}
-	return c.install(ctx, cfg, st, host)
+	doc, err := c.install(ctx, cfg, st, host)
+	return ctx.finish(doc, err)
 }
 
-func (c *InstallAgentCmd) install(ctx *Context, cfg *config.Config, st *state.State, host scheduler.Host) error {
+// scheduleJSON is what install-agent did, or with --print would do: the
+// steps on this machine, and what the schedule's environment will lack.
+type scheduleJSON struct {
+	Name    string   `json:"name"`
+	Kind    string   `json:"kind"`
+	Planned bool     `json:"planned,omitempty"` // --print: nothing was done
+	Actions []string `json:"actions"`
+	Notes   []string `json:"notes,omitempty"`
+}
+
+// scheduleList is the recorded schedules, by name.
+func scheduleList(st *state.State) []*state.ScheduleState {
+	out := []*state.ScheduleState{}
+	for _, name := range slices.Sorted(maps.Keys(st.Schedules)) {
+		out = append(out, st.Schedules[name])
+	}
+	return out
+}
+
+func (c *InstallAgentCmd) install(ctx *Context, cfg *config.Config, st *state.State, host scheduler.Host) (scheduleJSON, error) {
+	doc := scheduleJSON{Name: c.Name, Planned: c.Print, Actions: []string{}}
 	if _, err := (selection{c.Repos, c.Tag, c.Set}).predicate(cfg); err != nil {
-		return err
+		return doc, err
 	}
 	s, notes, err := c.schedule(ctx)
 	if err != nil {
-		return err
+		return doc, err
 	}
+	doc.Kind = string(s.Kind)
 	if err := s.Validate(); err != nil {
-		return err
+		return doc, err
 	}
 
 	// Moving a schedule to another backend removes it from the old one.
 	if old := st.Schedules[s.Name]; old != nil && (scheduler.Kind(old.Kind) != s.Kind || old.Daemon != s.Daemon) {
 		actions, err := host.Uninstall(scheduleOf(old), c.Print)
 		printActions("remove the "+old.Kind+" schedule", actions)
+		doc.Actions = append(doc.Actions, actions...)
 		if err != nil {
-			return fmt.Errorf("removing the %s schedule %q: %w", old.Kind, old.Name, err)
+			return doc, fmt.Errorf("removing the %s schedule %q: %w", old.Kind, old.Name, err)
 		}
 	}
 	actions, err := host.Install(s, c.Print)
+	doc.Actions = append(doc.Actions, actions...)
 	if c.Print {
 		printActions(fmt.Sprintf("install plan (%s)", s.Kind), actions)
 		printNotes(notes)
-		return err
+		doc.Notes = notes
+		return doc, err
 	}
 	if err != nil {
-		return fmt.Errorf("installing the %s schedule %q: %w", s.Kind, s.Name, err)
+		return doc, fmt.Errorf("installing the %s schedule %q: %w", s.Kind, s.Name, err)
 	}
 	printActions(fmt.Sprintf("Installed schedule %q (%s)", s.Name, s.Kind), actions)
 
@@ -100,14 +126,15 @@ func (c *InstallAgentCmd) install(ctx *Context, cfg *config.Config, st *state.St
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("recording the schedule: %w", err)
+		return doc, fmt.Errorf("recording the schedule: %w", err)
 	}
 
 	notes = append(notes, c.afterInstall(s, host)...)
 	printNotes(notes)
+	doc.Notes = notes
 	fmt.Printf("\ngit-mgr will sync %s every %s. Check it with `git-mgr doctor`; remove it with `git-mgr install-agent --uninstall --name %s`.\n",
 		describeSelection(s.Sync), s.Every(), s.Name)
-	return nil
+	return doc, nil
 }
 
 // schedule builds the schedule the flags describe, with notes on what the
@@ -185,7 +212,7 @@ func (c *InstallAgentCmd) afterInstall(s scheduler.Schedule, host scheduler.Host
 	return nil
 }
 
-func (c *InstallAgentCmd) uninstall(cfg *config.Config, st *state.State, host scheduler.Host) error {
+func (c *InstallAgentCmd) uninstall(cfg *config.Config, st *state.State, host scheduler.Host) (scheduleJSON, error) {
 	s := scheduler.Schedule{Name: c.Name, Kind: scheduler.Kind(c.Kind), Daemon: c.Daemon}
 	if rec := st.Schedules[c.Name]; rec != nil {
 		s = scheduleOf(rec)
@@ -193,15 +220,16 @@ func (c *InstallAgentCmd) uninstall(cfg *config.Config, st *state.State, host sc
 		s.Kind = scheduler.DefaultKind()
 	}
 	actions, err := host.Uninstall(s, c.Print)
+	doc := scheduleJSON{Name: s.Name, Kind: string(s.Kind), Planned: c.Print, Actions: append([]string{}, actions...)}
 	if c.Print {
 		printActions(fmt.Sprintf("uninstall plan (%s)", s.Kind), actions)
-		return err
+		return doc, err
 	}
 	if err != nil {
-		return fmt.Errorf("removing the %s schedule %q: %w", s.Kind, s.Name, err)
+		return doc, fmt.Errorf("removing the %s schedule %q: %w", s.Kind, s.Name, err)
 	}
 	printActions(fmt.Sprintf("Removed schedule %q (%s)", s.Name, s.Kind), actions)
-	return st.Update(cfg.LockTimeout, func(st *state.State) error {
+	return doc, st.Update(cfg.LockTimeout, func(st *state.State) error {
 		delete(st.Schedules, c.Name)
 		return nil
 	})

@@ -19,7 +19,6 @@ func (c *ReportCmd) Run(ctx *Context) error {
 	}
 	if len(evs) == 0 {
 		fmt.Printf("No git-mgr activity in the last %s.\n", c.Since)
-		return nil
 	}
 
 	counts := map[string]int{}
@@ -43,6 +42,20 @@ func (c *ReportCmd) Run(ctx *Context) error {
 		}
 	}
 
+	if ctx.JSON {
+		return ctx.Emit(struct {
+			Since   string         `json:"since"`
+			Events  int            `json:"events"`
+			Actions map[string]int `json:"actions"`
+			Syncs   int            `json:"syncs"`
+			Fetched int            `json:"fetched"`
+			Backups int            `json:"backed_up"`
+			Failed  int            `json:"failed"`
+		}{c.Since.String(), len(evs), counts, syncRuns, fetched, backedUp, failed})
+	}
+	if len(evs) == 0 {
+		return nil
+	}
 	fmt.Printf("Activity in the last %s (%d events):\n", c.Since, len(evs))
 	fmt.Printf("  clones:           %d\n", counts["clone"])
 	fmt.Printf("  adopts:           %d\n", counts["adopt"])
@@ -61,6 +74,12 @@ func (c *LogCmd) Run(ctx *Context) error {
 	}
 	if c.Lines > 0 && len(evs) > c.Lines {
 		evs = evs[len(evs)-c.Lines:]
+	}
+	if ctx.JSON {
+		if evs == nil {
+			evs = []oplog.Event{}
+		}
+		return ctx.Emit(evs)
 	}
 	for _, e := range evs {
 		fmt.Printf("%s  %-9s  %s  %s\n", e.Time.Format("2006-01-02 15:04:05"), e.Action, e.Repo, e.Detail)

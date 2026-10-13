@@ -29,7 +29,6 @@ import (
 type WSEnvCmd struct {
 	Name  string `arg:"" optional:"" help:"Workspace name; default the one this directory is in." predictor:"workspace"`
 	Agent string `arg:"" optional:"" help:"The agent; default the one whose folder this directory is in."`
-	JSON  bool   `help:"Print a JSON object instead of shell exports."`
 }
 
 func (c *WSEnvCmd) Run(ctx *Context) error {
@@ -65,10 +64,8 @@ func (c *WSEnvCmd) Run(ctx *Context) error {
 		k, v, _ := strings.Cut(kv, "=")
 		vars[k] = v
 	}
-	if c.JSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(vars)
+	if ctx.JSON {
+		return ctx.Emit(vars)
 	}
 	for _, k := range slices.Sorted(maps.Keys(vars)) {
 		fmt.Printf("export %s=%s\n", k, shellutil.Quote(vars[k]))
@@ -114,13 +111,16 @@ type WSWaitingCmd struct {
 
 func (c *WSWaitingCmd) Run(ctx *Context) error {
 	ws, agent := orDefault(c.Workspace, os.Getenv("GIT_MGR_WORKSPACE")), orDefault(c.Agent, os.Getenv("GIT_MGR_AGENT"))
+	doc := map[string]any{"workspace": ws, "agent": agent, "recorded": false}
 	if ws == "" || agent == "" {
-		return nil // not an agent git-mgr runs
+		return ctx.finish(doc, nil) // not an agent git-mgr runs
 	}
 	if err := c.note(ctx, ws, agent); err != nil {
 		fmt.Fprintf(os.Stderr, "git-mgr: %s/%s waiting: %v\n", ws, agent, err)
+		return ctx.finish(doc, nil)
 	}
-	return nil
+	doc["recorded"] = true
+	return ctx.finish(doc, nil)
 }
 
 func (c *WSWaitingCmd) note(ctx *Context, ws, agent string) error {

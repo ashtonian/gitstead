@@ -151,7 +151,35 @@ writes a config without asking anything.
 | `git-mgr version` | Print version, commit, build date. |
 
 Global flags: `--config`, `--state`, `--verbose`/`-v`, `--quiet`/`-q`,
-`--concurrency`/`-j`.
+`--concurrency`/`-j`, `--json`.
+
+### JSON output
+
+`--json`, on any command, prints the command's result as one JSON document on
+stdout -- a list, a status, or what a command changed -- and sends everything
+printed for people to stderr, as quietly as `--quiet` makes it. The exit code
+says what happened (see [Exit codes](#exit-codes)), so a script reads stdout
+only when it wants the detail:
+
+```bash
+git-mgr sync --json | jq '.copies[] | select(.ok | not)'
+git-mgr ws status app --json | jq -r '.[] | select(.agent_state == "running") | .label'
+git-mgr doctor --json > /dev/null || echo "doctor found problems (exit $?)"
+```
+
+Commands that apply changes -- `apply`, `clone`, `adopt`, `discover --apply`,
+`ws create`, `ws ensure`, `manifest import` -- print `changes` (each with its
+`kind`, `target`, `ok`, `info` or `error`), `drift` and `blocked`, the same
+actions `plan --json` shows. `sync` prints those with every repo and copy's
+backup, fetch and offsite push, its mirrors and what went stale; `bootstrap`
+one object of its steps' documents. Commands that would ask first (`remove`,
+`apply` with moves, `ws rm`, `ws retire`, `ws prune`, `archives rm`) need
+`--yes` under `--json`, and fail without it. Commands that take the terminal
+or only change your shell -- `ws run`, `open`, `shell-init`, `config --edit`,
+`ws create --open`, interactive `setup` -- refuse `--json`; `ws open` and
+`fleet open` under `--json` open without attaching tmux and print what they
+opened (`--print --json` prints the launch plan). A fleet on another host
+passes `--json` there and its document through.
 
 ## Live view: git-mgr top
 
@@ -1388,13 +1416,16 @@ schedule's environment -- recorded PATH and agent, nothing else -- so a `gh`
 that isn't on the recorded PATH or a token that only your shell can read
 shows up there instead of as silent failures in the log.
 
+## Exit codes
+
 Exit codes are stable, so a scheduler or script can tell a flaky repo from a
 broken setup. With `--quiet`, only failures are printed, to stderr.
 
 | Code | Meaning |
 | --- | --- |
 | 0 | Everything succeeded. `sync` also exits 0 when another run holds the lock, since overlapping scheduled runs are routine. |
-| 1 | The command failed: bad config, unreadable state, or every target failed. |
+| 1 | The command failed: bad config, unreadable state, every target failed, or it has no `--json` output or needs `--yes`. |
+| 2 | A check ran and found problems: `doctor`, `ws check`. |
 | 3 | Partial failure: some repos, copies or changes failed and the rest succeeded. Each failure is printed to stderr. |
 | 75 | Another git-mgr run held the state lock for longer than `lock_timeout`; try again (EX_TEMPFAIL). `git-mgr doctor` reports a stuck holder. |
 | 80 | Usage error: unknown command or flag. |

@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/ashtonian/git-mgr/internal/hook"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
 	"github.com/ashtonian/git-mgr/internal/workspace"
 )
@@ -43,6 +44,7 @@ func (c *HooksPostCloneCmd) Run(ctx *Context) error {
 	}
 	runner := hookRunner(cfg, st, os.Stdout)
 	ran, failed := 0, 0
+	doc := []hookRunJSON{}
 	for _, key := range keys {
 		repo := st.Repos[key]
 		commands := cfg.HooksFor(key, repo.DiscoveredBy).PostClone
@@ -55,7 +57,9 @@ func (c *HooksPostCloneCmd) Run(ctx *Context) error {
 		}
 		ran++
 		fmt.Printf("== %s\n", key)
-		if err := runner.Run(ctx.GoCtx(), reconcile.PostCloneHook(key, repo.LocalPath, commands)); err != nil {
+		err := runner.Run(ctx.GoCtx(), reconcile.PostCloneHook(key, repo.LocalPath, commands))
+		doc = append(doc, hookResult(key, repo.LocalPath, err))
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", key, err)
 			failed++
 		}
@@ -63,7 +67,27 @@ func (c *HooksPostCloneCmd) Run(ctx *Context) error {
 	if ran == 0 {
 		fmt.Println("No post_clone hooks to run for these repos.")
 	}
-	return outcome(failed, ran, "post_clone hooks failed in %d of %d repos", failed, ran)
+	return ctx.finish(doc, outcome(failed, ran, "post_clone hooks failed in %d of %d repos", failed, ran))
+}
+
+// hookRunJSON is what running one checkout's hooks did.
+type hookRunJSON struct {
+	Target string `json:"target"`
+	Path   string `json:"path"`
+	OK     bool   `json:"ok"`
+	// Command is the one that failed, Log where its run's output is.
+	Command string `json:"command,omitempty"`
+	Log     string `json:"log,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+func hookResult(target, path string, err error) hookRunJSON {
+	r := hookRunJSON{Target: target, Path: path, OK: err == nil, Error: errString(err)}
+	var hookErr *hook.Error
+	if errors.As(err, &hookErr) {
+		r.Command, r.Log = hookErr.Command, hookErr.Log
+	}
+	return r
 }
 
 // HooksPostCreateCmd runs a workspace's post_create hooks.
@@ -88,6 +112,7 @@ func (c *HooksPostCreateCmd) Run(ctx *Context) error {
 	spec := workspace.FromState(cfg, st, ws)
 	runner := hookRunner(cfg, st, os.Stdout)
 	ran, failed := 0, 0
+	doc := []hookRunJSON{}
 	for _, l := range spec.Copies() {
 		if len(c.Agents) > 0 && !slices.Contains(c.Agents, l.Agent) {
 			continue
@@ -106,6 +131,7 @@ func (c *HooksPostCreateCmd) Run(ctx *Context) error {
 		if err == nil {
 			err = runner.Run(ctx.GoCtx(), workspace.PostCreateHook(spec.Name, l.Agent, l.Copy, vars))
 		}
+		doc = append(doc, hookResult(label, l.Path, err))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", label, err)
 			failed++
@@ -114,7 +140,7 @@ func (c *HooksPostCreateCmd) Run(ctx *Context) error {
 	if ran == 0 {
 		fmt.Println("No post_create hooks to run in these copies.")
 	}
-	return outcome(failed, ran, "post_create hooks failed in %d of %d copies", failed, ran)
+	return ctx.finish(doc, outcome(failed, ran, "post_create hooks failed in %d of %d copies", failed, ran))
 }
 
 func onDisk(path string) bool {

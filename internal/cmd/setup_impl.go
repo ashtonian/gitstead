@@ -37,7 +37,7 @@ type SetupCmd struct {
 
 func (c *SetupCmd) Run(ctx *Context) error {
 	interactive := !c.Yes && c.Answers == ""
-	if interactive && !term.IsTerminal(int(os.Stdin.Fd())) {
+	if interactive && (ctx.JSON || !term.IsTerminal(int(os.Stdin.Fd()))) {
 		return errors.New("setup asks questions, so it needs a terminal; use --yes to accept the recommended answers, or --answers <file>")
 	}
 	home := setup.HomeDir()
@@ -106,9 +106,19 @@ func (c *SetupCmd) Run(ctx *Context) error {
 	printSetupReview(configPath, before, after, answers)
 	checks := (setup.Checker{Probe: !c.Offline, RunCombined: setup.ExecCombinedRunner}).Check(ctx.GoCtx(), candidate)
 	failed := printChecks(checks)
+	// What setup did, as --json prints it: the config it wrote, or would.
+	result := struct {
+		Config  string        `json:"config"`
+		Written bool          `json:"written"`
+		Text    string        `json:"text"`
+		Checks  []doctorCheck `json:"checks"`
+	}{Config: configPath, Text: string(after), Checks: []doctorCheck{}}
+	for _, ch := range checks {
+		result.Checks = append(result.Checks, doctorCheck{Level: string(ch.Status), Message: ch.Message})
+	}
 	if c.DryRun {
 		fmt.Println("\nDry run: nothing written.")
-		return nil
+		return ctx.finish(result, nil)
 	}
 	if interactive {
 		write := true
@@ -125,6 +135,7 @@ func (c *SetupCmd) Run(ctx *Context) error {
 	if err := doc.Save(); err != nil {
 		return err
 	}
+	result.Written = true
 	fmt.Printf("Wrote %s\n", tildify(configPath))
 	if c.SaveAnswers != "" {
 		if err := writeAnswers(config.ExpandHome(c.SaveAnswers), answers); err != nil {
@@ -140,7 +151,7 @@ func (c *SetupCmd) Run(ctx *Context) error {
 	if answers.Workspaces != nil {
 		fmt.Println("Then give a repo its agents: `git-mgr ws create <name> --repo <repo> --save`, and open them with `git-mgr ws open <name>`.")
 	}
-	return outcome(failed, len(checks), "setup checks failed")
+	return ctx.finish(result, outcome(failed, len(checks), "setup checks failed"))
 }
 
 // afterSetup adopts the chosen clones and installs the background agent.

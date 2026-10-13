@@ -9,10 +9,19 @@ import (
 
 // Exit codes. kong adds 80 for usage errors; see the README for the table.
 const (
-	exitFailed  = 1  // the command failed
-	exitPartial = 3  // some targets failed, the others succeeded
-	exitBusy    = 75 // another git-mgr run holds the lock (EX_TEMPFAIL): try again later
+	exitFailed   = 1  // the command failed
+	exitProblems = 2  // a check ran and found problems: doctor, ws check
+	exitPartial  = 3  // some targets failed, the others succeeded
+	exitBusy     = 75 // another git-mgr run holds the lock (EX_TEMPFAIL): try again later
 )
+
+// problems reports a check that ran and found n problems.
+func problems(n int, format string, args ...any) error {
+	if n == 0 {
+		return nil
+	}
+	return &exitError{exitProblems, fmt.Errorf(format, args...)}
+}
 
 // exitError gives an error the exit code main uses for it.
 type exitError struct {

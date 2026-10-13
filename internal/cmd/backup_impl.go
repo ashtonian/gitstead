@@ -124,7 +124,7 @@ func (c *BackupCmd) Run(ctx *Context) error {
 	if !ctx.Quiet {
 		fmt.Printf("Saved %d new backup(s)\n", saved)
 	}
-	return outcome(failed, len(jobs), "repos failed to back up")
+	return ctx.finish(copiesJSON(outcomes), outcome(failed, len(jobs), "repos failed to back up"))
 }
 
 func (c *BackupCmd) runList(ctx *Context, cfg *config.Config, st *state.State) error {
@@ -132,6 +132,8 @@ func (c *BackupCmd) runList(ctx *Context, cfg *config.Config, st *state.State) e
 	if err != nil {
 		return err
 	}
+	doc := map[string][]backupJSON{}
+	failed := 0
 	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
 		repo := st.Repos[key]
 		if !pass(key, repo) || !repo.Cloned {
@@ -139,6 +141,7 @@ func (c *BackupCmd) runList(ctx *Context, cfg *config.Config, st *state.State) e
 		}
 		backups, err := gitops.ListBackups(ctx.GoCtx(), repo.LocalPath, cfg.ResolveForRepo(key).Backup.PatchDir)
 		if err != nil {
+			failed++
 			fmt.Fprintf(os.Stderr, "  %s: %v\n", key, err)
 			continue
 		}
@@ -148,9 +151,10 @@ func (c *BackupCmd) runList(ctx *Context, cfg *config.Config, st *state.State) e
 		fmt.Printf("%s:\n", key)
 		for _, b := range backups {
 			fmt.Printf("  %s  %s\n", b.ID, backupKinds(b))
+			doc[key] = append(doc[key], backupInfoJSON(b))
 		}
 	}
-	return nil
+	return ctx.finish(doc, outcome(failed, failed+len(doc), "repos' backups could not be read"))
 }
 
 // backupKinds says what a backup consists of.
@@ -173,7 +177,7 @@ func (c *BackupCmd) runRestore(ctx *Context, cfg *config.Config, st *state.State
 	if err != nil {
 		return err
 	}
-	printed := 0
+	docs := []restoreJSON{}
 	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
 		repo := st.Repos[key]
 		if !pass(key, repo) || !repo.Cloned {
@@ -183,13 +187,13 @@ func (c *BackupCmd) runRestore(ctx *Context, cfg *config.Config, st *state.State
 		if err != nil {
 			continue
 		}
-		printed++
+		docs = append(docs, restoreJSON{Target: key, Path: repo.LocalPath, Backup: backupInfoJSON(b)})
 		printRestoreSteps(repo.LocalPath, key, b)
 	}
-	if printed == 0 {
+	if len(docs) == 0 {
 		fmt.Printf("No backup %q found for the selected repos.\n", c.Restore)
 	} else {
 		fmt.Println("Tip: `git-mgr restore <repo> [id]` can apply a backup, or --into a scratch dir.")
 	}
-	return nil
+	return ctx.finish(docs, nil)
 }

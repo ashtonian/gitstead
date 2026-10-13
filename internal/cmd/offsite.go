@@ -349,7 +349,7 @@ func (c *RemoteSyncCmd) Run(ctx *Context) error {
 		}
 		fmt.Printf("%s offsite copies of %d of %d working copies\n", verb, pushed, len(outcomes))
 	}
-	return outcome(failed, len(outcomes), "working copies failed to go offsite")
+	return ctx.finish(copiesJSON(outcomes), outcome(failed, len(outcomes), "working copies failed to go offsite"))
 }
 
 func describeOffsite(p gitops.OffsitePlan, dryRun bool) string {
@@ -387,6 +387,12 @@ func describeOffsite(p gitops.OffsitePlan, dryRun bool) string {
 // on its backup remote, and how to get it back.
 func listOffsite(ctx *Context, cfg *config.Config, st *state.State, pass func(string, *state.RepoState) bool) error {
 	failed, listed := 0, 0
+	// The refs each repo's remote holds, under the repo's key.
+	type remoteRefs struct {
+		Remote string   `json:"remote"`
+		Refs   []string `json:"refs"`
+	}
+	doc := map[string]remoteRefs{}
 	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
 		repo := st.Repos[key]
 		if !pass(key, repo) || !repo.Cloned {
@@ -416,6 +422,7 @@ func listOffsite(ctx *Context, cfg *config.Config, st *state.State, pass func(st
 		if len(refs) == 0 {
 			continue
 		}
+		doc[key] = remoteRefs{remote, refs}
 		fmt.Printf("%s (%s):\n", key, remote)
 		for _, ref := range refs {
 			fmt.Printf("  %s\n", ref)
@@ -428,5 +435,5 @@ Restore from inside a clone of the repo:
   a visible WIP ref:  git fetch <remote> <refs/heads/git-mgr/wip/...> && git cherry-pick --no-commit FETCH_HEAD
   unpushed commits:   git fetch <remote> <.../heads/<branch>>:refs/heads/<branch>-recovered`)
 	}
-	return outcome(failed, failed+listed, "repos' remotes could not be listed")
+	return ctx.finish(doc, outcome(failed, failed+listed, "repos' remotes could not be listed"))
 }
