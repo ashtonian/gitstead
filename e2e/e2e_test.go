@@ -1961,3 +1961,67 @@ func TestE2E_SyncUpdate(t *testing.T) {
 		t.Errorf("a clone with staged work must be left: %+v", again)
 	}
 }
+
+// TestE2E_AccountsGitconfig: accounts gitconfig --install makes each
+// account's identity git's own for repos under its folders, through
+// includeIf, including repos git-mgr never touched.
+func TestE2E_AccountsGitconfig(t *testing.T) {
+	env := newLocalEnv(t)
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	global := filepath.Join(t.TempDir(), "gitconfig")
+	cfg := fmt.Sprintf(`base_dir: %s
+accounts:
+  - name: work
+    hosts: [github.com]
+    owners: [acme]
+    ssh_key: ~/.ssh/id_work
+    git: {name: Work Me, email: me@acme.example}
+  - name: personal
+    hosts: [github.com]
+    owners: [me]
+    git: {email: me@home.example}
+`, base)
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env.extraEnv = []string{"GIT_CONFIG_GLOBAL=" + global}
+	if out, code := env.run(t, "accounts", "gitconfig", "--install"); code != 0 {
+		t.Fatalf("accounts gitconfig --install exit %d:\n%s", code, out)
+	}
+	if out, code := env.run(t, "accounts", "gitconfig", "--install"); code != 0 || strings.Count(mustRead(t, global), "include") != 1 {
+		t.Fatalf("a second --install must not include it twice (exit %d):\n%s\n%s", code, out, mustRead(t, global))
+	}
+
+	email := func(path string) string {
+		t.Helper()
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		gitCmd(t, path, "init", "-q")
+		cmd := exec.Command("git", "-C", path, "config", "user.email")
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+global)
+		out, _ := cmd.Output()
+		return strings.TrimSpace(string(out))
+	}
+	if got := email(filepath.Join(base, "github.com", "acme", "api")); got != "me@acme.example" {
+		t.Errorf("a repo under acme's folder: user.email %q", got)
+	}
+	if got := email(filepath.Join(base, "github.com", "me", "dots")); got != "me@home.example" {
+		t.Errorf("a repo under me's folder: user.email %q", got)
+	}
+	if got := email(filepath.Join(base, "gitlab.com", "x", "y")); got != "" {
+		t.Errorf("a repo no account covers: user.email %q", got)
+	}
+}
+
+func mustRead(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}

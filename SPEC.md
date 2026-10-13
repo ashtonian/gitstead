@@ -355,6 +355,13 @@ or the directory `<archive_dir>/<id>/`, with `<id>.json` describing it.
 | `restore <id> [--to path] [--base path]` | Put an archive back where it was (or `--to`). An archived clone is moved back and dropped from the catalog; a bundle is rebuilt into a clone -- branches, tags, remotes, HEAD, stash list, index, working tree, untracked files, LFS objects, submodules' archives -- and stays in the catalog. A bundle that leans on a base is restored into a clone of it (`--base` names another, such as a restored archive of that repo), or of origin when it is gone. A repo's archive is then tracked by hand (`adopt`), so it is never judged stale again; a workspace copy's is not tracked. Refuses an occupied destination and -- without `--to` -- a repo tracked again meanwhile; with `--to` such a repo's archive is restored untracked. |
 | `rm <id>... [--yes]` | Delete archives for good -- bundle or clone, description, LFS objects, submodules' archives -- and drop them from the catalog. Only files named for the archive, beside it, are deleted. Asks first; without a terminal, needs `--yes`. |
 
+#### `git-mgr accounts ls|gitconfig`
+
+| Subcommand | Description |
+|---|---|
+| `ls` | Each account: hosts and owners, email, SSH key, signing mode, and its folders (`reconcile.AccountFolders`: per host and owner, the base_dir-joined leading part of the path template that doesn't depend on the repo name, or for a host-wide account the owner; none under a template starting with one). |
+| `gitconfig [--write] [--install]` | Prints, or with `--write` writes, `$XDG_CONFIG_HOME/git-mgr/accounts/<name>.gitconfig` (the account's `reconcile.AccountGitConfig`: identity, signing, `core.sshCommand`, written by `git config --file`) and `$XDG_CONFIG_HOME/git-mgr/accounts.gitconfig` with an `[includeIf "gitdir:<folder>/"] path = <file>` per folder, shallower folders first. Folders two accounts claim are left out with a warning; accounts setting nothing or with no folders are skipped with the reason. `--install` also runs `git config --global --add include.path <file>` unless it is already there. |
+
 #### `git-mgr mirror [--repos g] [--tag t] [--set s] [--force]`
 
 Make or update the mirrors that are due -- of each selected repo mirroring
