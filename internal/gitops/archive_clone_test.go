@@ -94,7 +94,7 @@ func TestDeleteArchive(t *testing.T) {
 	}
 	_, other := remoteAndClone(t)
 	writeFile(t, filepath.Join(other, "notes.txt"), []byte("untracked\n"))
-	bundle, err := gitops.RemoveClone(ctx, other, dir, "bundle", false)
+	bundle, err := gitops.RemoveClone(ctx, other, dir, "bundle", gitops.RemoveOptions{})
 	if err != nil || bundle == "" {
 		t.Fatalf("RemoveClone = %q, %v", bundle, err)
 	}

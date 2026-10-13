@@ -74,7 +74,7 @@ func TestRemoveClone_KeepsAcloneWithWorktrees(t *testing.T) {
 	if err := gitops.WorktreeAdd(ctx, repo, wt, "agent-1", ""); err != nil {
 		t.Fatal(err)
 	}
-	_, err := gitops.RemoveClone(ctx, repo, t.TempDir(), "repo", true)
+	_, err := gitops.RemoveClone(ctx, repo, t.TempDir(), "repo", gitops.RemoveOptions{Discard: true})
 	if !errors.Is(err, gitops.ErrHasWorktrees) {
 		t.Fatalf("RemoveClone = %v, want ErrHasWorktrees even when discarding", err)
 	}
@@ -86,7 +86,7 @@ func TestRemoveClone_KeepsAcloneWithWorktrees(t *testing.T) {
 	if err := gitops.WorktreeRemove(ctx, repo, wt, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gitops.RemoveClone(ctx, repo, t.TempDir(), "repo", true); err != nil {
+	if _, err := gitops.RemoveClone(ctx, repo, t.TempDir(), "repo", gitops.RemoveOptions{Discard: true}); err != nil {
 		t.Fatalf("RemoveClone without worktrees = %v", err)
 	}
 }

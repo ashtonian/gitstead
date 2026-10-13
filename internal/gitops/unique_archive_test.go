@@ -3,6 +3,8 @@ package gitops_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -60,6 +62,16 @@ func TestInspectUniqueWork(t *testing.T) {
 			writeFile(t, filepath.Join(c, "a.txt"), []byte("stashed\n"))
 			mustGit(t, c, "stash", "-q")
 		}, func(u gitops.UniqueWork) bool { return u.Stashes == 1 && u.Changed == 0 }, true},
+		{"commit only a tag reaches", func(t *testing.T, c string) {
+			commitFile(t, c, "t.txt", "t\n")
+			mustGit(t, c, "tag", "kept")
+			mustGit(t, c, "reset", "-q", "--hard", "origin/main")
+		}, func(u gitops.UniqueWork) bool {
+			return u.OtherRefCommits == 1 && u.UnpushedCommits == 0 && !u.LostWithWorktree()
+		}, true},
+		{"git-mgr's own backup refs aren't work", func(t *testing.T, c string) {
+			mustGit(t, c, "update-ref", "refs/git-mgr/backups/x", mustGit(t, c, "commit-tree", "-m", "wip", "HEAD^{tree}"))
+		}, func(u gitops.UniqueWork) bool { return reflect.DeepEqual(u, gitops.UniqueWork{}) }, false},
 		{"detached HEAD commit", func(t *testing.T, c string) {
 			mustGit(t, c, "switch", "-q", "--detach")
 			commitFile(t, c, "d.txt", "d\n")
@@ -99,8 +111,9 @@ func TestInspectUniqueWork_NotARepoIsAnError(t *testing.T) {
 	}
 }
 
-// Everything deleting a clone would lose comes back from the archive.
-func TestRemoveClone_ArchiveRestoresUniqueWork(t *testing.T) {
+// Everything deleting a clone would lose comes back from its archive alone:
+// the upstream is gone too, as it is when stale cleanup deletes a clone.
+func TestRemoveClone_ArchiveRestoresWithoutTheUpstream(t *testing.T) {
 	ctx := context.Background()
 	remote, clone := remoteAndClone(t)
 	mustGit(t, clone, "switch", "-qc", "feature")
@@ -112,7 +125,7 @@ func TestRemoveClone_ArchiveRestoresUniqueWork(t *testing.T) {
 	featureTip := mustGit(t, clone, "rev-parse", "feature")
 
 	archiveDir := t.TempDir()
-	bundle, err := gitops.RemoveClone(ctx, clone, archiveDir, "github.com/acme/app", false)
+	bundle, err := gitops.RemoveClone(ctx, clone, archiveDir, "github.com/acme/app", gitops.RemoveOptions{})
 	if err != nil {
 		t.Fatalf("RemoveClone: %v", err)
 	}
@@ -122,45 +135,178 @@ func TestRemoveClone_ArchiveRestoresUniqueWork(t *testing.T) {
 	if _, err := os.Stat(clone); !os.IsNotExist(err) {
 		t.Fatalf("clone should be deleted, stat err = %v", err)
 	}
-	if _, err := os.Stat(strings.TrimSuffix(bundle, ".bundle") + ".json"); err != nil {
-		t.Fatalf("archive metadata missing: %v", err)
+	if err := os.RemoveAll(remote); err != nil {
+		t.Fatal(err)
 	}
 
 	restored := filepath.Join(t.TempDir(), "restored")
-	mustGit(t, filepath.Dir(restored), "clone", "-q", remote, restored)
-	mustGit(t, restored, "fetch", "-q", bundle, "+refs/*:refs/restored/*")
-
-	if got := mustGit(t, restored, "rev-parse", "refs/restored/heads/feature"); got != featureTip {
-		t.Errorf("restored feature = %s, want %s", got, featureTip)
+	if err := gitops.RestoreArchive(ctx, bundle, restored, ""); err != nil {
+		t.Fatalf("RestoreArchive: %v", err)
 	}
-	refs := mustGit(t, restored, "for-each-ref", "--format=%(refname)", "refs/restored/git-mgr/archive/")
-	var worktreeRef, stashRef string
-	for _, r := range strings.Split(refs, "\n") {
-		switch {
-		case strings.HasSuffix(r, "/worktree"):
-			worktreeRef = r
-		case strings.HasSuffix(r, "/stash-0"):
-			stashRef = r
-		}
+	if got := mustGit(t, restored, "symbolic-ref", "--short", "HEAD"); got != "feature" {
+		t.Errorf("HEAD = %s, want feature", got)
 	}
-	if worktreeRef == "" || stashRef == "" {
-		t.Fatalf("archive must carry worktree and stash refs, got:\n%s", refs)
+	if got := mustGit(t, restored, "rev-parse", "HEAD"); got != featureTip {
+		t.Errorf("feature = %s, want %s", got, featureTip)
 	}
-	mustGit(t, restored, "checkout", "-q", "--detach", featureTip)
-	mustGit(t, restored, "stash", "apply", "-q", "--index", worktreeRef)
-	for name, want := range map[string]string{"a.txt": "dirty\n", "notes.txt": "untracked\n"} {
+	for name, want := range map[string]string{"a.txt": "dirty\n", "notes.txt": "untracked\n", "feature.txt": "unpushed\n"} {
 		if got, _ := os.ReadFile(filepath.Join(restored, name)); string(got) != want {
 			t.Errorf("restored %s = %q, want %q", name, got, want)
 		}
 	}
-	if got := mustGit(t, restored, "show", stashRef+":a.txt"); got != "stashed" {
+	if got := mustGit(t, restored, "show", "stash@{0}:a.txt"); got != "stashed" {
 		t.Errorf("restored stash = %q", got)
+	}
+	if got := mustGit(t, restored, "remote", "get-url", "origin"); got != remote {
+		t.Errorf("origin = %s, want %s", got, remote)
+	}
+	if refs := mustGit(t, restored, "for-each-ref", "refs/git-mgr/archive/"); refs != "" {
+		t.Errorf("the archive's own refs are left in the restore:\n%s", refs)
+	}
+}
+
+// A commit only a tag reaches is unique work: deleting the clone would lose it.
+func TestRemoveClone_ArchivesTagOnlyCommits(t *testing.T) {
+	ctx := context.Background()
+	remote, clone := remoteAndClone(t)
+	commitFile(t, clone, "treasure.txt", "unique\n")
+	tip := mustGit(t, clone, "rev-parse", "HEAD")
+	mustGit(t, clone, "tag", "saved-work")
+	mustGit(t, clone, "reset", "-q", "--hard", "origin/main")
+
+	bundle, err := gitops.RemoveClone(ctx, clone, t.TempDir(), "app", gitops.RemoveOptions{})
+	if err != nil || bundle == "" {
+		t.Fatalf("RemoveClone = %q, %v; want an archive of the tagged commit", bundle, err)
+	}
+	if err := os.RemoveAll(remote); err != nil {
+		t.Fatal(err)
+	}
+	restored := filepath.Join(t.TempDir(), "restored")
+	if err := gitops.RestoreArchive(ctx, bundle, restored, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGit(t, restored, "rev-parse", "saved-work^{commit}"); got != tip {
+		t.Errorf("saved-work = %s, want %s", got, tip)
+	}
+}
+
+// Deleting a clone git is busy in could catch it half-changed, so it is kept,
+// whether its work is saved or discarded.
+func TestRemoveClone_KeepsAcloneGitIsBusyIn(t *testing.T) {
+	tests := []struct {
+		name string
+		busy func(t *testing.T, gitDir string)
+	}{
+		{"index.lock", func(t *testing.T, g string) { writeFile(t, filepath.Join(g, "index.lock"), nil) }},
+		{"a ref's lock", func(t *testing.T, g string) { writeFile(t, filepath.Join(g, "refs", "heads", "main.lock"), nil) }},
+		{"gc running", func(t *testing.T, g string) { writeFile(t, filepath.Join(g, "gc.pid"), []byte("1 host")) }},
+		{"rebase in progress", func(t *testing.T, g string) {
+			if err := os.Mkdir(filepath.Join(g, "rebase-merge"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		for _, discard := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/discard=%v", tt.name, discard), func(t *testing.T) {
+				_, clone := remoteAndClone(t)
+				tt.busy(t, filepath.Join(clone, ".git"))
+				_, err := gitops.RemoveClone(context.Background(), clone, t.TempDir(), "app", gitops.RemoveOptions{Discard: discard})
+				if !errors.Is(err, gitops.ErrBusy) {
+					t.Fatalf("RemoveClone = %v, want ErrBusy", err)
+				}
+				if !gitops.HasGitDir(clone) {
+					t.Fatal("the clone was deleted")
+				}
+			})
+		}
+	}
+}
+
+// A workspace copy's bundle leans on the repo it was made from, which keeps
+// the history the copy shares with its remotes; when that repo lacks some of
+// it, the bundle holds everything instead.
+func TestRemoveClone_BundleLeansOnItsBase(t *testing.T) {
+	ctx := context.Background()
+	remote, base := remoteAndClone(t)
+	newCopy := func(t *testing.T) string {
+		copyPath := filepath.Join(t.TempDir(), "copy")
+		mustGit(t, base, "clone", "-q", remote, copyPath)
+		mustGit(t, copyPath, "config", "user.email", "test@test.com")
+		mustGit(t, copyPath, "config", "user.name", "Test")
+		return copyPath
+	}
+	readMeta := func(t *testing.T, bundle string) gitops.ArchiveMeta {
+		meta, _, err := gitops.ReadArchive(bundle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return meta
+	}
+
+	t.Run("base holds the history", func(t *testing.T) {
+		copyPath := newCopy(t)
+		commitFile(t, copyPath, "agent.txt", "work\n")
+		tip := mustGit(t, copyPath, "rev-parse", "HEAD")
+		bundle, err := gitops.RemoveClone(ctx, copyPath, t.TempDir(), "copy", gitops.RemoveOptions{Base: base})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if meta := readMeta(t, bundle); meta.Complete || meta.Base != base {
+			t.Fatalf("meta = %+v, want a bundle leaning on %s", meta, base)
+		}
+		restored := filepath.Join(t.TempDir(), "restored")
+		if err := gitops.RestoreArchive(ctx, bundle, restored, ""); err != nil {
+			t.Fatal(err)
+		}
+		if got := mustGit(t, restored, "rev-parse", "HEAD"); got != tip {
+			t.Errorf("HEAD = %s, want %s", got, tip)
+		}
+	})
+
+	t.Run("base lacks some of it", func(t *testing.T) {
+		copyPath := newCopy(t)
+		other := filepath.Join(t.TempDir(), "other")
+		mustGit(t, base, "clone", "-q", remote, other)
+		mustGit(t, other, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "upstream moved")
+		mustGit(t, other, "push", "-q", "origin", "HEAD:main")
+		mustGit(t, copyPath, "pull", "-q", "--ff-only")
+		commitFile(t, copyPath, "agent.txt", "work\n")
+
+		bundle, err := gitops.RemoveClone(ctx, copyPath, t.TempDir(), "copy", gitops.RemoveOptions{Base: base})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if meta := readMeta(t, bundle); !meta.Complete {
+			t.Fatalf("meta = %+v, want a complete bundle", meta)
+		}
+	})
+}
+
+// A repo other archives lean on is archived whole, unique work or not.
+func TestRemoveClone_KeepHistoryArchivesAcleanClone(t *testing.T) {
+	ctx := context.Background()
+	remote, clone := remoteAndClone(t)
+	tip := mustGit(t, clone, "rev-parse", "HEAD")
+	bundle, err := gitops.RemoveClone(ctx, clone, t.TempDir(), "app", gitops.RemoveOptions{KeepHistory: true})
+	if err != nil || bundle == "" {
+		t.Fatalf("RemoveClone = %q, %v; want an archive", bundle, err)
+	}
+	if err := os.RemoveAll(remote); err != nil {
+		t.Fatal(err)
+	}
+	restored := filepath.Join(t.TempDir(), "restored")
+	if err := gitops.RestoreArchive(ctx, bundle, restored, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGit(t, restored, "rev-parse", "origin/main"); got != tip {
+		t.Errorf("origin/main = %s, want %s", got, tip)
 	}
 }
 
 func TestRemoveClone_NothingUniqueNeedsNoArchive(t *testing.T) {
 	_, clone := remoteAndClone(t)
-	bundle, err := gitops.RemoveClone(context.Background(), clone, t.TempDir(), "x", false)
+	bundle, err := gitops.RemoveClone(context.Background(), clone, t.TempDir(), "x", gitops.RemoveOptions{})
 	if err != nil || bundle != "" {
 		t.Fatalf("clean pushed clone: bundle=%q err=%v", bundle, err)
 	}
@@ -175,7 +321,7 @@ func TestRemoveClone_UninspectableIsKept(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(dir, "precious.txt"), []byte("keep\n"))
-	if _, err := gitops.RemoveClone(context.Background(), dir, t.TempDir(), "x", false); err == nil {
+	if _, err := gitops.RemoveClone(context.Background(), dir, t.TempDir(), "x", gitops.RemoveOptions{}); err == nil {
 		t.Fatal("RemoveClone must fail when it cannot inspect the directory")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "precious.txt")); err != nil {
@@ -192,7 +338,7 @@ func TestRemoveClone_NestedRepoIsKept(t *testing.T) {
 	mustGit(t, clone, "init", "-q", nested)
 	writeFile(t, filepath.Join(nested, "only-copy.txt"), []byte("x"))
 
-	if _, err := gitops.RemoveClone(context.Background(), clone, t.TempDir(), "x", false); err == nil {
+	if _, err := gitops.RemoveClone(context.Background(), clone, t.TempDir(), "x", gitops.RemoveOptions{}); err == nil {
 		t.Fatal("RemoveClone must refuse a clone holding a nested repository")
 	}
 	if _, err := os.Stat(filepath.Join(nested, "only-copy.txt")); err != nil {
@@ -202,14 +348,14 @@ func TestRemoveClone_NestedRepoIsKept(t *testing.T) {
 
 func TestRemoveClone_AlreadyGoneIsRemoved(t *testing.T) {
 	gone := filepath.Join(t.TempDir(), "a", "b", "gone")
-	bundle, err := gitops.RemoveClone(context.Background(), gone, t.TempDir(), "x", false)
+	bundle, err := gitops.RemoveClone(context.Background(), gone, t.TempDir(), "x", gitops.RemoveOptions{})
 	if err != nil || bundle != "" {
 		t.Fatalf("a clone already gone counts as removed: bundle=%q err=%v", bundle, err)
 	}
 }
 
 func TestRemoveClone_RefusesRelativePath(t *testing.T) {
-	if _, err := gitops.RemoveClone(context.Background(), "repo", t.TempDir(), "x", false); err == nil {
+	if _, err := gitops.RemoveClone(context.Background(), "repo", t.TempDir(), "x", gitops.RemoveOptions{}); err == nil {
 		t.Fatal("RemoveClone must refuse a relative path")
 	}
 }
@@ -292,7 +438,7 @@ func TestRemoveClone_ArchivesSubmoduleWork(t *testing.T) {
 		t.Fatalf("work = %+v", work)
 	}
 	archive := filepath.Join(root, "archive")
-	path, err := gitops.RemoveClone(ctx, clone, archive, "super", false)
+	path, err := gitops.RemoveClone(ctx, clone, archive, "super", gitops.RemoveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,6 +458,18 @@ func TestRemoveClone_ArchivesSubmoduleWork(t *testing.T) {
 	if !strings.Contains(heads, "refs/heads/work") || !strings.Contains(heads, "worktree") {
 		t.Errorf("the submodule's bundle lacks its branch or working tree:\n%s", heads)
 	}
+
+	restored := filepath.Join(root, "restored")
+	if err := gitops.RestoreArchive(ctx, path, restored, ""); err != nil {
+		t.Fatal(err)
+	}
+	lib := filepath.Join(restored, "lib")
+	if got := mustGit(t, lib, "symbolic-ref", "--short", "HEAD"); got != "work" {
+		t.Errorf("restored submodule is on %s, want work", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(lib, "wip.txt")); string(got) != "wip\n" {
+		t.Errorf("restored submodule's wip.txt = %q", got)
+	}
 }
 
 // A clone's Git LFS objects aren't in a bundle, which holds pointers to
@@ -326,7 +484,7 @@ func TestRemoveClone_KeepsLFSObjects(t *testing.T) {
 	writeFile(t, filepath.Join(objects, "abcd1234"), []byte("big file\n"))
 	writeFile(t, filepath.Join(clone, "wip.txt"), []byte("wip\n"))
 
-	path, err := gitops.RemoveClone(ctx, clone, filepath.Join(t.TempDir(), "archive"), "app", false)
+	path, err := gitops.RemoveClone(ctx, clone, filepath.Join(t.TempDir(), "archive"), "app", gitops.RemoveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

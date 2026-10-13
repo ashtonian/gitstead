@@ -1,6 +1,7 @@
 package gitops
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -28,12 +29,19 @@ type ArchiveMeta struct {
 	Source  string            `json:"source"`
 	Remotes map[string]string `json:"remotes,omitempty"`
 	Branch  string            `json:"branch,omitempty"`
-	Work    string            `json:"work"`
-	Created time.Time         `json:"created"`
+	// Head is the commit HEAD was at; "" on an unborn branch.
+	Head    string    `json:"head,omitempty"`
+	Work    string    `json:"work"`
+	Created time.Time `json:"created"`
 	// Bundle is the repository's own bundle; "" when only its submodules
 	// had work to save.
-	Bundle  string `json:"bundle,omitempty"`
-	Restore string `json:"restore,omitempty"`
+	Bundle string `json:"bundle,omitempty"`
+	// Complete marks a bundle holding all of the repository's history, so it
+	// restores with nothing else. Otherwise the bundle holds only what Base
+	// lacks, and restores into a clone of Base or of the repository's remote.
+	Complete bool   `json:"complete,omitempty"`
+	Base     string `json:"base,omitempty"`
+	Restore  string `json:"restore,omitempty"`
 	// Submodules maps each submodule with work saved to its own archive.
 	Submodules map[string]string `json:"submodules,omitempty"`
 	// LFS holds the clone's Git LFS objects, which a bundle carries only
@@ -51,29 +59,35 @@ const (
 	scopeWorktree                     // what removing a linked worktree would lose
 )
 
-// ArchiveUniqueWork saves the unique work of the clone at repoPath into one
-// verified git bundle in dir and returns its path, or "" when there is nothing
-// to save. The bundle holds local branches and HEAD minus what any remote
-// already has, every stash entry, and a snapshot of the index, working tree and
-// untracked files that `git stash apply --index` restores. A JSON file beside
-// it records the remotes and the restore command. Each submodule with work
-// of its own gets its own archive, and a clone's Git LFS objects are kept
-// beside the bundle. When only submodules had work, the JSON file's path is
-// returned.
-func ArchiveUniqueWork(ctx context.Context, repoPath, dir, name string) (string, error) {
-	return archive(ctx, repoPath, dir, name, scopeClone)
+// archiveOptions says what archive saves and what its bundle may lean on.
+type archiveOptions struct {
+	scope archiveScope
+	// base keeps the history a clone shares with its remotes; see
+	// RemoveOptions.Base. A worktree's base is its own repository.
+	base string
+	// keepHistory archives a clone even when it has no unique work.
+	keepHistory bool
 }
 
-func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope) (string, error) {
+// archive saves the unique work of the repository at repoPath into one
+// verified git bundle in dir and returns its path, or "" when there is nothing
+// to save. The bundle holds the repository's refs -- branches, tags and other
+// refs, every stash entry, HEAD -- and a snapshot of the index, working tree
+// and untracked files that `git stash apply --index` restores. A JSON file
+// beside it records the remotes and how to restore it. Each submodule with
+// work of its own gets its own archive, and a clone's Git LFS objects are kept
+// beside the bundle. When only submodules had work, the JSON file's path is
+// returned.
+func archive(ctx context.Context, repoPath, dir, name string, opts archiveOptions) (string, error) {
 	work, err := InspectUniqueWork(ctx, repoPath)
 	if err != nil {
 		return "", err
 	}
 	lost := work.LostWithClone()
-	if scope == scopeWorktree {
+	if opts.scope == scopeWorktree {
 		lost = work.LostWithWorktree()
 	}
-	if !lost {
+	if !lost && !opts.keepHistory {
 		return "", nil
 	}
 
@@ -85,9 +99,17 @@ func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope
 	metaPath := filepath.Join(dir, id+".json")
 	meta := ArchiveMeta{Source: repoPath, Remotes: remoteURLs(ctx, repoPath), Work: work.String(), Created: time.Now().UTC()}
 	meta.Branch, _ = Git(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
+	meta.Head, _ = Git(ctx, repoPath, "rev-parse", "--verify", "-q", "HEAD^{commit}")
+	if !lost {
+		meta.Work = "its whole history, which other archives lean on"
+	}
 
 	for _, sub := range slices.Sorted(maps.Keys(work.Submodules)) {
-		path, err := archive(ctx, filepath.Join(repoPath, sub), dir, name+"-"+pathutil.FileName(sub), scopeClone)
+		subOpts := archiveOptions{scope: scopeClone}
+		if opts.base != "" {
+			subOpts.base = filepath.Join(opts.base, sub)
+		}
+		path, err := archive(ctx, filepath.Join(repoPath, sub), dir, name+"-"+pathutil.FileName(sub), subOpts)
 		if err != nil {
 			return "", fmt.Errorf("archiving submodule %s: %w", sub, err)
 		}
@@ -98,11 +120,11 @@ func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope
 	}
 	own := work
 	own.Submodules = nil
-	ownLost := own.LostWithClone()
-	if scope == scopeWorktree {
+	ownLost := own.LostWithClone() || opts.keepHistory
+	if opts.scope == scopeWorktree {
 		ownLost = own.LostWithWorktree()
 	}
-	if scope == scopeClone {
+	if opts.scope == scopeClone {
 		lfs := filepath.Join(ResolveGitDirs(ctx, repoPath).CommonDir, "lfs", "objects")
 		if hasFiles(lfs) {
 			meta.LFS = filepath.Join(dir, id+".lfs")
@@ -138,12 +160,12 @@ func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope
 			return "", err
 		}
 	}
-	if GitExitCode(ctx, repoPath, "rev-parse", "--verify", "-q", "HEAD") == 0 {
-		if err := setRef("head", "HEAD"); err != nil {
+	if meta.Head != "" {
+		if err := setRef("head", meta.Head); err != nil {
 			return "", err
 		}
 	}
-	if scope == scopeClone {
+	if opts.scope == scopeClone {
 		for i := 0; i < work.Stashes; i++ {
 			oid, err := Git(ctx, repoPath, "rev-parse", "stash@{"+strconv.Itoa(i)+"}")
 			if err != nil {
@@ -155,30 +177,113 @@ func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope
 		}
 	}
 
-	args := []string{"bundle", "create", "-q", bundle}
-	if scope == scopeClone {
-		args = append(args, "--branches")
+	switch {
+	case opts.scope == scopeWorktree:
+		// Branch commits survive in the shared repository.
+		err = writeArchiveBundle(ctx, repoPath, opts.base, bundle, "--glob="+refs+"*", "--not", "--remotes", "--branches")
+	case opts.base != "":
+		err = writeArchiveBundle(ctx, repoPath, opts.base, bundle, thinBundleRevs...)
+		if err != nil && ctx.Err() == nil {
+			// The base lacks some of what the bundle would lean on: keep
+			// all of it instead.
+			err = writeArchiveBundle(ctx, repoPath, "", bundle, completeBundleRevs...)
+			meta.Complete = true
+		} else {
+			meta.Base = opts.base
+		}
+	default:
+		err = writeArchiveBundle(ctx, repoPath, "", bundle, completeBundleRevs...)
+		meta.Complete = true
 	}
-	args = append(args, "--glob="+refs+"*", "--not", "--remotes")
-	if scope == scopeWorktree {
-		args = append(args, "--branches") // branch commits survive in the shared repo
-	}
-	if _, err := Git(ctx, repoPath, args...); err != nil {
-		os.Remove(bundle)
-		return "", fmt.Errorf("writing bundle: %w", err)
-	}
-	if _, err := Git(ctx, repoPath, "bundle", "verify", "-q", bundle); err != nil {
-		os.Remove(bundle)
-		return "", fmt.Errorf("verifying bundle: %w", err)
+	if err != nil {
+		return "", err
 	}
 
 	meta.Bundle = bundle
-	meta.Restore = fmt.Sprintf("git clone <remote> restored && cd restored && git fetch %s '+refs/*:refs/restored/*'"+
-		" && git stash apply --index refs/restored/%sworktree", bundle, strings.TrimPrefix(refs, "refs/"))
+	meta.Restore = restoreCommand(meta, bundle, strings.TrimPrefix(refs, "refs/"))
 	if err := writeMeta(metaPath, meta); err != nil {
+		os.Remove(bundle)
 		return "", err
 	}
 	return bundle, nil
+}
+
+// The refs a clone's bundle holds: all of the repository's own, and with
+// completeBundleRevs its remote-tracking refs too. refs/prefetch holds copies
+// of remote branches.
+var (
+	thinBundleRevs     = []string{"--exclude=refs/remotes/*", "--exclude=refs/prefetch/*", "--all", "--not", "--remotes"}
+	completeBundleRevs = []string{"--exclude=refs/prefetch/*", "--all"}
+)
+
+// writeArchiveBundle writes the bundle of revs from repoPath to path and verifies
+// it: against base, which must hold everything it leans on, or, with no base,
+// that it leans on nothing at all. A bundle that fails is deleted.
+func writeArchiveBundle(ctx context.Context, repoPath, base, path string, revs ...string) error {
+	if _, err := Git(ctx, repoPath, append([]string{"bundle", "create", "-q", path}, revs...)...); err != nil {
+		os.Remove(path)
+		return fmt.Errorf("writing bundle: %w", err)
+	}
+	verify := func() error {
+		if base != "" {
+			_, err := Git(ctx, base, "bundle", "verify", "-q", path)
+			return err
+		}
+		prereqs, err := bundlePrerequisites(path)
+		if err == nil && len(prereqs) > 0 {
+			err = fmt.Errorf("it needs %d commits it doesn't hold, such as %s", len(prereqs), prereqs[0])
+		}
+		return err
+	}
+	if err := verify(); err != nil {
+		os.Remove(path)
+		return fmt.Errorf("verifying bundle: %w", err)
+	}
+	return nil
+}
+
+// bundlePrerequisites lists the commits the bundle at path needs a
+// repository to hold before it can be fetched: the header lines that start
+// with "-".
+func bundlePrerequisites(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	r := bufio.NewReader(f)
+	signature, err := r.ReadString('\n')
+	if err != nil || !strings.HasPrefix(signature, "# v") || !strings.HasSuffix(signature, " git bundle\n") {
+		return nil, fmt.Errorf("%s is not a git bundle", path)
+	}
+	var prereqs []string
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", path, err)
+		}
+		switch {
+		case line == "\n":
+			return prereqs, nil
+		case strings.HasPrefix(line, "-"):
+			oid, _, _ := strings.Cut(strings.TrimSpace(line[1:]), " ")
+			prereqs = append(prereqs, oid)
+		}
+	}
+}
+
+// restoreCommand is how to restore a bundle archive by hand. refs is where
+// its own refs are, below refs/.
+func restoreCommand(meta ArchiveMeta, bundle, refs string) string {
+	start := "git clone <remote> restored"
+	switch {
+	case meta.Complete:
+		start = "git init restored"
+	case meta.Base != "":
+		start = "git clone " + meta.Base + " restored"
+	}
+	return fmt.Sprintf("%s && cd restored && git fetch %s '+refs/*:refs/restored/*'"+
+		" && git stash apply --index refs/restored/%sworktree", start, bundle, refs)
 }
 
 // ReadArchive returns the description of the archive at path -- a bundle,
@@ -308,13 +413,29 @@ func linkTree(src, dst string) error {
 // delete their branches and history, and leave their work unreadable.
 var ErrHasWorktrees = errors.New("it has linked worktrees")
 
-// RemoveClone deletes the clone at repoPath. Unless discard is set it first
-// archives the clone's unique work into archiveDir; if that work cannot be
-// inspected or archived the clone is left in place and an error is returned.
-// A clone with linked worktrees on disk is always left in place, discard or
-// not. A clone already gone from disk counts as removed. It returns the
-// archive path, or "" when there was nothing to save.
-func RemoveClone(ctx context.Context, repoPath, archiveDir, name string, discard bool) (string, error) {
+// RemoveOptions says how RemoveClone saves a clone's work before deleting it.
+type RemoveOptions struct {
+	// Discard deletes the clone without saving anything.
+	Discard bool
+	// Base is a repository that keeps the history the clone shares with its
+	// remotes: the repo a workspace copy was made from. The bundle then holds
+	// only what the base lacks. Without one it holds the clone's whole
+	// history, so it restores with nothing else: once the clone is gone, its
+	// upstream may be the only other copy, and may be gone too.
+	Base string
+	// KeepHistory archives the clone's whole history even when it has no
+	// unique work, for archives that lean on it.
+	KeepHistory bool
+}
+
+// RemoveClone deletes the clone at repoPath. Unless opts.Discard is set it
+// first archives the clone's unique work into archiveDir; if that work cannot
+// be inspected or archived the clone is left in place and an error is
+// returned. A clone with linked worktrees on disk, or that git is busy in, is
+// always left in place, discard or not. A clone already gone from disk counts
+// as removed. It returns the archive path, or "" when there was nothing to
+// save.
+func RemoveClone(ctx context.Context, repoPath, archiveDir, name string, opts RemoveOptions) (string, error) {
 	if !filepath.IsAbs(repoPath) {
 		return "", fmt.Errorf("refusing to remove clone at non-absolute path %q", repoPath)
 	}
@@ -326,10 +447,14 @@ func RemoveClone(ctx context.Context, repoPath, archiveDir, name string, discard
 	} else if len(linked) > 0 {
 		return "", fmt.Errorf("keeping %s: %w (%s); remove them first", repoPath, ErrHasWorktrees, strings.Join(linked, ", "))
 	}
+	if err := CheckIdle(ctx, repoPath, true); err != nil {
+		return "", fmt.Errorf("keeping %s: %w", repoPath, err)
+	}
 	var archived string
-	if !discard {
+	if !opts.Discard {
 		var err error
-		if archived, err = archive(ctx, repoPath, archiveDir, name, scopeClone); err != nil {
+		aopts := archiveOptions{scope: scopeClone, base: opts.Base, keepHistory: opts.KeepHistory}
+		if archived, err = archive(ctx, repoPath, archiveDir, name, aopts); err != nil {
 			return "", fmt.Errorf("keeping %s: %w", repoPath, err)
 		}
 	}
@@ -366,6 +491,11 @@ func ArchiveClone(ctx context.Context, repoPath, dir, name string) (string, erro
 		return "", fmt.Errorf("keeping %s: listing its worktrees: %w", repoPath, err)
 	} else if len(linked) > 0 {
 		return "", fmt.Errorf("keeping %s: %w (%s); remove them first", repoPath, ErrHasWorktrees, strings.Join(linked, ", "))
+	}
+	// A rebase or merge under way moves with the clone; a running git
+	// command could be cut off halfway through a copy.
+	if err := CheckIdle(ctx, repoPath, false); err != nil {
+		return "", fmt.Errorf("keeping %s: %w", repoPath, err)
 	}
 
 	id := newArchiveID(name)
@@ -406,14 +536,17 @@ func ArchiveClone(ctx context.Context, repoPath, dir, name string) (string, erro
 // RemoveWorktree removes the linked worktree at path from source. Unless
 // discard is set it first archives what removal would lose (the working tree,
 // index and detached-HEAD commits); branches stay in source. On an inspection
-// or archive failure the worktree is left in place. The worktree's backup refs
-// go with it.
+// or archive failure, or while git is busy in it, the worktree is left in
+// place. The worktree's backup refs go with it.
 func RemoveWorktree(ctx context.Context, source, path, archiveDir, name string, discard bool) (string, error) {
+	if err := CheckIdle(ctx, path, true); err != nil {
+		return "", fmt.Errorf("keeping %s: %w", path, err)
+	}
 	copyID := ReadCopyID(ctx, path)
 	var archived string
 	if !discard {
 		var err error
-		if archived, err = archive(ctx, path, archiveDir, name, scopeWorktree); err != nil {
+		if archived, err = archive(ctx, path, archiveDir, name, archiveOptions{scope: scopeWorktree, base: source}); err != nil {
 			return "", fmt.Errorf("keeping %s: %w", path, err)
 		}
 	}

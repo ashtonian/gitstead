@@ -78,7 +78,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 		}
 		switch {
 		case c.Delete && repo.LocalPath != "":
-			archived, err := gitops.RemoveClone(ctx.GoCtx(), repo.LocalPath, cfg.Backup.ArchiveDir, key, false)
+			archived, err := gitops.RemoveClone(ctx.GoCtx(), repo.LocalPath, cfg.Backup.ArchiveDir, key, gitops.RemoveOptions{KeepHistory: st.LeansOn(key)})
 			if err != nil {
 				keep(key, err)
 				continue
