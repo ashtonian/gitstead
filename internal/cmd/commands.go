@@ -227,6 +227,13 @@ type BootstrapCmd struct {
 type ManifestCmd struct {
 	Export ManifestExportCmd `cmd:"" help:"Export tracked repos to a portable manifest (stdout or --out)."`
 	Import ManifestImportCmd `cmd:"" help:"Clone + track repos listed in a manifest (idempotent)."`
+	Save   ManifestSaveCmd   `cmd:"" help:"Save repos tracked by hand on this machine in the shared manifest (config 'manifest:'), so every machine has them."`
+}
+
+// ManifestSaveCmd saves this machine's hand-added repos in the shared
+// manifest. Run method is in manifest_impl.go
+type ManifestSaveCmd struct {
+	DryRun bool `help:"List what would be saved." name:"dry-run"`
 }
 
 // ManifestExportCmd writes a portable manifest of tracked repos.

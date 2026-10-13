@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -111,13 +112,19 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	var removed []string
 	for _, key := range toRemove {
-		if _, ok := untrack[key]; ok {
+		if _, ok := untrack[key]; ok && st.Repos[key] == nil {
+			removed = append(removed, key)
 			logEvent(ctx, "remove", key, "")
 			fmt.Printf("  Removed %s\n", key)
 		}
 	}
-	return outcome(len(kept), len(toRemove), "repos could not be deleted or archived and are still tracked: %s", strings.Join(kept, ", "))
+	// Other machines reading the manifest no longer clone it; the ones that
+	// have it keep it, as with a repos: entry dropped.
+	return errors.Join(
+		outcome(len(kept), len(toRemove), "repos could not be deleted or archived and are still tracked: %s", strings.Join(kept, ", ")),
+		dropFromManifest(cfg, removed...))
 }
 
 func (c *ConfigCmd) Run(ctx *Context) error {

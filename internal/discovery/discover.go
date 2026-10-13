@@ -250,6 +250,7 @@ func parseManualRepo(mr config.ManualRepo) (*Repo, error) {
 		FullName:     id.FullName,
 		Tags:         mr.Tags,
 		DiscoveredBy: ManualRule,
+		Path:         mr.Path,
 	}
 	if strings.HasPrefix(mr.URL, "http://") || strings.HasPrefix(mr.URL, "https://") {
 		r.HTTPURL = mr.URL

@@ -15,8 +15,8 @@ agents at once, each in a copy of its own — keeping their WIP safe.
   self-hosted), and Gitea/Forgejo, by user, org, group, or raw search query.
   SSH or HTTPS/PAT transport (`clone_protocol`).
 - **One-command bootstrap** — `git-mgr bootstrap` (init → doctor → discover →
-  sync → agent) plus a portable `manifest export/import` to rehydrate a new
-  machine; `doctor` diagnoses tooling/auth/state before things break.
+  sync → agent) plus a shared manifest, so repos added by hand on one machine
+  reach the others ([Several machines](#several-machines)); `doctor` diagnoses tooling/auth/state before things break.
 - **Structured layout** — repos land at `{{.Host}}/{{.Owner}}/{{.Name}}` (fully
   templatable). Operate them in bulk with named **sets** (`--set`) and
   `run -- <cmd>`.
@@ -135,7 +135,7 @@ writes a config without asking anything.
 | `git-mgr adopt <path>` | Track an existing clone where it is. `--scan` for batch, `--dry-run`, `--tag`. |
 | `git-mgr remove <pattern>` | Stop tracking repos. `--tag`/`--set`, `--yes`. `--delete` also removes the clone from disk after archiving its unique work (see [Deleting without losing work](#deleting-without-losing-work)); `--archive` moves the clone, whole, into the archive instead (see [Archiving instead of deleting](#archiving-instead-of-deleting)). |
 | `git-mgr run -- <cmd>` | Run a command in each matching repo (parallel). `--repos`/`--tag`/`--set`, `--fail-fast`. |
-| `git-mgr manifest export\|import` | Portable `{url,tags,path}` manifest to rehydrate the repo set on a new machine. |
+| `git-mgr manifest export\|import\|save` | Portable `{url,tags,path}` manifest: export and import to rehydrate a new machine, `save` to put the repos tracked by hand here into the shared manifest. See [Several machines](#several-machines). |
 | `git-mgr remote-sync` | Back up and take WIP and unpushed commits offsite now, under `remote_sync`. `--repos`, `--tag`, `--set`, `--dry-run`; `--list` shows what every machine left offsite and how to restore it. |
 | `git-mgr config` | Print resolved config. `--validate`, `--edit`, `--path`, `--for-repo <key>`, `--redact`. |
 | `git-mgr report` / `log` | Summarize / list recent activity (clones, backups, syncs…) from the operation log. `--since`, `-n`. |
@@ -529,6 +529,9 @@ someone else's repo never runs their code.
 repos:
   - url: "git@github.com:someone/useful-fork.git"
     tags: ["libs"]
+  - url: "git@github.com:me/notes.git"
+    path: "~/notes"                    # not where path_template puts it: absolute,
+                                       # ~-relative, or relative to its base_dir
 
 # Skip repos even if a rule matched them.
 exclude:
@@ -571,6 +574,41 @@ git-mgr status --tag work
 git-mgr sync   --set core
 git-mgr run    --set active-backend -- go test ./...
 ```
+
+### Several machines
+
+One config, kept in your dotfiles, gives every machine the same discovery
+rules, `repos:`, overrides and declared workspaces. What it can't hold is
+what you add by hand -- `git-mgr clone`, `adopt`, `manifest import` -- which
+lives in one machine's state. Point `manifest:` at a file every machine can
+read and write -- beside the config in a dotfiles repo, or in a synced folder
+-- and git-mgr keeps it as the list of repos tracked by hand:
+
+```yaml
+manifest: ~/dotfiles/git-mgr/repos.yaml
+```
+
+- `clone`, `adopt` (and `adopt --scan`) and `manifest import` add an entry:
+  the repo's URL, the tags you gave it, and its path when it isn't where
+  `path_template` puts it -- relative to its `base_dir` when under it,
+  `~/...` under your home, else absolute -- so it lands in the same place on
+  every machine.
+- Every machine reads the manifest as more `repos:` entries, so its next
+  `sync` clones what another machine added.
+- `git-mgr remove` takes the entry out, so no other machine clones it again;
+  machines that already have it keep tracking it, as with a `repos:` entry you
+  delete, until you remove it there too.
+- `git-mgr manifest save` adds the repos this machine tracked by hand before
+  the manifest existed; without `manifest:` it prints them as `repos:`
+  entries to paste into config. `git-mgr doctor` names repos tracked by hand
+  here that neither lists.
+
+The config file itself is never written, so this works when it is
+generated -- by the home-manager module, say -- and read-only. Writes take a
+lock on `<manifest>.lock` and replace the file atomically, so a sync tool
+copying it never sees half a file; two machines writing at the same moment
+through a sync tool can still conflict, as any synced file can, and the
+next `manifest save` puts back an entry a conflict lost.
 
 ## Config changes: plan and apply
 

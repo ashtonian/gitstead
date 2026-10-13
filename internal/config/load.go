@@ -150,6 +150,9 @@ func Load(path string, opts ...Option) (*Config, error) {
 	}
 
 	normalize(cfg)
+	if err := loadManifest(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
@@ -168,6 +171,7 @@ func normalize(cfg *Config) {
 
 func expandPaths(cfg *Config) {
 	cfg.BaseDir = ExpandHome(cfg.BaseDir)
+	cfg.Manifest = ExpandHome(cfg.Manifest)
 	cfg.WorkspaceDefaults.Root = ExpandHome(cfg.WorkspaceDefaults.Root)
 	if cfg.WorkspaceDefaults.CacheRoot == "" {
 		cfg.WorkspaceDefaults.CacheRoot = defaultCacheRoot()

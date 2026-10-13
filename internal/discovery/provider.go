@@ -30,6 +30,9 @@ type Repo struct {
 	Visibility    string // "public", "private", "internal"
 	DefaultBranch string
 	DiscoveredBy  string // name of the discovery rule that found this repo
+	// Path is where a repos: or manifest entry puts it, as written there;
+	// "" for where path_template does.
+	Path string
 }
 
 // Key returns the canonical state key for this repo (host/owner/name).

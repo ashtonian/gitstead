@@ -1044,6 +1044,91 @@ repos:
 	}
 }
 
+// TestE2E_SharedManifest: two machines read one manifest. A repo cloned or
+// adopted by hand on one is saved in it and cloned on the other by sync, at
+// the same place relative to base_dir; one removed by hand leaves it; one
+// tracked before the manifest existed is saved with manifest save.
+func TestE2E_SharedManifest(t *testing.T) {
+	tmp := t.TempDir()
+	newRemote := func(name string) string {
+		remote := filepath.Join(tmp, "remotes", name+".git")
+		gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+		seed := filepath.Join(tmp, "seed-"+name)
+		gitCmd(t, tmp, "clone", "-q", remote, seed)
+		if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitCmd(t, seed, "add", ".")
+		gitCmd(t, seed, "-c", "user.name=e2e", "-c", "user.email=e2e@test.local", "commit", "-qm", "init")
+		gitCmd(t, seed, "push", "-q", "origin", "HEAD:main")
+		return remote
+	}
+	app, notes, old := newRemote("app"), newRemote("notes"), newRemote("old")
+	manifest := filepath.Join(tmp, "dotfiles", "git-mgr", "repos.yaml")
+	configure := func(e *testEnv, withManifest bool) {
+		cfg := "base_dir: " + e.baseDir + "\n"
+		if withManifest {
+			cfg += "manifest: " + manifest + "\n"
+		}
+		if err := os.WriteFile(e.configFile, []byte(cfg), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, b := newLocalEnv(t), newLocalEnv(t)
+	configure(b, true)
+
+	// Tracked on a before it shared a manifest.
+	configure(a, false)
+	if out, code := a.run(t, "clone", old); code != 0 {
+		t.Fatalf("clone exit %d:\n%s", code, out)
+	}
+	configure(a, true)
+	if out, _ := a.run(t, "doctor"); !strings.Contains(out, "manifest save") {
+		t.Errorf("doctor should name repos only this machine tracks:\n%s", out)
+	}
+	if out, code := a.run(t, "manifest", "save"); code != 0 || !strings.Contains(out, "Saved 1 repos") {
+		t.Fatalf("manifest save exit %d:\n%s", code, out)
+	}
+
+	if out, code := a.run(t, "clone", app, "--tag", "work"); code != 0 {
+		t.Fatalf("clone exit %d:\n%s", code, out)
+	}
+	custom := filepath.Join(a.baseDir, "personal", "notes")
+	gitCmd(t, tmp, "clone", "-q", notes, custom)
+	if out, code := a.run(t, "adopt", custom); code != 0 {
+		t.Fatalf("adopt exit %d:\n%s", code, out)
+	}
+	data, _ := os.ReadFile(manifest)
+	for _, want := range []string{app, notes, old, "path: personal/notes", "- work"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("manifest lacks %q:\n%s", want, data)
+		}
+	}
+
+	if out, code := b.run(t, "sync"); code != 0 {
+		t.Fatalf("sync on b exit %d:\n%s", code, out)
+	}
+	for _, p := range []string{
+		filepath.Join(b.baseDir, "local", "remotes", "app", "README.md"),
+		filepath.Join(b.baseDir, "personal", "notes", "README.md"),
+		filepath.Join(b.baseDir, "local", "remotes", "old", "README.md"),
+	} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("b should have %s: %v", p, err)
+		}
+	}
+
+	if out, code := a.run(t, "remove", "local/remotes/app", "--yes"); code != 0 {
+		t.Fatalf("remove exit %d:\n%s", code, out)
+	}
+	if data, _ := os.ReadFile(manifest); strings.Contains(string(data), app) {
+		t.Errorf("a removed repo should leave the manifest:\n%s", data)
+	}
+	if _, ok := b.statusJSON(t)["local/remotes/app"]; !ok {
+		t.Error("b keeps tracking a repo the manifest dropped, as with a repos: entry")
+	}
+}
+
 // TestE2E_PublishAndRetire: publish pushes an agent's branch to its remote;
 // retire archives the copy's uncommitted work, removes it, and catalogs the
 // archive.

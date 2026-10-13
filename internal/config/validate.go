@@ -9,8 +9,6 @@ import (
 	"text/template"
 
 	"github.com/go-playground/validator/v10"
-
-	"github.com/ashtonian/git-mgr/internal/repourl"
 )
 
 // --- Validation ---
@@ -80,8 +78,8 @@ func Validate(cfg *Config) error {
 		return err
 	}
 	for _, mr := range cfg.Repos {
-		if err := repourl.CheckNoCredentials(mr.URL); err != nil {
-			return fmt.Errorf("repos entry: %w", err)
+		if err := checkManualRepo(mr); err != nil {
+			return err
 		}
 	}
 	if err := validateWorkspaces(cfg); err != nil {
