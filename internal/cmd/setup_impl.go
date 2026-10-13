@@ -564,6 +564,7 @@ func askFeatures(a *setup.Answers) error {
 		huh.NewSelect[string]().Title("When a repo disappears upstream").Options(
 			huh.NewOption("mark it stale and keep it (recommended)", "mark_stale"),
 			huh.NewOption("stop tracking it after 30 days; keep the files", "remove"),
+			huh.NewOption("after 30 days, stop tracking it and move its clone into the archive", "archive"),
 			huh.NewOption("after 30 days, archive its unique work and delete it", "remove_and_delete"),
 			huh.NewOption("ignore it", "ignore")).Value(&a.Cleanup),
 	)).Run()

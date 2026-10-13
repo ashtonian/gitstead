@@ -44,8 +44,11 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 		for _, k := range toRemove {
 			fmt.Printf("  %s\n", k)
 		}
-		if c.Delete {
+		switch {
+		case c.Delete:
 			fmt.Printf("  (will also delete from disk; unique work is archived to %s first)\n", cfg.Backup.ArchiveDir)
+		case c.Archive:
+			fmt.Printf("  (will also move each clone into %s)\n", cfg.Backup.ArchiveDir)
 		}
 		fmt.Print("Continue? (y/n): ")
 		var answer string
@@ -66,7 +69,8 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 			kept = append(kept, key)
 			continue
 		}
-		if c.Delete && repo.LocalPath != "" {
+		switch {
+		case c.Delete && repo.LocalPath != "":
 			archived, err := gitops.RemoveClone(ctx.GoCtx(), repo.LocalPath, cfg.Backup.ArchiveDir, key, false)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "  %s: kept and still tracked: %v\n", key, err)
@@ -78,6 +82,17 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 				archives = append(archives, archiveEntry(archived, key, repo.LocalPath))
 			}
 			fmt.Printf("  Deleted %s\n", repo.LocalPath)
+		case c.Archive && repo.LocalPath != "":
+			entry, err := archiveClone(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir, key, repo.LocalPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  %s: kept and still tracked: %v\n", key, err)
+				kept = append(kept, key)
+				continue
+			}
+			if entry != nil {
+				fmt.Printf("  Moved %s to %s (git-mgr archives restore %s)\n", repo.LocalPath, entry.Path, entry.ID)
+				archives = append(archives, *entry)
+			}
 		}
 		untrack[key] = repo.LocalPath
 	}
@@ -87,7 +102,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 		for key, path := range untrack {
 			// A repo moved meanwhile wasn't the one deleted, and one a
 			// workspace started using meanwhile is still needed.
-			if repo := st.Repos[key]; repo != nil && (!c.Delete || repo.LocalPath == path) && st.CheckRemovable(key) == nil {
+			if repo := st.Repos[key]; repo != nil && (!(c.Delete || c.Archive) || repo.LocalPath == path) && st.CheckRemovable(key) == nil {
 				delete(st.Repos, key)
 			}
 		}
@@ -102,7 +117,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 			fmt.Printf("  Removed %s\n", key)
 		}
 	}
-	return outcome(len(kept), len(toRemove), "repos could not be deleted and are still tracked: %s", strings.Join(kept, ", "))
+	return outcome(len(kept), len(toRemove), "repos could not be deleted or archived and are still tracked: %s", strings.Join(kept, ", "))
 }
 
 func (c *ConfigCmd) Run(ctx *Context) error {

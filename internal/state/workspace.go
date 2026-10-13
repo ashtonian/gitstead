@@ -206,14 +206,16 @@ func (s *State) RenameRepo(from, to string) {
 	}
 }
 
-// ArchiveEntry is an archive of unique work git-mgr saved before deleting a
-// copy or a repo.
+// ArchiveEntry is an archive git-mgr made before taking a copy or a repo
+// away: a bundle of its unique work, or the whole clone, moved.
 type ArchiveEntry struct {
 	// ID is the archive's file name, without its extension.
 	ID string `yaml:"id" json:"id"`
-	// Path is the bundle, or the description of an archive that only holds
-	// submodules' bundles.
-	Path      string    `yaml:"path" json:"path"`
+	// Path is the bundle, the description of an archive that only holds
+	// submodules' bundles, or the archived clone's directory.
+	Path string `yaml:"path" json:"path"`
+	// Clone marks an archive of the whole clone, moved, rather than a bundle.
+	Clone     bool      `yaml:"clone,omitempty" json:"clone,omitempty"`
 	Repo      string    `yaml:"repo,omitempty" json:"repo,omitempty"`
 	Workspace string    `yaml:"workspace,omitempty" json:"workspace,omitempty"`
 	Agent     string    `yaml:"agent,omitempty" json:"agent,omitempty"`

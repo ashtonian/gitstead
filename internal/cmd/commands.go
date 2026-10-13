@@ -290,7 +290,8 @@ type RemoveCmd struct {
 	Pattern string `arg:"" optional:"" help:"Repo key glob to remove (or use --tag/--set)." predictor:"repo"`
 	Tag     string `help:"Remove repos with this tag." default:"" predictor:"tag"`
 	Set     string `help:"Remove repos in this named set (from config 'sets:')." default:"" predictor:"set"`
-	Delete  bool   `help:"Also delete from disk." default:"false"`
+	Delete  bool   `help:"Also delete the clone; unique work is archived first." xor:"disk"`
+	Archive bool   `help:"Also move the clone, whole, into backup.archive_dir; git-mgr archives restore puts it back." xor:"disk"`
 	Yes     bool   `help:"Skip confirmation." default:"false"`
 }
 

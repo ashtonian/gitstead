@@ -327,7 +327,22 @@ Stop tracking repos.
 | Flag | Description |
 |---|---|
 | `--delete` | Also delete the clone from disk. Unique work is archived to `backup.archive_dir` first; a clone that can't be inspected or archived is kept and stays tracked, and the command exits non-zero. |
+| `--archive` | Also move the clone, whole, to `backup.archive_dir/<id>/` and catalog it; `archives restore` puts it back. A clone with linked worktrees is kept and stays tracked, and the command exits non-zero. Exclusive with `--delete`. |
 | `--yes` | Skip confirmation prompt |
+
+#### `git-mgr archives ls|show|restore|rm`
+
+The catalog of archives git-mgr made before taking copies and repos away:
+verified bundles of unique work, and whole clones moved by `remove --archive`
+or `cleanup.policy: archive`. Each archive is `<archive_dir>/<id>.bundle`
+or the directory `<archive_dir>/<id>/`, with `<id>.json` describing it.
+
+| Subcommand | Description |
+|---|---|
+| `ls [--workspace w] [--repo glob]` | ID, when, where it came from, the repo, what it saved. |
+| `show <id>` | The description and the restore steps: the bundle's fetch-and-apply commands, or `archives restore` for a clone. |
+| `restore <id> [--to path]` | Move an archived clone back to where it was (or `--to`), drop it from the catalog and track it by hand (`adopt`), so it is never judged stale again. Refuses a bundle (its steps are in `show`), an occupied destination, and -- without `--to` -- a repo tracked again meanwhile; with `--to` such a repo's archive is restored untracked. |
+| `rm <id>... [--yes]` | Delete archives for good -- bundle or clone, description, LFS objects, submodules' archives -- and drop them from the catalog. Only files named for the archive, beside it, are deleted. Asks first; without a terminal, needs `--yes`. |
 
 #### `git-mgr remote-sync [flags]`
 
@@ -665,9 +680,12 @@ reconcile:
 # Controls what happens when a previously-discovered repo is no longer found
 # by any discovery rule (deleted upstream, removed from org, etc.).
 cleanup:
-  # Policy: "mark_stale" (default), "remove", "remove_and_delete", "ignore"
+  # Policy: "mark_stale" (default), "remove", "archive", "remove_and_delete", "ignore"
   # - mark_stale: set status to "stale" in state. No disk changes. Visible in `git-mgr status --stale`.
   # - remove: remove from state after grace_period. Keep files on disk.
+  # - archive: remove from state after grace_period and move the clone, whole,
+  #   to backup.archive_dir/<id>/, catalogued; `archives restore` puts it back.
+  #   A clone with linked worktrees or workspace copies is kept and stays tracked.
   # - remove_and_delete: remove from state AND delete from disk after grace_period.
   #   Unique work is archived to backup.archive_dir first; a repo that can't be
   #   archived is kept, stays tracked and records the reason in its error.
@@ -675,7 +693,7 @@ cleanup:
   # A stale repo is no longer fetched or pushed offsite, but is still backed up.
   policy: "mark_stale"
 
-  # Grace period before "remove" or "remove_and_delete" policies take effect.
+  # Grace period before "remove", "archive" or "remove_and_delete" take effect.
   # Repo must be continuously stale for this duration. Protects against
   # temporary API failures or org permission changes.
   grace_period: "30d"
@@ -894,8 +912,17 @@ workspaces:
 fleets:
   daily: {name: daily, launcher: muxy, opened: 2026-10-12T15:00:00Z, muxy_projects: {app: "8f2c..."}}
 
-# Unique work saved before copies and repos were deleted.
+# Archives made before copies and repos were taken away: bundles of unique
+# work, and whole clones (clone: true; path is the clone's directory).
 archives:
+  - id: github.com_acme_old-lib-20261013T060000.000000000Z
+    path: /Users/me/.local/share/git-mgr/archive/github.com_acme_old-lib-20261013T060000.000000000Z
+    clone: true
+    repo: github.com/acme/old-lib
+    source: /Users/me/repos/github.com/acme/old-lib
+    branch: main
+    work: the whole clone, with 1 unpushed commit
+    created: 2026-10-13T06:00:00Z
   - id: app-agent-3-git-mgr-20261012T170000.000000000Z
     path: /Users/me/.local/share/git-mgr/archive/app-agent-3-git-mgr-20261012T170000.000000000Z.bundle
     repo: github.com/ashtonian/git-mgr
@@ -1292,12 +1319,18 @@ func DetectStale(state, discovered, scope):
             repo.Status = "stale"
 
     // Apply cleanup policy
-    if config.Cleanup.Policy == "remove" || config.Cleanup.Policy == "remove_and_delete":
+    if config.Cleanup.Untracks():                     // remove, archive, remove_and_delete
         for key, repo := range state.Repos:
             if repo.Status == "stale" && time.Since(repo.StaleSince) > config.Cleanup.GracePeriod:
-                if config.Cleanup.Policy == "remove_and_delete":
+                switch config.Cleanup.Policy:
+                case "remove_and_delete":
                     // archive unique work, then delete; keep the repo on any failure
                     if err := gitops.RemoveClone(repo.LocalPath, config.Backup.ArchiveDir); err != nil:
+                        repo.Error = err
+                        continue
+                case "archive":
+                    // move the whole clone into the archive; keep the repo on any failure
+                    if err := gitops.ArchiveClone(repo.LocalPath, config.Backup.ArchiveDir); err != nil:
                         repo.Error = err
                         continue
                 delete(state.Repos, key)
@@ -1930,6 +1963,8 @@ replica once every copy is gone, and an agent left with copies shows as
   on) snapshots dirty copies first.
 - A tracked repo with workspace copies, or with linked worktrees, is never
   untracked or deleted (`remove`, stale cleanup) until they are gone.
-- Every archive -- of a retired copy, or of a repo `remove --delete` or stale
-  cleanup deleted -- is catalogued under `archives:` in state; `git-mgr
-  archives ls|show` lists them and prints their restore steps.
+- Every archive -- of a retired copy, of a repo `remove --delete` or stale
+  cleanup deleted, or of a clone `remove --archive` or `cleanup.policy:
+  archive` moved whole -- is catalogued under `archives:` in state; `git-mgr
+  archives ls|show` lists them and prints their restore steps, `archives
+  restore` moves an archived clone back, `archives rm` deletes archives.

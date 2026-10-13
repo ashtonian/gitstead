@@ -513,6 +513,97 @@ func TestE2E_SyncFetch(t *testing.T) {
 	}
 }
 
+// TestE2E_StaleRepoArchived: under cleanup.policy archive, a repo deleted
+// upstream goes stale on one discover --apply and, past the grace period,
+// the next moves its clone into the archive and stops tracking it; the repo
+// still upstream is untouched.
+func TestE2E_StaleRepoArchived(t *testing.T) {
+	env := setupTestEnv(t)
+	token := env.createToken(t)
+	env.createRepo(t, token, "keep-me", false)
+	env.createRepo(t, token, "drop-me", false)
+	archiveDir := filepath.Join(t.TempDir(), "archive")
+	cfg := fmt.Sprintf(`base_dir: %s
+clone_protocol: https
+providers:
+  - name: forgejo
+    type: gitea
+    url: %s
+    token: %s
+discovery:
+  - name: me
+    provider: forgejo
+    user: %s
+cleanup:
+  policy: archive
+  grace_period: 0s
+  protect_manual: false
+backup:
+  archive_dir: %s
+`, env.baseDir, env.httpURL, token, env.adminUser, archiveDir)
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The container advertises a clone URL it can't be reached at, so the
+	// repos are cloned over its mapped port and adopted; with protect_manual
+	// off, discovery judges them like any other.
+	host := strings.Split(strings.TrimPrefix(env.httpURL, "http://"), ":")[0] // a key has no port
+	path := func(name string) string { return filepath.Join(env.baseDir, name) }
+	for _, name := range []string{"keep-me", "drop-me"} {
+		env.httpClone(t, env.adminUser, name, path(name))
+		if out, code := env.run(t, "adopt", path(name)); code != 0 {
+			t.Fatalf("adopt exit %d:\n%s", code, out)
+		}
+	}
+	if out, code := env.run(t, "discover", "--apply"); code != 0 {
+		t.Fatalf("discover --apply exit %d:\n%s", code, out)
+	}
+	if repos := env.statusJSON(t); len(repos) != 2 {
+		t.Fatalf("want both repos tracked, got %v", repos)
+	}
+
+	resp := env.api(t, "DELETE", "/api/v1/repos/"+env.adminUser+"/drop-me", nil, token)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("deleting drop-me: status %d", resp.StatusCode)
+	}
+	// The first pass marks it stale; the next, past the grace period, archives it.
+	for range 2 {
+		if out, code := env.run(t, "discover", "--apply"); code != 0 {
+			t.Fatalf("discover --apply exit %d:\n%s", code, out)
+		}
+	}
+
+	repos := env.statusJSON(t)
+	if _, ok := repos[host+"/"+env.adminUser+"/drop-me"]; ok || len(repos) != 1 {
+		t.Errorf("only keep-me should be tracked, got %v", repos)
+	}
+	if _, err := os.Lstat(path("drop-me")); !os.IsNotExist(err) {
+		t.Errorf("drop-me's clone should have moved: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(path("keep-me"), ".git")); err != nil {
+		t.Errorf("keep-me's clone must stay: %v", err)
+	}
+	out, _ := env.run(t, "archives", "ls")
+	if !strings.Contains(out, "drop-me") || !strings.Contains(out, "the whole clone") {
+		t.Errorf("archives ls should list drop-me's clone:\n%s", out)
+	}
+	entries, _ := os.ReadDir(archiveDir)
+	var archived string
+	for _, e := range entries {
+		if e.IsDir() {
+			archived = filepath.Join(archiveDir, e.Name())
+		}
+	}
+	if archived == "" {
+		t.Fatalf("no clone in %s", archiveDir)
+	}
+	if _, err := os.Stat(filepath.Join(archived, "README.md")); err != nil {
+		t.Errorf("the archived clone is incomplete: %v", err)
+	}
+}
+
 // --- Docker-free local tests (no Forgejo/provider needed) ---
 
 // newLocalEnv builds the binary and points it at fresh temp config/state files
@@ -650,6 +741,122 @@ func TestE2E_SyncRefreshesClones(t *testing.T) {
 	}
 	if got := gitCmd(t, copyPath, "rev-parse", "origin/main"); got != head {
 		t.Errorf("the clone's origin/main = %s, want %s\n%s", got, head, out)
+	}
+}
+
+// TestE2E_ArchiveAndRestore: remove --archive moves a clone, whole, into the
+// archive and catalogs it; archives restore moves it back and tracks it
+// again, or puts it elsewhere when the repo is tracked again; archives rm
+// deletes it.
+func TestE2E_ArchiveAndRestore(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+	archiveDir := filepath.Join(tmp, "archive")
+	remote := filepath.Join(tmp, "remotes", "app.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	clone := filepath.Join(env.baseDir, "app")
+	cloneAt := func() {
+		gitCmd(t, tmp, "clone", "-q", remote, clone)
+		gitCmd(t, clone, "config", "user.email", "e2e@test.local")
+		gitCmd(t, clone, "config", "user.name", "e2e")
+	}
+	cloneAt()
+	write := func(name string) {
+		if err := os.WriteFile(filepath.Join(clone, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("pushed.txt")
+	gitCmd(t, clone, "add", ".")
+	gitCmd(t, clone, "commit", "-qm", "pushed")
+	gitCmd(t, clone, "push", "-q", "origin", "HEAD:main")
+	write("unpushed.txt")
+	gitCmd(t, clone, "add", ".")
+	gitCmd(t, clone, "commit", "-qm", "unpushed")
+	write("notes.txt")
+	tip := gitCmd(t, clone, "rev-parse", "HEAD")
+
+	cfg := fmt.Sprintf("base_dir: %s\nbackup:\n  archive_dir: %s\n", env.baseDir, archiveDir)
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := env.run(t, "adopt", clone); code != 0 {
+		t.Fatalf("adopt exit %d:\n%s", code, out)
+	}
+	const key = "local/remotes/app"
+	archive := func() string {
+		t.Helper()
+		out, code := env.run(t, "remove", key, "--archive", "--yes")
+		if code != 0 {
+			t.Fatalf("remove --archive exit %d:\n%s", code, out)
+		}
+		if _, err := os.Lstat(clone); !os.IsNotExist(err) {
+			t.Fatalf("the clone should have moved:\n%s", out)
+		}
+		entries, _ := os.ReadDir(archiveDir)
+		for _, e := range entries {
+			if e.IsDir() {
+				return e.Name()
+			}
+		}
+		t.Fatalf("no archived clone in %s:\n%s", archiveDir, out)
+		return ""
+	}
+
+	id := archive()
+	if _, ok := env.statusJSON(t)[key]; ok {
+		t.Error("an archived repo should no longer be tracked")
+	}
+	out, _ := env.run(t, "archives", "ls")
+	if !strings.Contains(out, id) || !strings.Contains(out, "the whole clone, with 1 untracked file, 1 unpushed commit") {
+		t.Errorf("archives ls:\n%s", out)
+	}
+
+	out, code := env.run(t, "archives", "restore", id)
+	if code != 0 {
+		t.Fatalf("archives restore exit %d:\n%s", code, out)
+	}
+	if got := gitCmd(t, clone, "rev-parse", "HEAD"); got != tip {
+		t.Errorf("restored HEAD = %s, want %s", got, tip)
+	}
+	if _, err := os.Stat(filepath.Join(clone, "notes.txt")); err != nil {
+		t.Errorf("the untracked file didn't come back: %v", err)
+	}
+	if r, ok := env.statusJSON(t)[key]; !ok || r["manually_added"] != true {
+		t.Errorf("a restored repo is tracked by hand, got %v", r)
+	}
+	if out, _ := env.run(t, "archives", "ls"); !strings.Contains(out, "No archives on record.") {
+		t.Errorf("a restored archive should leave the catalog:\n%s", out)
+	}
+
+	// Tracked again from a fresh clone, the repo's place is taken: the
+	// archive goes elsewhere, untracked.
+	id = archive()
+	cloneAt()
+	if out, code := env.run(t, "adopt", clone); code != 0 {
+		t.Fatalf("adopt exit %d:\n%s", code, out)
+	}
+	if out, code := env.run(t, "archives", "restore", id); code == 0 || !strings.Contains(out, "tracked again") {
+		t.Errorf("restoring over a tracked repo must fail, exit %d:\n%s", code, out)
+	}
+	elsewhere := filepath.Join(tmp, "elsewhere", "app")
+	out, code = env.run(t, "archives", "restore", id, "--to", elsewhere)
+	if code != 0 || !strings.Contains(out, "Not tracked") {
+		t.Fatalf("archives restore --to exit %d:\n%s", code, out)
+	}
+	if got := gitCmd(t, elsewhere, "rev-parse", "HEAD"); got != tip {
+		t.Errorf("restored HEAD = %s, want %s", got, tip)
+	}
+
+	id = archive()
+	if out, code := env.run(t, "archives", "rm", id); code == 0 {
+		t.Errorf("archives rm without a terminal must ask for --yes:\n%s", out)
+	}
+	if out, code := env.run(t, "archives", "rm", id, "--yes"); code != 0 {
+		t.Fatalf("archives rm exit %d:\n%s", code, out)
+	}
+	if entries, _ := os.ReadDir(archiveDir); len(entries) != 0 {
+		t.Errorf("archives rm left %d files behind", len(entries))
 	}
 }
 

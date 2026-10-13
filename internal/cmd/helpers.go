@@ -46,11 +46,16 @@ func stateUpdater(cfg *config.Config, st *state.State) func(change func(*state.S
 }
 
 // staleCleanup judges tracked repos against a discovery pass under the
-// configured cleanup policy, deleting through archivingRemover.
+// configured cleanup policy, deleting clones through archivingRemover or
+// moving them into the archive through cloneArchiver.
 func staleCleanup(ctx *Context, cfg *config.Config, st *state.State) discovery.Cleanup {
+	remove := archivingRemover(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir)
+	if cfg.Cleanup.Policy == "archive" {
+		remove = cloneArchiver(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir)
+	}
 	return discovery.Cleanup{
 		Config: cfg.Cleanup,
-		Remove: archivingRemover(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir),
+		Remove: remove,
 		Update: stateUpdater(cfg, st),
 	}
 }
@@ -81,4 +86,34 @@ func archivingRemover(ctx context.Context, log *slog.Logger, archiveDir string) 
 		entry := archiveEntry(archived, key, repo.LocalPath)
 		return &entry, nil
 	}
+}
+
+// cloneArchiver moves stale clones, whole, into archiveDir.
+func cloneArchiver(ctx context.Context, log *slog.Logger, archiveDir string) discovery.RemoveFunc {
+	return func(key string, repo *state.RepoState) (*state.ArchiveEntry, error) {
+		entry, err := archiveClone(ctx, log, archiveDir, key, repo.LocalPath)
+		switch {
+		case err != nil:
+			log.Warn("stale repo kept", "repo", key, "path", repo.LocalPath, "error", err)
+		case entry != nil:
+			log.Info("moved stale repo into the archive", "repo", key, "archive", entry.Path)
+		}
+		return entry, err
+	}
+}
+
+// archiveClone moves repo key's clone at path, whole, into archiveDir and
+// returns its catalog entry, nil when the clone was already gone. A clone
+// archived whole but whose old folder couldn't all be deleted counts as
+// archived; the leftovers are logged.
+func archiveClone(ctx context.Context, log *slog.Logger, archiveDir, key, path string) (*state.ArchiveEntry, error) {
+	archived, err := gitops.ArchiveClone(ctx, path, archiveDir, key)
+	if archived == "" {
+		return nil, err
+	}
+	if err != nil {
+		log.Warn("repo archived, but some of its old folder is left; delete it by hand", "repo", key, "path", path, "error", err)
+	}
+	entry := archiveEntry(archived, key, path)
+	return &entry, nil
 }
