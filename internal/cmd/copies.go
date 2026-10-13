@@ -26,6 +26,8 @@ type copyJob struct {
 	backup        *gitops.BackupConfig // nil skips the backup
 	backupTimeout time.Duration        // bounds the backup and the status read
 	fetch         bool
+	// update fast-forwards the clone after a successful fetch (sync.update).
+	update bool
 	// refresh is the path of the repo's clone a workspace clone is brought
 	// up to date from, without the network, in place of a fetch.
 	refresh string
@@ -41,6 +43,11 @@ type copyOutcome struct {
 	backupErr error
 	fetched   bool // a fetch was attempted
 	fetchErr  error
+	// updated reports a fast-forward; updateSkipped why there was none when
+	// the clone was behind.
+	updated       bool
+	updateSkipped string
+	updateErr     error
 	// offsite is what the offsite push left, nil when it didn't run;
 	// offsitePlan is what it did, or would do on a dry run.
 	offsite     *gitops.OffsiteRecord
@@ -87,6 +94,12 @@ func runCopy(ctx context.Context, log *slog.Logger, job copyJob) copyOutcome {
 		o.fetched, o.fetchErr = true, fetchWithRetry(fctx, job.path, job.sshKey, job.sync)
 		o.fetchErr = ctxutil.TimedOut(fctx, o.fetchErr, "fetch", job.sync.TimeoutPerRepo, "sync.timeout_per_repo")
 		cancel()
+		if job.update && o.fetchErr == nil {
+			uctx, cancel := ctxutil.WithTimeout(ctx, job.sync.TimeoutPerRepo)
+			o.updated, o.updateSkipped, o.updateErr = gitops.FastForward(uctx, job.path)
+			o.updateErr = ctxutil.TimedOut(uctx, o.updateErr, "fast-forward", job.sync.TimeoutPerRepo, "sync.timeout_per_repo")
+			cancel()
+		}
 	case job.refresh != "":
 		fctx, cancel := ctxutil.WithTimeout(ctx, job.sync.TimeoutPerRepo)
 		o.fetched, o.fetchErr = true, gitops.RefreshFromSource(fctx, job.path, job.refresh)
@@ -123,6 +136,9 @@ func (o copyOutcome) failed() []error {
 	}
 	if o.offsiteErr != nil {
 		errs = append(errs, o.offsiteErr)
+	}
+	if o.updateErr != nil {
+		errs = append(errs, o.updateErr)
 	}
 	return errs
 }

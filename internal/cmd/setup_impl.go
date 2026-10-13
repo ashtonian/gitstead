@@ -576,6 +576,8 @@ func askFeatures(a *setup.Answers) error {
 			Description("Installs a launchd agent, systemd timer or cron entry. Recommended.").Value(&a.Schedule),
 		huh.NewConfirm().Title("Push backup refs to each repo's remote?").
 			Description("Offsite copies of your backups under refs/git-mgr/*; visible to anyone who can read the remote.").Value(&a.RemoteSync),
+		huh.NewConfirm().Title("Fast-forward clones that are behind during sync?").
+			Description("Only a branch with no local commits and no uncommitted changes, while no git command runs in it; anything else is left as it is.").Value(&a.Update),
 		huh.NewSelect[string]().Title("When config changes, what may sync change by itself?").Options(
 			huh.NewOption("everything except moving or deleting directories (recommended)", "safe"),
 			huh.NewOption("everything, moves included", "all"),

@@ -1900,3 +1900,64 @@ func TestE2E_JSONErrors(t *testing.T) {
 		check(t, 1, "sync")
 	})
 }
+
+// TestE2E_SyncUpdate: with sync.update: ff-only-clean, sync fast-forwards a
+// clean clone that is behind, and leaves one with uncommitted changes.
+func TestE2E_SyncUpdate(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+	remote := filepath.Join(tmp, "remotes", "app.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	clone := func(name string) string {
+		path := filepath.Join(env.baseDir, name)
+		gitCmd(t, tmp, "clone", "-q", remote, path)
+		gitCmd(t, path, "config", "user.email", "e2e@test.local")
+		gitCmd(t, path, "config", "user.name", "e2e")
+		return path
+	}
+	upstream := clone("upstream")
+	gitCmd(t, upstream, "commit", "-q", "--allow-empty", "-m", "first")
+	gitCmd(t, upstream, "push", "-q", "origin", "HEAD:main")
+	app := clone("app")
+	if err := os.WriteFile(env.configFile, []byte("base_dir: "+env.baseDir+"\nsync:\n  update: ff-only-clean\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := env.run(t, "adopt", app); code != 0 {
+		t.Fatalf("adopt exit %d:\n%s", code, out)
+	}
+	gitCmd(t, upstream, "commit", "-q", "--allow-empty", "-m", "second")
+	gitCmd(t, upstream, "push", "-q", "origin", "HEAD:main")
+
+	var doc struct {
+		Updated int `json:"updated"`
+		Copies  []struct {
+			Repo    string `json:"repo"`
+			Updated bool   `json:"updated"`
+		} `json:"copies"`
+	}
+	if stderr, code := env.runJSON(t, &doc, "sync", "--force", "--no-discover"); code != 0 {
+		t.Fatalf("sync exit %d:\n%s", code, stderr)
+	}
+	if doc.Updated != 1 || gitCmd(t, app, "rev-parse", "HEAD") != gitCmd(t, upstream, "rev-parse", "HEAD") {
+		t.Fatalf("the clean clone wasn't fast-forwarded: %+v", doc)
+	}
+
+	gitCmd(t, upstream, "commit", "-q", "--allow-empty", "-m", "third")
+	gitCmd(t, upstream, "push", "-q", "origin", "HEAD:main")
+	if err := os.WriteFile(filepath.Join(app, "wip.txt"), []byte("staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, app, "add", "wip.txt")
+	before := gitCmd(t, app, "rev-parse", "HEAD")
+	var again struct {
+		Copies []struct {
+			UpdateSkipped string `json:"update_skipped"`
+		} `json:"copies"`
+	}
+	if stderr, code := env.runJSON(t, &again, "sync", "--force", "--no-discover"); code != 0 {
+		t.Fatalf("sync exit %d:\n%s", code, stderr)
+	}
+	if gitCmd(t, app, "rev-parse", "HEAD") != before || len(again.Copies) != 1 || !strings.Contains(again.Copies[0].UpdateSkipped, "uncommitted") {
+		t.Errorf("a clone with staged work must be left: %+v", again)
+	}
+}

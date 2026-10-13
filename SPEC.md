@@ -20,7 +20,7 @@
 
 ## Non-Goals
 
-- The discover/sync/backup subsystem is read-only with respect to your working tree and branches -- it never `git pull`s, merges, or commits. (The opt-in **workspace** subsystem is separate and *does* mutate on request; see [Workspaces](#workspaces).)
+- The discover/sync/backup subsystem is read-only with respect to your working tree and branches -- it never `git pull`s, merges, or commits -- except that `sync.update: ff-only-clean`, off by default, fast-forwards a clean clone that is behind. (The opt-in **workspace** subsystem is separate and *does* mutate on request; see [Workspaces](#workspaces).)
 - Not a replacement for git workflows (no branch management, no PR creation)
 - Not a monorepo/subrepo tool (no manifest-based dependency linking)
 
@@ -720,6 +720,12 @@ sync:
 
   # Retry backoff base duration. Actual delay: base * 2^attempt.
   retry_backoff: "2s"
+
+  # After a successful fetch of a tracked clone: "off", or "ff-only-clean" --
+  # git merge --ff-only @{upstream} when the branch is behind and not ahead,
+  # no tracked file has changes, and git isn't busy (gitops.CheckIdle).
+  # Otherwise update_skipped records why. Workspace copies are never updated.
+  update: "off"
 
 # ============================================================================
 # Config Changes

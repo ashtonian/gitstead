@@ -267,6 +267,16 @@ func TestDefaults_ReadBackWhatRenderWrote(t *testing.T) {
 	if got.Layout != "owner/name" || got.Schedule {
 		t.Errorf("re-run answers = %+v", got)
 	}
+
+	// sync.update round-trips too.
+	want.Update = true
+	render(t, path, want)
+	if cfg, err = config.Load(path); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sync.Update != "ff-only-clean" || !Defaults(Detected{}, cfg, "/nonexistent-home").Update {
+		t.Errorf("sync.update = %q", cfg.Sync.Update)
+	}
 }
 
 func TestGuessLayout_DeliberateTreesOutweighFlatClones(t *testing.T) {

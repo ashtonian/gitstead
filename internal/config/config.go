@@ -228,6 +228,7 @@ type SyncOverride struct {
 	TimeoutPerRepo   *time.Duration `koanf:"timeout_per_repo"   yaml:"timeout_per_repo,omitempty"   validate:"omitempty,min=0"`
 	Retries          *int           `koanf:"retries"            yaml:"retries,omitempty"            validate:"omitempty,min=0,max=10"`
 	RetryBackoff     *time.Duration `koanf:"retry_backoff"      yaml:"retry_backoff,omitempty"      validate:"omitempty,min=0"`
+	Update           *string        `koanf:"update"             yaml:"update,omitempty"             validate:"omitempty,oneof=off ff-only-clean"`
 }
 
 // BackupOverride overrides BackupCfg fields per repo. A nil pointer means "not set".
@@ -347,6 +348,11 @@ type SyncConfig struct {
 	DiscoveryTimeout time.Duration `koanf:"discovery_timeout"  yaml:"discovery_timeout"  default:"5m"     validate:"min=0"` // one discovery rule, retries and rate-limit waits included
 	Retries          int           `koanf:"retries"            yaml:"retries"            default:"2"      validate:"min=0,max=10"`
 	RetryBackoff     time.Duration `koanf:"retry_backoff"      yaml:"retry_backoff"      default:"2s"     validate:"min=0"`
+	// Update is what sync does to a tracked clone after fetching it: "off"
+	// leaves its branch where it is; "ff-only-clean" fast-forwards it to its
+	// upstream when it is behind and not ahead, has no tracked changes and
+	// git isn't busy in it.
+	Update string `koanf:"update" yaml:"update" default:"off" validate:"oneof=off ff-only-clean"`
 }
 
 // CleanupConfig controls stale repo handling.
