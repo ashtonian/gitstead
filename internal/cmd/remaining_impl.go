@@ -71,7 +71,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 	}
 	var archives []state.ArchiveEntry
 	untrack := map[string]string{} // key -> the path it was removed at
-	take := repoTaker(st.Path(), cfg.LockTimeout)
+	take := repoTaker(st.Path(), cfg.Backup.ArchiveDir, cfg.LockTimeout)
 	// Each clone is taken -- locked, and checked against state as it is
 	// then -- for as long as deleting or archiving it takes, so no workspace
 	// copy is made from it meanwhile.
@@ -94,7 +94,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 			return ctxutil.TimedOut(rctx, err, "archiving "+repo.LocalPath, cfg.Sync.CloneTimeout, "sync.clone_timeout")
 		}
 		if c.Delete {
-			archived, err := gitops.RemoveClone(rctx, repo.LocalPath, cfg.Backup.ArchiveDir, key, gitops.RemoveOptions{KeepHistory: taken.state.LeansOn(key)})
+			archived, err := gitops.RemoveClone(rctx, repo.LocalPath, cfg.Backup.ArchiveDir, key, gitops.RemoveOptions{KeepHistory: taken.leansOn, Repo: key})
 			if err != nil {
 				return timedOut(err)
 			}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
@@ -60,7 +61,7 @@ func agentEnv(cfg *config.Config, st *state.State, ws, agent string) ([]string, 
 // configured cleanup policy, deleting clones through archivingRemover or
 // moving them into the archive through cloneArchiver.
 func staleCleanup(ctx *Context, cfg *config.Config, st *state.State) discovery.Cleanup {
-	take := repoTaker(st.Path(), cfg.LockTimeout)
+	take := repoTaker(st.Path(), cfg.Backup.ArchiveDir, cfg.LockTimeout)
 	remove := archivingRemover(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir, cfg.Sync.CloneTimeout, take)
 	if cfg.Cleanup.Policy == "archive" {
 		remove = cloneArchiver(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir, cfg.Sync.CloneTimeout, take)
@@ -82,18 +83,18 @@ func discoveredKeys[V any](discovered map[string]V) map[string]bool {
 }
 
 // takenRepo is a tracked repo's clone, locked for deleting or archiving it,
-// and state as it was once the lock was held.
+// and whether archives lean on it, as they were once the lock was held.
 type takenRepo struct {
 	release func()
-	state   *state.State
+	leansOn bool
 }
 
 // repoTaker returns what takes repo key's clone at path for deleting or
 // archiving it: its lock (see gitops.LockRepo), waiting up to wait, then a
 // check against state as it is now that the repo is still tracked at path
-// and no workspace copy was made from it meanwhile. A clone not on disk
-// needs no lock.
-func repoTaker(statePath string, wait time.Duration) func(ctx context.Context, key, path string) (takenRepo, error) {
+// and no workspace copy was made from it meanwhile, and whether archives in
+// archiveDir lean on it. A clone not on disk needs no lock.
+func repoTaker(statePath, archiveDir string, wait time.Duration) func(ctx context.Context, key, path string) (takenRepo, error) {
 	return func(ctx context.Context, key, path string) (takenRepo, error) {
 		taken := takenRepo{release: func() {}}
 		if gitops.HasGitDir(path) {
@@ -116,9 +117,36 @@ func repoTaker(statePath string, wait time.Duration) func(ctx context.Context, k
 			taken.release()
 			return taken, err
 		}
-		taken.state = fresh
+		taken.leansOn = leansOn(fresh, archiveDir, key, path)
 		return taken, nil
 	}
+}
+
+// leansOn reports whether an archive may need repo key's history, its clone
+// at path, to be restored: a thin bundle -- of a copy made from the repo, or
+// of one of its submodules -- that holds only what the repo lacked. Archives
+// on record count, and so does any in archiveDir that a run interrupted
+// before recording it left there. An archive whose description can't be
+// read might lean on it, so it counts too.
+func leansOn(st *state.State, archiveDir, key, path string) bool {
+	if st.LeansOn(key) {
+		return true
+	}
+	descriptions, _ := filepath.Glob(filepath.Join(archiveDir, "*.json"))
+	for _, d := range descriptions {
+		meta, _, err := gitops.ReadArchive(d)
+		if err != nil {
+			return true
+		}
+		if meta.Bundle == "" || meta.Complete {
+			continue
+		}
+		base := filepath.Clean(meta.Base)
+		if meta.Repo == key || base == filepath.Clean(path) || strings.HasPrefix(base, filepath.Clean(path)+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // archivingRemover deletes stale clones through gitops.RemoveClone: unique work
@@ -135,7 +163,7 @@ func archivingRemover(ctx context.Context, log *slog.Logger, archiveDir string, 
 		defer taken.release()
 		rctx, cancel := ctxutil.WithTimeout(ctx, timeout)
 		defer cancel()
-		archived, err := gitops.RemoveClone(rctx, repo.LocalPath, archiveDir, key, gitops.RemoveOptions{KeepHistory: taken.state.LeansOn(key)})
+		archived, err := gitops.RemoveClone(rctx, repo.LocalPath, archiveDir, key, gitops.RemoveOptions{KeepHistory: taken.leansOn, Repo: key})
 		err = ctxutil.TimedOut(rctx, err, "archiving and deleting "+repo.LocalPath, timeout, "sync.clone_timeout")
 		if err != nil {
 			log.Warn("stale repo kept", "repo", key, "path", repo.LocalPath, "error", err)

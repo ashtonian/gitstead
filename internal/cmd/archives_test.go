@@ -39,3 +39,39 @@ func TestCatalog_FindsArchivesNotOnRecord(t *testing.T) {
 		t.Errorf("catalogEntry = %+v, %v", a, err)
 	}
 }
+
+// A repo is leant on by any thin bundle of a copy made from it, or of a
+// submodule of one, on record or not, and by any archive whose description
+// can't be read.
+func TestLeansOn(t *testing.T) {
+	const key, path = "github.com/o/app", "/src/app"
+	tests := []struct {
+		name        string
+		description string
+		recorded    []state.ArchiveEntry
+		want        bool
+	}{
+		{name: "nothing", want: false},
+		{name: "on record", recorded: []state.ArchiveEntry{{ID: "a-1", Repo: key, Workspace: "w"}}, want: true},
+		{name: "thin bundle naming the repo", description: `{"bundle": "/x.bundle", "repo": "` + key + `", "base": "/elsewhere"}`, want: true},
+		{name: "thin bundle based on its clone", description: `{"bundle": "/x.bundle", "base": "/src/app/"}`, want: true},
+		{name: "thin bundle of a submodule", description: `{"bundle": "/x.bundle", "base": "/src/app/lib"}`, want: true},
+		{name: "complete bundle", description: `{"bundle": "/x.bundle", "complete": true, "repo": "` + key + `", "base": "/src/app"}`, want: false},
+		{name: "another repo", description: `{"bundle": "/x.bundle", "repo": "github.com/o/other", "base": "/src/app-2"}`, want: false},
+		{name: "archived clone", description: `{"clone": "/x", "repo": "` + key + `"}`, want: false},
+		{name: "unreadable", description: `{`, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tt.description != "" {
+				if err := os.WriteFile(filepath.Join(dir, "a-1.json"), []byte(tt.description), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := leansOn(&state.State{Archives: tt.recorded}, dir, key, path); got != tt.want {
+				t.Errorf("leansOn = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

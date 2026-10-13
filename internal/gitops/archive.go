@@ -42,7 +42,10 @@ type ArchiveMeta struct {
 	// lacks, and restores into a clone of Base or of the repository's remote.
 	Complete bool   `json:"complete,omitempty"`
 	Base     string `json:"base,omitempty"`
-	Restore  string `json:"restore,omitempty"`
+	// Repo is the tracked repo the archived clone was, or was a copy of: a
+	// deletion of that repo finds the archives leaning on it by Repo or Base.
+	Repo    string `json:"repo,omitempty"`
+	Restore string `json:"restore,omitempty"`
 	// Submodules maps each submodule with work saved to its own archive.
 	Submodules map[string]string `json:"submodules,omitempty"`
 	// LFS holds the clone's Git LFS objects, which a bundle carries only
@@ -68,6 +71,8 @@ type archiveOptions struct {
 	base string
 	// keepHistory archives a clone even when it has no unique work.
 	keepHistory bool
+	// repo is recorded as ArchiveMeta.Repo.
+	repo string
 }
 
 // archive saves the unique work of the repository at repoPath into one
@@ -98,7 +103,7 @@ func archive(ctx context.Context, repoPath, dir, name string, opts archiveOption
 	id := newArchiveID(name)
 	bundle := filepath.Join(dir, id+".bundle")
 	metaPath := filepath.Join(dir, id+".json")
-	meta := ArchiveMeta{Source: repoPath, Remotes: remoteURLs(ctx, repoPath), Work: work.String(), Created: time.Now().UTC()}
+	meta := ArchiveMeta{Source: repoPath, Remotes: remoteURLs(ctx, repoPath), Work: work.String(), Created: time.Now().UTC(), Repo: opts.repo}
 	meta.Branch, _ = Git(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
 	meta.Head, _ = Git(ctx, repoPath, "rev-parse", "--verify", "-q", "HEAD^{commit}")
 	if !lost {
@@ -444,6 +449,9 @@ type RemoveOptions struct {
 	// KeepHistory archives the clone's whole history even when it has no
 	// unique work, for archives that lean on it.
 	KeepHistory bool
+	// Repo is the tracked repo the clone is, or is a copy of, recorded in its
+	// archive.
+	Repo string
 }
 
 // RemoveClone deletes the clone at repoPath. Unless opts.Discard is set it
@@ -471,7 +479,7 @@ func RemoveClone(ctx context.Context, repoPath, archiveDir, name string, opts Re
 	var archived string
 	if !opts.Discard {
 		var err error
-		aopts := archiveOptions{scope: scopeClone, base: opts.Base, keepHistory: opts.KeepHistory}
+		aopts := archiveOptions{scope: scopeClone, base: opts.Base, keepHistory: opts.KeepHistory, repo: opts.Repo}
 		if archived, err = archive(ctx, repoPath, archiveDir, name, aopts); err != nil {
 			return "", fmt.Errorf("keeping %s: %w", repoPath, err)
 		}
@@ -552,19 +560,19 @@ func ArchiveClone(ctx context.Context, repoPath, dir, name string) (string, erro
 }
 
 // RemoveWorktree removes the linked worktree at path from source. Unless
-// discard is set it first archives what removal would lose (the working tree,
-// index and detached-HEAD commits); branches stay in source. On an inspection
-// or archive failure, or while git is busy in it, the worktree is left in
-// place. The worktree's backup refs go with it.
-func RemoveWorktree(ctx context.Context, source, path, archiveDir, name string, discard bool) (string, error) {
+// opts.Discard is set it first archives what removal would lose (the working
+// tree, index and detached-HEAD commits); branches stay in source, its base.
+// On an inspection or archive failure, or while git is busy in it, the
+// worktree is left in place. The worktree's backup refs go with it.
+func RemoveWorktree(ctx context.Context, source, path, archiveDir, name string, opts RemoveOptions) (string, error) {
 	if err := CheckIdle(ctx, path, true); err != nil {
 		return "", fmt.Errorf("keeping %s: %w", path, err)
 	}
 	copyID := ReadCopyID(ctx, path)
 	var archived string
-	if !discard {
+	if !opts.Discard {
 		var err error
-		if archived, err = archive(ctx, path, archiveDir, name, archiveOptions{scope: scopeWorktree, base: source}); err != nil {
+		if archived, err = archive(ctx, path, archiveDir, name, archiveOptions{scope: scopeWorktree, base: source, repo: opts.Repo}); err != nil {
 			return "", fmt.Errorf("keeping %s: %w", path, err)
 		}
 	}
