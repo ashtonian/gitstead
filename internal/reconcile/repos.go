@@ -162,9 +162,10 @@ func planURL(p *Plan, d Repo, a *state.RepoState, here Copy, overwrite bool) []A
 	case have == recorded:
 		return set(recorded, "")
 	case overwrite:
-		return set(have, "changed by hand; restoring")
+		return set(repourl.Redact(have), "changed by hand; restoring")
 	default:
-		p.Drift = append(p.Drift, Drift{Target: d.Key, What: "origin URL", Recorded: recorded, Found: OrUnset(have), Wanted: want})
+		// An origin set by hand may embed a token: it is shown redacted.
+		p.Drift = append(p.Drift, Drift{Target: d.Key, What: "origin URL", Recorded: recorded, Found: repourl.Redact(OrUnset(have)), Wanted: want})
 		return nil
 	}
 }
@@ -239,7 +240,7 @@ func Occupied(path string, c Copy) string {
 	case !c.IsRepo:
 		return path + " is already taken by something that isn't a git repository"
 	case c.Origin != "":
-		return path + " already holds a clone of " + c.Origin
+		return path + " already holds a clone of " + repourl.Redact(c.Origin)
 	default:
 		return path + " already holds another repository"
 	}

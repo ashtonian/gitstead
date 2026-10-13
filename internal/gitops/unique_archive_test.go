@@ -497,3 +497,23 @@ func TestRemoveClone_KeepsLFSObjects(t *testing.T) {
 		t.Errorf("the LFS object wasn't kept: %q, %v", got, err)
 	}
 }
+
+// A token someone put in a remote's URL never reaches an archive's
+// description, which git-mgr prints and serves as JSON.
+func TestRemoveClone_ArchiveKeepsNoCredentials(t *testing.T) {
+	ctx := context.Background()
+	_, clone := remoteAndClone(t)
+	writeFile(t, filepath.Join(clone, "wip.txt"), []byte("wip\n"))
+	mustGit(t, clone, "remote", "add", "backup", "https://alice:not-a-real-token@example.invalid/o/r.git")
+	bundle, err := gitops.RemoveClone(ctx, clone, t.TempDir(), "app", gitops.RemoveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(strings.TrimSuffix(bundle, ".bundle") + ".json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "not-a-real-token") || !strings.Contains(string(data), "https://example.invalid/o/r.git") {
+		t.Errorf("archive description:\n%s", data)
+	}
+}

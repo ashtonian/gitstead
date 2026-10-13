@@ -169,3 +169,19 @@ func TestCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestWithoutCredentials(t *testing.T) {
+	tests := []struct{ url, want string }{
+		{"https://me:ghp_secret@github.com/acme/api.git", "https://github.com/acme/api.git"},
+		{"https://ghp_secret@github.com/acme/api.git", "https://github.com/acme/api.git"},
+		{"ssh://git:hunter2@host:2222/acme/api.git", "ssh://git@host:2222/acme/api.git"},
+		{"ssh://git@host:2222/acme/api.git", "ssh://git@host:2222/acme/api.git"},
+		{"git@github.com:acme/api.git", "git@github.com:acme/api.git"},
+		{"/srv/git/api.git", "/srv/git/api.git"},
+	}
+	for _, tt := range tests {
+		if got := repourl.WithoutCredentials(tt.url); got != tt.want {
+			t.Errorf("WithoutCredentials(%q) = %q, want %q", tt.url, got, tt.want)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -37,5 +38,19 @@ func TestFinish_Text(t *testing.T) {
 	ctx := &Context{Out: &out}
 	if err := ctx.finish(map[string]int{"n": 1}, nil); err != nil || out.Len() != 0 {
 		t.Errorf("err %v, printed %q", err, out.String())
+	}
+}
+
+// Whatever a command puts in its JSON result, a credential in a URL is
+// never printed.
+func TestEmit_RedactsCredentials(t *testing.T) {
+	var out bytes.Buffer
+	c := &Context{JSON: true, Out: &out}
+	doc := map[string]string{"remote": "https://alice:not-a-real-token@example.invalid/o/r.git"}
+	if err := c.Emit(doc); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "not-a-real-token") || !strings.Contains(out.String(), "https://***@example.invalid/o/r.git") {
+		t.Errorf("emitted:\n%s", out.String())
 	}
 }

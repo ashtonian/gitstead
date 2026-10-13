@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ashtonian/git-mgr/internal/pathutil"
+	"github.com/ashtonian/git-mgr/internal/repourl"
 )
 
 // archiveRefPrefix holds the temporary refs a bundle is built from. Each
@@ -567,6 +568,9 @@ func deleteRefs(ctx context.Context, repoPath, prefix string) {
 	}
 }
 
+// remoteURLs maps the repository's remotes to their URLs, without any
+// credential a URL embeds: they are written where anyone reading git-mgr's
+// output or files can see them.
 func remoteURLs(ctx context.Context, repoPath string) map[string]string {
 	out, err := Git(ctx, repoPath, "config", "--get-regexp", `^remote\..*\.url$`)
 	if err != nil || out == "" {
@@ -578,7 +582,7 @@ func remoteURLs(ctx context.Context, repoPath string) map[string]string {
 		if !ok {
 			continue
 		}
-		urls[strings.TrimSuffix(strings.TrimPrefix(key, "remote."), ".url")] = url
+		urls[strings.TrimSuffix(strings.TrimPrefix(key, "remote."), ".url")] = repourl.WithoutCredentials(url)
 	}
 	return urls
 }
