@@ -119,14 +119,3 @@ func MoveCopy(ctx context.Context, isolation string, c Copy, dest string) error 
 	}
 	return os.Rename(c.Path, dest)
 }
-
-// removeEmptyDirs removes dir and then its parents up to, not including,
-// stop, while they are empty.
-func removeEmptyDirs(dir, stop string) {
-	stop = filepath.Clean(stop)
-	for d := filepath.Clean(dir); d != stop && d != filepath.Dir(d); d = filepath.Dir(d) {
-		if os.Remove(d) != nil {
-			return
-		}
-	}
-}

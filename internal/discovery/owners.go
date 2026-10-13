@@ -101,7 +101,7 @@ func giteaOwners(c *gitea.Client) ([]Owner, error) {
 			return owners, fmt.Errorf("listing organizations: %w", err)
 		}
 		for _, o := range orgs {
-			owners = append(owners, Owner{Login: o.UserName, Kind: "org"})
+			owners = append(owners, Owner{Login: o.Name, Kind: "org"})
 		}
 		if len(orgs) < 50 {
 			return owners, nil

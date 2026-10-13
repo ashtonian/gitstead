@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -16,11 +15,6 @@ import (
 	"github.com/ashtonian/git-mgr/internal/state"
 	"github.com/ashtonian/git-mgr/internal/workspace"
 )
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
-}
 
 // eventsPath is the operation-log file, kept next to the state file so it
 // follows GIT_MGR_STATE / --state.
