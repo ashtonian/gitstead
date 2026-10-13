@@ -121,7 +121,15 @@ func ensureFleet(ctx *Context, cfg *config.Config, st *state.State, names []stri
 // need signing from can sign without a terminal: an agent that can't would
 // stall on its first commit.
 func fleetPlan(ctx *Context, cfg *config.Config, st *state.State, fleet string, names []string, agent, command string, fresh bool) (launch.Plan, error) {
-	if err := checkSigning(ctx, cfg, st, names); err != nil {
+	var copies []state.CopyState
+	for _, name := range names {
+		if ws := st.Workspaces[name]; ws != nil {
+			for _, r := range ws.Replicas {
+				copies = append(copies, r.Copies...)
+			}
+		}
+	}
+	if err := checkSigning(ctx, cfg, st, copies); err != nil {
 		return launch.Plan{}, err
 	}
 	self, err := selfInvocation(ctx)
@@ -134,30 +142,24 @@ func fleetPlan(ctx *Context, cfg *config.Config, st *state.State, fleet string, 
 }
 
 // checkSigning makes a test signature for each account with signing.mode
-// required that covers a repo the workspaces have copies of.
-func checkSigning(ctx *Context, cfg *config.Config, st *state.State, names []string) error {
+// required that covers a repo copies are of: an agent that can't sign
+// without a terminal would stall on its first commit. Every agent launch --
+// fleet open, ws open, ws run -- passes through it.
+func checkSigning(ctx *Context, cfg *config.Config, st *state.State, copies []state.CopyState) error {
 	tested := map[string]bool{}
 	var errs []error
-	for _, name := range names {
-		ws := st.Workspaces[name]
-		if ws == nil {
+	for _, c := range copies {
+		repo := st.Repos[c.Repo]
+		if repo == nil {
 			continue
 		}
-		for _, r := range ws.Replicas {
-			for _, c := range r.Copies {
-				repo := st.Repos[c.Repo]
-				if repo == nil {
-					continue
-				}
-				a := cfg.AccountFor(c.Repo, repo.DiscoveredBy)
-				if a == nil || a.Signing.Mode != "required" || tested[a.Name] {
-					continue
-				}
-				tested[a.Name] = true
-				if err := gitops.TestSign(ctx.GoCtx(), reconcile.AccountConfig(a)); err != nil {
-					errs = append(errs, fmt.Errorf("account %q requires signing, but a test signature failed, so agents would stall on their first commit: %w", a.Name, err))
-				}
-			}
+		a := cfg.AccountFor(c.Repo, repo.DiscoveredBy)
+		if a == nil || a.Signing.Mode != "required" || tested[a.Name] {
+			continue
+		}
+		tested[a.Name] = true
+		if err := gitops.TestSign(ctx.GoCtx(), reconcile.AccountConfig(a)); err != nil {
+			errs = append(errs, fmt.Errorf("account %q requires signing, but a test signature failed, so agents would stall on their first commit: %w", a.Name, err))
 		}
 	}
 	return errors.Join(errs...)
