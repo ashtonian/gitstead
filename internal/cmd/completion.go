@@ -11,7 +11,8 @@ import (
 )
 
 // CompletionPredictors returns kongplete options that complete dynamic values --
-// repo keys, tags, named sets, workspace and fleet names -- for any arg/flag tagged
+// repo keys, tags, named sets, workspace and fleet names, jump targets and archive
+// IDs -- for any arg/flag tagged
 // with the matching `predictor:"..."`. They run at completion time, resolving the
 // state/config path from the env or default, best-effort (no candidates on error).
 func CompletionPredictors() []kongplete.Option {
@@ -22,6 +23,7 @@ func CompletionPredictors() []kongplete.Option {
 		kongplete.WithPredictor("workspace", complete.PredictFunc(func(complete.Args) []string { return completionWorkspaces() })),
 		kongplete.WithPredictor("fleet", complete.PredictFunc(func(complete.Args) []string { return completionFleets() })),
 		kongplete.WithPredictor("target", complete.PredictFunc(func(complete.Args) []string { return completionTargets() })),
+		kongplete.WithPredictor("archive", complete.PredictFunc(func(complete.Args) []string { return completionArchives() })),
 	}
 }
 
@@ -125,6 +127,18 @@ func completionFleets() []string {
 	out := make([]string, 0, len(cfg.Fleets))
 	for _, f := range cfg.Fleets {
 		out = append(out, f.Name)
+	}
+	return out
+}
+
+func completionArchives() []string {
+	st := completionState()
+	if st == nil {
+		return nil
+	}
+	out := make([]string, 0, len(st.Archives))
+	for _, a := range st.Archives {
+		out = append(out, a.ID)
 	}
 	return out
 }

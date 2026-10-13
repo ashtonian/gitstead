@@ -355,3 +355,30 @@ func TestCleanup_CatalogsArchives(t *testing.T) {
 		t.Errorf("result %+v, archives %+v", res, st.Archives)
 	}
 }
+
+// "archive" takes the clone away through Remove -- which moves it -- then
+// untracks the repo and catalogs the archive.
+func TestCleanup_ArchiveMovesAndUntracks(t *testing.T) {
+	st, dir := stalePastGrace(t)
+	archiveDir := t.TempDir()
+	move := func(key string, repo *state.RepoState) (*state.ArchiveEntry, error) {
+		dest := filepath.Join(archiveDir, "a1")
+		return &state.ArchiveEntry{ID: "a1", Path: dest, Repo: key, Clone: true}, os.Rename(repo.LocalPath, dest)
+	}
+	cleanup := config.CleanupConfig{Policy: "archive", GracePeriod: time.Minute, ProtectManual: true}
+
+	res := run(t, st, map[string]bool{}, StaleScope{all: true}, cleanup, move)
+
+	if _, ok := st.Repos["host/owner/repo"]; ok || res.Reaped != 1 {
+		t.Fatalf("archive should untrack the repo, got %+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(archiveDir, "a1", "wip.txt")); err != nil {
+		t.Errorf("the clone wasn't moved: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("the clone is still at %s: %v", dir, err)
+	}
+	if len(st.Archives) != 1 || !st.Archives[0].Clone {
+		t.Errorf("archives %+v", st.Archives)
+	}
+}

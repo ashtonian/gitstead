@@ -39,6 +39,9 @@ type ArchiveMeta struct {
 	// LFS holds the clone's Git LFS objects, which a bundle carries only
 	// pointers to; copy them into the restored repo's .git/lfs/objects.
 	LFS string `json:"lfs,omitempty"`
+	// Clone is where the whole clone was moved, for an archive that kept
+	// all of it rather than a bundle of its unique work.
+	Clone string `json:"clone,omitempty"`
 }
 
 type archiveScope int
@@ -77,7 +80,7 @@ func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("creating archive dir: %w", err)
 	}
-	id := safeName(name) + "-" + time.Now().UTC().Format("20060102T150405.000000000Z")
+	id := newArchiveID(name)
 	bundle := filepath.Join(dir, id+".bundle")
 	metaPath := filepath.Join(dir, id+".json")
 	meta := ArchiveMeta{Source: repoPath, Remotes: remoteURLs(ctx, repoPath), Work: work.String(), Created: time.Now().UTC()}
@@ -178,10 +181,11 @@ func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope
 	return bundle, nil
 }
 
-// ReadArchive returns the description of the archive at path, a bundle or
-// its description, and the archive's ID: its file name without extension.
+// ReadArchive returns the description of the archive at path -- a bundle,
+// an archived clone or its description -- and the archive's ID: its file
+// name without extension.
 func ReadArchive(path string) (ArchiveMeta, string, error) {
-	base := strings.TrimSuffix(strings.TrimSuffix(path, ".bundle"), ".json")
+	base := archiveBase(path)
 	var meta ArchiveMeta
 	data, err := os.ReadFile(base + ".json")
 	if err != nil {
@@ -191,6 +195,47 @@ func ReadArchive(path string) (ArchiveMeta, string, error) {
 		return meta, "", fmt.Errorf("reading %s.json: %w", base, err)
 	}
 	return meta, filepath.Base(base), nil
+}
+
+// DeleteArchive deletes the archive at path: its bundle or archived clone,
+// its description, its LFS objects and its submodules' archives. What is
+// already gone is skipped. Only files of the archive's own name, beside it,
+// are deleted, whatever its description says.
+func DeleteArchive(path string) error {
+	base := archiveBase(path)
+	meta, _, err := ReadArchive(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	for _, sub := range slices.Sorted(maps.Values(meta.Submodules)) {
+		if filepath.Dir(sub) != filepath.Dir(base) {
+			return fmt.Errorf("%s's submodule archive %s isn't beside it", path, sub)
+		}
+		if err := DeleteArchive(sub); err != nil {
+			return err
+		}
+	}
+	dirs := []string{base + ".lfs"}
+	if path == base {
+		dirs = append(dirs, base) // an archived clone
+	}
+	for _, dir := range dirs {
+		if err := pathutil.SafeRemoveAll(dir); err != nil {
+			return err
+		}
+	}
+	for _, f := range []string{base + ".bundle", base + ".json"} {
+		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+// archiveBase is an archive's path without extension: its archived clone,
+// or the name its bundle and description share.
+func archiveBase(path string) string {
+	return strings.TrimSuffix(strings.TrimSuffix(path, ".bundle"), ".json")
 }
 
 func writeMeta(path string, meta ArchiveMeta) error {
@@ -287,6 +332,62 @@ func RemoveClone(ctx context.Context, repoPath, archiveDir, name string, discard
 	return archived, nil
 }
 
+// ArchiveClone moves the whole clone at repoPath into dir, as dir/<id>, with
+// a JSON description beside it at dir/<id>.json, and returns its new path, or
+// "" when it is already gone from disk. Moving loses nothing, so a clone
+// whose work can't be inspected -- or that holds a nested repository a
+// bundle can't -- is moved all the same. A clone with linked worktrees on
+// disk is left in place: moving it would cut them off from their history.
+// With a *pathutil.LeftoverError the clone is archived at the returned path,
+// and only deleting what was left at repoPath failed.
+func ArchiveClone(ctx context.Context, repoPath, dir, name string) (string, error) {
+	if !filepath.IsAbs(repoPath) {
+		return "", fmt.Errorf("refusing to archive clone at non-absolute path %q", repoPath)
+	}
+	if _, err := os.Lstat(repoPath); errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if linked, err := LinkedWorktrees(ctx, repoPath); err != nil {
+		return "", fmt.Errorf("keeping %s: listing its worktrees: %w", repoPath, err)
+	} else if len(linked) > 0 {
+		return "", fmt.Errorf("keeping %s: %w (%s); remove them first", repoPath, ErrHasWorktrees, strings.Join(linked, ", "))
+	}
+
+	id := newArchiveID(name)
+	dest := filepath.Join(dir, id)
+	meta := ArchiveMeta{
+		Source:  repoPath,
+		Remotes: remoteURLs(ctx, repoPath),
+		Work:    "the whole clone",
+		Created: time.Now().UTC(),
+		Clone:   dest,
+		Restore: "git-mgr archives restore " + id,
+	}
+	meta.Branch, _ = Git(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
+	switch work, err := InspectUniqueWork(ctx, repoPath); {
+	case err != nil:
+		meta.Work += fmt.Sprintf(" (its work couldn't be inspected: %v)", err)
+	case work.LostWithClone():
+		meta.Work += ", with " + work.String()
+	}
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("creating archive dir: %w", err)
+	}
+	metaPath := dest + ".json"
+	if err := writeMeta(metaPath, meta); err != nil {
+		return "", err
+	}
+	if err := pathutil.Move(repoPath, dest); err != nil {
+		if leftover := (*pathutil.LeftoverError)(nil); errors.As(err, &leftover) {
+			return dest, err
+		}
+		os.Remove(metaPath)
+		return "", fmt.Errorf("keeping %s: %w", repoPath, err)
+	}
+	return dest, nil
+}
+
 // RemoveWorktree removes the linked worktree at path from source. Unless
 // discard is set it first archives what removal would lose (the working tree,
 // index and detached-HEAD commits); branches stay in source. On an inspection
@@ -332,6 +433,12 @@ func remoteURLs(ctx context.Context, repoPath string) map[string]string {
 		urls[strings.TrimSuffix(strings.TrimPrefix(key, "remote."), ".url")] = url
 	}
 	return urls
+}
+
+// newArchiveID names a new archive of name: unique, sortable by time, and
+// usable as a file name.
+func newArchiveID(name string) string {
+	return safeName(name) + "-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 }
 
 // safeName turns a repo key or member name into a single path component.

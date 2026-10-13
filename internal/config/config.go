@@ -307,9 +307,21 @@ type SyncConfig struct {
 
 // CleanupConfig controls stale repo handling.
 type CleanupConfig struct {
-	Policy        string        `koanf:"policy"         yaml:"policy"         default:"mark_stale" validate:"required,oneof=mark_stale remove remove_and_delete ignore"`
+	Policy        string        `koanf:"policy"         yaml:"policy"         default:"mark_stale" validate:"required,oneof=mark_stale remove remove_and_delete archive ignore"`
 	GracePeriod   time.Duration `koanf:"grace_period"   yaml:"grace_period"   default:"720h"       validate:"min=0"`
 	ProtectManual bool          `koanf:"protect_manual" yaml:"protect_manual" default:"true"`
+}
+
+// Untracks reports whether the policy stops tracking repos stale past the
+// grace period.
+func (c CleanupConfig) Untracks() bool {
+	return c.Policy == "remove" || c.TakesClones()
+}
+
+// TakesClones reports whether the policy also takes their clones away:
+// remove_and_delete deletes them, archive moves them into the archive.
+func (c CleanupConfig) TakesClones() bool {
+	return c.Policy == "remove_and_delete" || c.Policy == "archive"
 }
 
 // BackupCfg controls backup behavior (renamed to avoid collision with gitops.BackupConfig).

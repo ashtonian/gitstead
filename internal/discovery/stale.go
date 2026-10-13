@@ -19,10 +19,10 @@ type CleanupResult struct {
 	Kept map[string]error
 }
 
-// RemoveFunc deletes a stale repo's files. When it cannot do so without
-// losing work it must leave them in place and return an error.
-// It returns the catalog entry of the archive it saved the repo's unique
-// work to, nil when there was none.
+// RemoveFunc takes a stale repo's clone away -- deletes it, or moves it into
+// the archive. When it cannot do so without losing work it must leave the
+// clone in place and return an error. It returns the catalog entry of the
+// archive it made, nil when there was none.
 type RemoveFunc func(key string, repo *state.RepoState) (*state.ArchiveEntry, error)
 
 // StaleScope is the set of tracked repos a discovery pass is entitled to judge. A
@@ -60,13 +60,13 @@ func (s StaleScope) Covers(repo *state.RepoState) bool {
 }
 
 // Cleanup judges tracked repos against what a discovery pass found: repos in
-// scope it no longer found go stale, and under a reaping policy the ones
-// stale past the grace period are cleaned up -- "remove" untracks them,
-// "remove_and_delete" deletes their files through Remove first and untracks
-// only those it deleted.
+// scope it no longer found go stale, and under a policy that untracks, the
+// ones stale past the grace period are cleaned up -- "remove" untracks them;
+// "remove_and_delete" and "archive" take their clones away through Remove
+// first and untrack only those it took.
 type Cleanup struct {
 	Config config.CleanupConfig
-	// Remove deletes a repo's files under remove_and_delete.
+	// Remove deletes or archives a repo's clone, as the policy says.
 	Remove RemoveFunc
 	// Update runs a change to the state under the state lock and saves it.
 	Update func(change func(*state.State) error) error
@@ -109,7 +109,7 @@ func (c Cleanup) Run(st *state.State, discovered map[string]bool, scope StaleSco
 		}
 		return nil
 	})
-	if err != nil || c.Config.Policy != "remove_and_delete" || len(due) == 0 {
+	if err != nil || !c.Config.TakesClones() || len(due) == 0 {
 		return res, err
 	}
 
@@ -157,7 +157,8 @@ type staleRepo struct {
 }
 
 // mark updates the stale state of every repo in scope and returns the ones
-// due for cleanup: stale past the grace period, under a reaping policy. The
+// due for cleanup: stale past the grace period, under a policy that
+// untracks. The
 // grace period runs from the persisted StaleSince, so a repo that only just
 // went missing is never due.
 func (c Cleanup) mark(st *state.State, discovered map[string]bool, scope StaleScope) (newlyStale int, due []staleRepo) {
@@ -165,7 +166,6 @@ func (c Cleanup) mark(st *state.State, discovered map[string]bool, scope StaleSc
 	if c.Now != nil {
 		now = c.Now()
 	}
-	reaps := c.Config.Policy == "remove" || c.Config.Policy == "remove_and_delete"
 
 	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
 		repo := st.Repos[key]
@@ -191,7 +191,7 @@ func (c Cleanup) mark(st *state.State, discovered map[string]bool, scope StaleSc
 			newlyStale++
 		}
 		repo.Status = "stale"
-		if reaps && now.Sub(repo.StaleSince) > c.Config.GracePeriod {
+		if c.Config.Untracks() && now.Sub(repo.StaleSince) > c.Config.GracePeriod {
 			due = append(due, staleRepo{key, *repo})
 		}
 	}

@@ -130,7 +130,7 @@ writes a config without asking anything.
 | `git-mgr doctor` | Diagnose tooling, auth (tokens/SSH keys), config, and repo-on-disk health. Read-only; `plan`/`apply` fix what config can. |
 | `git-mgr clone <url>` | Clone and track one repo by hand, at its templated path or `--path`. `--tag`. A repo added by hand keeps the path and URL it was given. |
 | `git-mgr adopt <path>` | Track an existing clone where it is. `--scan` for batch, `--dry-run`, `--tag`. |
-| `git-mgr remove <pattern>` | Stop tracking repos. `--tag`/`--set`, `--yes`. `--delete` also removes the clone from disk after archiving its unique work (see [Deleting without losing work](#deleting-without-losing-work)). |
+| `git-mgr remove <pattern>` | Stop tracking repos. `--tag`/`--set`, `--yes`. `--delete` also removes the clone from disk after archiving its unique work (see [Deleting without losing work](#deleting-without-losing-work)); `--archive` moves the clone, whole, into the archive instead (see [Archiving instead of deleting](#archiving-instead-of-deleting)). |
 | `git-mgr run -- <cmd>` | Run a command in each matching repo (parallel). `--repos`/`--tag`/`--set`, `--fail-fast`. |
 | `git-mgr manifest export\|import` | Portable `{url,tags,path}` manifest to rehydrate the repo set on a new machine. |
 | `git-mgr remote-sync` | Back up and take WIP and unpushed commits offsite now, under `remote_sync`. `--repos`, `--tag`, `--set`, `--dry-run`; `--list` shows what every machine left offsite and how to restore it. |
@@ -138,7 +138,7 @@ writes a config without asking anything.
 | `git-mgr report` / `log` | Summarize / list recent activity (clones, backups, syncs…) from the operation log. `--since`, `-n`. |
 | `git-mgr workspace` (`ws`, `wg`) | Manage workspaces: repos × agents, each agent in a copy of its own. See [Workspaces](#workspaces). |
 | `git-mgr fleet` | Open several workspaces' agents side by side with tmux, iTerm, Muxy or a plugin; `open`, `plan`, `ls`, `status`, `stop`. See [Fleets](#fleets-and-launchers). |
-| `git-mgr archives ls\|show` | The catalog of unique work saved before copies and repos were deleted, and how to restore each. |
+| `git-mgr archives ls\|show\|restore\|rm` | The catalog of what was saved before copies and repos were taken away -- bundles of unique work, and whole clones -- and how to restore each; `restore` moves an archived clone back, `rm` deletes archives for good. |
 | `git-mgr cd\|path\|open <query>` | Jump to, print, or open in your editor (`--web`: the repo's page) a repo, workspace or agent's folder from part of its name. See [Jump and open](#jump-and-open). |
 | `git-mgr shell-init bash\|zsh\|fish` | Print the shell function that makes `git-mgr cd` change directory. |
 | `git-mgr install-agent` | Install, list (`--list`) or remove (`--uninstall`) background syncs (launchd/systemd/cron); `--name` and `--repos`/`--tag`/`--set` for several. |
@@ -696,7 +696,34 @@ git for-each-ref refs/restored   # heads/*, git-mgr/archive/<id>/{head,worktree,
 
 The `worktree` ref is a commit of the working tree including untracked files;
 `git checkout <ref> -- .` brings them back. Archives are never pruned
-automatically.
+automatically; `git-mgr archives rm <id>` deletes one for good.
+
+### Archiving instead of deleting
+
+`cleanup.policy: archive` and `remove --archive` keep the whole clone rather
+than deleting it, as git-workspace's `archive` does. Past the grace period, a
+repo gone upstream stops being tracked and its clone is moved, untouched, to
+`backup.archive_dir/<repo>-<time>/`, with a `.json` file beside it recording
+where it was, its remotes, its branch and what it held that exists nowhere
+else. Moving loses nothing, so nothing has to be bundled first: a clone a
+bundle can't hold -- a nested repository, a file too big to snapshot -- is
+archived all the same. A clone with linked worktrees, or that workspace
+copies are made from, stays where it is and stays tracked until they are
+gone. Across filesystems the clone is copied in full, each file synced to
+disk, and only then deleted; a failed copy leaves it where it was and
+nothing in the archive. `adopt --scan` skips the archive directory.
+
+```bash
+git-mgr archives ls                    # ID, where it was, what it held
+git-mgr archives restore <id>          # move it back and track it again
+git-mgr archives restore <id> --to ~/scratch/app   # the repo is tracked again meanwhile
+git-mgr archives rm <id>               # delete it for good
+```
+
+A restored clone is tracked by hand, so discovery never judges it stale
+again. If its repo is tracked again meanwhile -- found upstream once more and
+cloned afresh -- `restore` refuses its old place and `--to` puts it elsewhere,
+untracked.
 
 ## Workspaces
 
@@ -816,8 +843,8 @@ When an agent is done, `git-mgr ws retire <workspace> <agent...>` (or
 archived is kept, and its agent shows as `retiring` until a retire finishes.
 `ws rm --delete`, `ws prune` and removals on `git-mgr apply` retire copies the
 same way. `git-mgr archives ls` lists what was saved, from copies and from
-repos `remove --delete` or stale cleanup deleted; `git-mgr archives show <id>`
-prints the restore steps.
+repos `remove --delete`, `remove --archive` or stale cleanup took away;
+`git-mgr archives show <id>` prints the restore steps.
 
 A workspace created from flags or adopted is kept as recorded: `ws ensure`
 makes its missing copies again, and only `ws rm` removes it. Declared
@@ -983,7 +1010,7 @@ so `git-mgr ws create` or `git-mgr clone` work normally while a long sync is
 running. `min_fetch_interval` skips recently-fetched repos, and `auto_discover`
 picks up new repos. It never pulls or merges, and it moves or deletes a repo
 only if you configure it to (`reconcile.auto: all`,
-`cleanup.policy: remove_and_delete`).
+`cleanup.policy: remove_and_delete` or `archive`).
 
 Nothing waits on a person or hangs forever:
 
@@ -1199,8 +1226,13 @@ go build -ldflags="-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD)" .
 | `internal/state` | The state file: schema, migrations, locking, atomic writes, and `GroupCommit`, which saves concurrent changes in one write. |
 | `internal/gitops` | Everything that runs git: clone, fetch, status, snapshots, backups, restore, archives, copy IDs, worktrees. |
 | `internal/workspace` | Workspaces: resolving config into replicas and copies, planning their changes on the reconcile engine, making, moving and removing copies, health. Depends on the inventory, never the reverse. |
+| `internal/agent` | Running agents: profile commands, the lease that marks an agent running, and `ws run` itself. |
+| `internal/launch` | Fleets' terminals: the launch plan, and the tmux, iTerm, Muxy and plugin launchers. |
+| `internal/view` | `git-mgr top`: collecting every repo and copy's state and terminal activity, and laying it out. |
+| `internal/jump` | Matching a short query to a repo, workspace, agent or copy, for `cd`, `path` and `open`. |
+| `internal/setup` | `git-mgr setup`'s logic: detecting what the machine has, proposing answers, rendering them into config. |
 | `internal/repourl` | Parsing remote URLs into host/owner/name keys. |
-| `internal/pathtemplate`, `internal/pathutil`, `internal/shellutil`, `internal/ctxutil` | Path templates, deletion guards, shell quoting, optional deadlines. |
+| `internal/pathtemplate`, `internal/pathutil`, `internal/shellutil`, `internal/ctxutil` | Path templates, deletion guards and moves across filesystems, shell quoting, optional deadlines. |
 | `internal/scheduler` | launchd, systemd and cron installation. |
 | `internal/oplog`, `internal/notify` | The operation log and desktop notifications. |
 | `nix/home-manager.nix`, `flake.nix` | The home-manager module: package, config and schedules as systemd timers or launchd agents. |

@@ -66,6 +66,9 @@ func (c *AdoptCmd) scanAndAdopt(ctx *Context, cfg *config.Config, st *state.Stat
 		if d.IsDir() && gitops.IsStaging(d.Name()) {
 			return filepath.SkipDir // a clone in progress
 		}
+		if d.IsDir() && path == cfg.Backup.ArchiveDir {
+			return filepath.SkipDir // clones archived on purpose
+		}
 		if d.IsDir() && d.Name() == ".git" {
 			found = append(found, filepath.Dir(path))
 			return filepath.SkipDir

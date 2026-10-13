@@ -323,6 +323,10 @@ cleanup:
   # What happens when a repo is no longer found by discovery:
   #   mark_stale       - Set status to "stale" (visible in `git-mgr status --stale`)
   #   remove           - Remove from state after grace_period (keep files on disk)
+  #   archive          - Remove from state after grace_period and move the clone,
+  #                       whole, into backup.archive_dir (`git-mgr archives
+  #                       restore` puts it back); a clone with linked worktrees
+  #                       or workspace copies is kept and stays tracked
   #   remove_and_delete - Remove from state AND delete from disk after grace_period
   #                       (unique work is archived to backup.archive_dir first;
   #                       a repo that can't be archived is kept and stays tracked)
@@ -331,7 +335,7 @@ cleanup:
   # but its local work is still backed up.
   policy: "mark_stale"
 
-  # Grace period before remove/remove_and_delete takes effect.
+  # Grace period before remove, archive or remove_and_delete takes effect.
   grace_period: "720h"    # 30 days
 
   # Never judge repos added by hand: `git-mgr clone`, `adopt`, and `repos:`
@@ -375,11 +379,12 @@ backup:
   # Default: ~/.local/share/git-mgr/patches/
   patch_dir: ""
 
-  # Before git-mgr deletes a clone or worktree (wg rm --delete, wg prune,
+  # Before git-mgr deletes a clone or worktree (ws rm --delete, ws prune,
   # remove --delete, stale cleanup), any unique work -- uncommitted changes,
   # untracked files, stashes, unpushed commits -- is saved here as a verified
   # git bundle with a .json file describing how to restore it. If that fails,
-  # nothing is deleted.
+  # nothing is deleted. Clones archived whole (cleanup.policy archive, remove
+  # --archive) are moved here too. `git-mgr archives ls` lists everything here.
   # Default: ~/.local/share/git-mgr/archive/
   archive_dir: ""
 
