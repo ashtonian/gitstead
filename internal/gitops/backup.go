@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -76,6 +78,18 @@ func WithClock(now func() time.Time) BackupOption { return func(c *BackupConfig)
 // copy gets its own namespace.
 const backupRefPrefix = "refs/git-mgr/backups/"
 
+// submoduleRefPrefix holds, as <prefix><copy ID>/<backup ID>, a blob listing
+// the submodules' backups that go with a backup (SubmoduleBackups as JSON),
+// for a backup kept only as a snapshot ref.
+const submoduleRefPrefix = "refs/git-mgr/backup-submodules/"
+
+// SubmoduleBackup names the backup of one submodule that goes with its
+// parent's: the submodule's own copy ID and backup ID.
+type SubmoduleBackup struct {
+	CopyID string `json:"copy_id"`
+	ID     string `json:"id"`
+}
+
 // BackupOutcome is what a backup run did.
 type BackupOutcome int
 
@@ -106,6 +120,9 @@ type BackupResult struct {
 	PatchDir      string // patch backup directory; "" if the strategy keeps none or it failed
 	Skipped       []SkippedFile
 	IndexUnmerged bool
+	// Submodules holds, by path, the backups of the checked-out submodules
+	// that had uncommitted work.
+	Submodules map[string]*BackupResult
 }
 
 // Dirty reports whether the working copy had anything to back up.
@@ -115,11 +132,50 @@ func (r *BackupResult) Dirty() bool { return r.Outcome != BackupClean }
 // and unstaged changes and untracked files within cfg.Limits. It never touches
 // the working tree, the index, index.lock, branches or the stash.
 //
+// Each checked-out submodule with uncommitted work is backed up the same way,
+// as a working copy of its own -- its own copy ID, refs and patch folder --
+// and the parent's backup records which of the submodules' backups go with
+// it, so restoring it restores theirs.
+//
 // An unchanged state is not saved again. Old backups are pruned by
 // cfg.Retention, and only after a new one is complete. Every requested part
 // that fails is reported in the error; the result still describes what was
 // saved.
 func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResult, error) {
+	paths, err := Submodules(ctx, repoPath)
+	if err != nil {
+		return &BackupResult{}, err
+	}
+	var errs []error
+	subs := map[string]SubmoduleBackup{}
+	results := map[string]*BackupResult{}
+	for _, path := range paths {
+		r, err := backupRepo(ctx, filepath.Join(repoPath, path), cfg, nil)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("submodule %s: %w", path, err))
+		}
+		if r.Dirty() {
+			results[path] = r
+		}
+		if r.ID != "" {
+			subs[path] = SubmoduleBackup{CopyID: r.CopyID, ID: r.ID}
+		}
+	}
+	res, err := backupRepo(ctx, repoPath, cfg, subs)
+	if len(results) > 0 {
+		res.Submodules = results
+	}
+	for _, path := range slices.Sorted(maps.Keys(results)) {
+		for _, s := range results[path].Skipped {
+			res.Skipped = append(res.Skipped, SkippedFile{Path: path + "/" + s.Path, Reason: s.Reason})
+		}
+	}
+	return res, errors.Join(append([]error{err}, errs...)...)
+}
+
+// backupRepo backs up one working copy, not its submodules; subs are the
+// submodules' backups that go with it, which make it dirty by themselves.
+func backupRepo(ctx context.Context, repoPath string, cfg BackupConfig, subs map[string]SubmoduleBackup) (*BackupResult, error) {
 	res := &BackupResult{}
 	untracked := "--untracked-files=no"
 	if cfg.Limits.Untracked {
@@ -129,7 +185,7 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 	if err != nil {
 		return res, fmt.Errorf("reading status of %s: %w", repoPath, err)
 	}
-	if len(status) == 0 {
+	if len(status) == 0 && len(subs) == 0 {
 		return res, nil
 	}
 
@@ -150,21 +206,21 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 	}
 
 	var errs []error
-	if latest := lastBackup(backups); latest != nil && latest.snapshot() == snap.Commit &&
+	if latest := lastBackup(backups); latest != nil && latest.snapshot() == snap.Commit && maps.Equal(latest.Submodules, subs) &&
 		(!wantRef || latest.Ref != "") && (!wantPatch || latest.PatchDir != "") {
 		res.Outcome, res.ID, res.Ref, res.PatchDir = BackupUnchanged, latest.ID, latest.Ref, latest.PatchDir
 	} else {
 		id := newBackupID(cfg.Now(), latest)
 		if wantRef {
 			ref := backupRefPrefix + res.CopyID + "/" + id
-			if _, err := Git(ctx, repoPath, "update-ref", ref, snap.Commit, ""); err != nil {
+			if err := saveSnapshotRef(ctx, repoPath, ref, submoduleRefPrefix+res.CopyID+"/"+id, snap.Commit, subs); err != nil {
 				errs = append(errs, fmt.Errorf("saving snapshot ref: %w", err))
 			} else {
 				res.Ref = ref
 			}
 		}
 		if wantPatch {
-			if dir, err := writePatchBackup(ctx, repoPath, cfg.PatchDir, res.CopyID, id, snap, cfg.Now()); err != nil {
+			if dir, err := writePatchBackup(ctx, repoPath, cfg.PatchDir, res.CopyID, id, snap, subs, cfg.Now()); err != nil {
 				errs = append(errs, fmt.Errorf("saving patch backup: %w", err))
 			} else {
 				res.PatchDir = dir
@@ -189,6 +245,27 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 	return res, nil
 }
 
+// saveSnapshotRef points ref at the snapshot commit and, when there are
+// submodules' backups, subsRef at a blob listing them. The list is written
+// first, so a ref is never left without the submodules that go with it.
+func saveSnapshotRef(ctx context.Context, repoPath, ref, subsRef, commit string, subs map[string]SubmoduleBackup) error {
+	if len(subs) > 0 {
+		data, err := json.Marshal(subs)
+		if err != nil {
+			return err
+		}
+		blob, err := gitWithStdin(ctx, repoPath, nil, data, "hash-object", "-w", "--stdin")
+		if err != nil {
+			return err
+		}
+		if _, err := Git(ctx, repoPath, "update-ref", subsRef, blob, ""); err != nil {
+			return err
+		}
+	}
+	_, err := Git(ctx, repoPath, "update-ref", ref, commit, "")
+	return err
+}
+
 // newBackupID names a backup taken at now, later than latest so IDs stay
 // unique and ordered even within one millisecond.
 func newBackupID(now time.Time, latest *BackupInfo) string {
@@ -209,13 +286,13 @@ const partialSuffix = ".partial"
 // staged and unstaged changes as patches, the untracked files as a tarball,
 // and metadata.json. They outlive the repository. The directory is built under
 // a partial name and published with one rename.
-func writePatchBackup(ctx context.Context, repoPath, patchRoot, copyID, id string, snap Snapshot, now time.Time) (string, error) {
+func writePatchBackup(ctx context.Context, repoPath, patchRoot, copyID, id string, snap Snapshot, subs map[string]SubmoduleBackup, now time.Time) (string, error) {
 	dir := filepath.Join(patchRoot, copyID, id)
 	partial := dir + partialSuffix
 	if err := os.MkdirAll(partial, 0o700); err != nil {
 		return "", fmt.Errorf("creating patch dir: %w", err)
 	}
-	if err := writePatchFiles(ctx, repoPath, partial, copyID, id, snap, now); err != nil {
+	if err := writePatchFiles(ctx, repoPath, partial, copyID, id, snap, subs, now); err != nil {
 		os.RemoveAll(partial)
 		return "", err
 	}
@@ -229,7 +306,7 @@ func writePatchBackup(ctx context.Context, repoPath, patchRoot, copyID, id strin
 	return dir, nil
 }
 
-func writePatchFiles(ctx context.Context, repoPath, dir, copyID, id string, snap Snapshot, now time.Time) error {
+func writePatchFiles(ctx context.Context, repoPath, dir, copyID, id string, snap Snapshot, subs map[string]SubmoduleBackup, now time.Time) error {
 	baseTree, err := treeOf(ctx, repoPath, snap.Base)
 	if err != nil {
 		return err
@@ -249,6 +326,9 @@ func writePatchFiles(ctx context.Context, repoPath, dir, copyID, id string, snap
 		ID: id, CopyID: copyID, Path: repoPath, Created: now.UTC(),
 		Snapshot: snap.Commit, Base: snap.Base, Branch: currentBranchLabel(ctx, repoPath),
 		IndexUnmerged: snap.IndexUnmerged, Skipped: snap.Skipped,
+	}
+	if len(subs) > 0 {
+		meta.Submodules = subs
 	}
 	return writeJSON(filepath.Join(dir, metadataFile), meta)
 }
@@ -411,7 +491,9 @@ func pruneBackupRefs(ctx context.Context, repoPath, copyID string, r Retention, 
 	for _, id := range r.expired(ids, now) {
 		if _, err := Git(ctx, repoPath, "update-ref", "-d", prefix+id); err != nil {
 			slog.Warn("pruning backup ref", "repo", repoPath, "ref", prefix+id, "error", err)
+			continue
 		}
+		deleteRefs(ctx, repoPath, submoduleRefPrefix+copyID+"/"+id)
 	}
 }
 
@@ -429,5 +511,6 @@ func prunePatchBackups(patchRoot, copyID string, r Retention, now time.Time) {
 func deleteCopyBackupRefs(ctx context.Context, repoPath, copyID string) {
 	if copyID != "" {
 		deleteRefs(ctx, repoPath, backupRefPrefix+copyID+"/")
+		deleteRefs(ctx, repoPath, submoduleRefPrefix+copyID+"/")
 	}
 }

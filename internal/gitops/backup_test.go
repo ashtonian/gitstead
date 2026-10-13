@@ -540,3 +540,107 @@ func TestBackup_FailedPatchKeepsEarlierBackups(t *testing.T) {
 		t.Fatalf("the earlier backup must survive and no partial may remain, got %v", names)
 	}
 }
+
+// superWithSubmodule returns a clone with a submodule checked out at lib.
+func superWithSubmodule(t *testing.T) (super, lib string) {
+	t.Helper()
+	root := t.TempDir()
+	subRemote := filepath.Join(root, "lib.git")
+	mustGit(t, root, "init", "-q", "--bare", "-b", "main", subRemote)
+	seed := filepath.Join(root, "seed")
+	mustGit(t, root, "clone", "-q", subRemote, seed)
+	writeFile(t, filepath.Join(seed, "lib.txt"), []byte("lib\n"))
+	mustGit(t, seed, "add", ".")
+	mustGit(t, seed, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "lib")
+	mustGit(t, seed, "push", "-q", "origin", "HEAD:main")
+
+	super = filepath.Join(root, "super")
+	mustGit(t, root, "init", "-q", "-b", "main", super)
+	writeFile(t, filepath.Join(super, "app.txt"), []byte("app\n"))
+	mustGit(t, super, "-c", "protocol.file.allow=always", "submodule", "add", "-q", subRemote, "lib")
+	mustGit(t, super, "add", ".")
+	mustGit(t, super, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "super")
+	return super, filepath.Join(super, "lib")
+}
+
+// Work inside a submodule is backed up with its parent's and restored with
+// it, whichever form the backup takes, even when the parent has none of its
+// own.
+func TestBackup_RestoresSubmoduleWork(t *testing.T) {
+	ctx := context.Background()
+	for _, strategy := range []string{"stash-ref", "patch", "both"} {
+		for _, parentDirty := range []bool{false, true} {
+			for _, into := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/parent dirty=%v/into=%v", strategy, parentDirty, into), func(t *testing.T) {
+					super, lib := superWithSubmodule(t)
+					writeFile(t, filepath.Join(lib, "lib.txt"), []byte("edited in the submodule\n"))
+					writeFile(t, filepath.Join(lib, "new.txt"), []byte("untracked in the submodule\n"))
+					if parentDirty {
+						writeFile(t, filepath.Join(super, "app.txt"), []byte("edited\n"))
+					}
+					wantSuper, wantLib := captureState(t, super), captureState(t, lib)
+					patchRoot := t.TempDir()
+					cfg := gitops.NewBackupConfig(gitops.WithStrategy(strategy), gitops.WithPatchDir(patchRoot))
+
+					res, err := gitops.Backup(ctx, super, cfg)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if res.Outcome != gitops.BackupSaved || res.Submodules["lib"] == nil || res.Submodules["lib"].Outcome != gitops.BackupSaved {
+						t.Fatalf("backup: %+v", res)
+					}
+					if again, err := gitops.Backup(ctx, super, cfg); err != nil || again.Outcome != gitops.BackupUnchanged {
+						t.Fatalf("an unchanged state was saved again: %+v, %v", again, err)
+					}
+					b, err := gitops.FindBackup(ctx, super, patchRoot, "latest")
+					if err != nil {
+						t.Fatal(err)
+					}
+					if into {
+						scratch := filepath.Join(t.TempDir(), "scratch")
+						if err := gitops.RestoreBackupInto(ctx, super, b, scratch); err != nil {
+							t.Fatal(err)
+						}
+						assertSameState(t, wantLib, captureState(t, filepath.Join(scratch, "lib")))
+						if parentDirty {
+							if got, _ := os.ReadFile(filepath.Join(scratch, "app.txt")); string(got) != "edited\n" {
+								t.Errorf("restored app.txt = %q", got)
+							}
+						}
+						return
+					}
+					resetToHead(t, lib)
+					resetToHead(t, super)
+					if err := gitops.ApplyBackup(ctx, super, b); err != nil {
+						t.Fatal(err)
+					}
+					assertSameState(t, wantLib, captureState(t, lib))
+					assertSameState(t, wantSuper, captureState(t, super))
+				})
+			}
+		}
+	}
+}
+
+// A submodule's new work makes a new backup of its parent, even when the
+// parent's own work is unchanged.
+func TestBackup_SubmoduleChangeIsANewBackup(t *testing.T) {
+	ctx := context.Background()
+	super, lib := superWithSubmodule(t)
+	clock := newTestClock()
+	cfg := gitops.NewBackupConfig(gitops.WithPatchDir(t.TempDir()), gitops.WithClock(clock.Now))
+	writeFile(t, filepath.Join(lib, "lib.txt"), []byte("one\n"))
+	first, err := gitops.Backup(ctx, super, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(time.Minute)
+	writeFile(t, filepath.Join(lib, "lib.txt"), []byte("two\n"))
+	second, err := gitops.Backup(ctx, super, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Outcome != gitops.BackupSaved || second.ID == first.ID {
+		t.Fatalf("second backup: %+v, first %s", second, first.ID)
+	}
+}

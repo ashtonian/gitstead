@@ -1186,6 +1186,22 @@ worktrees share one ref namespace, so the copy ID keeps their backups, and their
 retention, apart. The ID moves with the copy (`git worktree move`, `mv` of a
 clone).
 
+### Submodules
+
+Each checked-out submodule (recursively) is a working copy of its own, backed
+up first, with its own copy ID, refs (in its own git dir) and patch folder.
+The parent's backup records the submodules' backups that go with it, as
+`{<path>: {copy_id, id}}`: in `metadata.json` (`submodules`) for a patch
+backup, and for a snapshot ref in a blob at
+`refs/git-mgr/backup-submodules/<copy-id>/<backup-id>`, written before the
+snapshot ref and pruned with it. A dirty submodule makes its parent's backup
+dirty even when the parent has no work of its own, and a changed submodule
+backup makes a new parent backup. Restoring the parent applies each recorded
+submodule backup in the submodule (`--into`: clones the submodule into its
+place in the scratch clone and restores there), found by its recorded copy
+ID. Untracked paths a submodule's backup left out are reported as
+`<path>/<file>`.
+
 ### Snapshot layout
 
 ```

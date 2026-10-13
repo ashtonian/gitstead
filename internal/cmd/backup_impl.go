@@ -38,6 +38,9 @@ func describeBackup(br *gitops.BackupResult) string {
 	if br.IndexUnmerged {
 		parts = append(parts, "index had conflicts, kept as unstaged")
 	}
+	if n := len(br.Submodules); n > 0 {
+		parts = append(parts, fmt.Sprintf("with %d submodule(s): %s", n, strings.Join(slices.Sorted(maps.Keys(br.Submodules)), ", ")))
+	}
 	if n := len(br.Skipped); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d untracked path(s) left out: %s", n, skippedSummary(br.Skipped)))
 	}

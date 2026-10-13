@@ -742,6 +742,10 @@ Guarantees:
   each other's backups.
 - **No duplicates.** A state identical to the latest backup isn't saved again;
   the run reports `unchanged since <id>`.
+- **Submodules too.** Each checked-out submodule with uncommitted work is
+  backed up as a working copy of its own, and its parent's backup records
+  which of the submodule's backups goes with it: `restore --apply` restores
+  them in place, `restore --into` as clones of their own in their places.
 - **Nothing silently skipped.** Untracked files over `max_untracked_file_mb`
   (50) or past `max_untracked_total_mb` (500), unreadable files and nested git
   repositories are left out *and reported* with the reason, in the command's
@@ -777,6 +781,9 @@ copies alike:
   such commits is saved as `<namespace>/heads/<branch>`; your branches are
   never pushed. Once a remote has the commits (you pushed for real), the
   saved copy is deleted.
+
+A submodule's uncommitted work is backed up locally with its parent's (see
+above) but not taken offsite; commit and push it in the submodule.
 
 `<namespace>` is `refs/git-mgr/<machine>/<copy>`: every machine and every copy
 -- each agent's clone or worktree -- owns its refs, so copies on one branch

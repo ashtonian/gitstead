@@ -79,12 +79,14 @@ type copyJSON struct {
 	Path      string `json:"path"`
 	OK        bool   `json:"ok"`
 	// Backup is "clean", "saved" or "unchanged"; "" when it wasn't backed up.
-	Backup      string   `json:"backup,omitempty"`
-	BackupID    string   `json:"backup_id,omitempty"`
-	BackupError string   `json:"backup_error,omitempty"`
-	LeftOut     []string `json:"left_out,omitempty"` // untracked files too big to back up
-	Fetched     bool     `json:"fetched,omitempty"`
-	FetchError  string   `json:"fetch_error,omitempty"`
+	Backup      string `json:"backup,omitempty"`
+	BackupID    string `json:"backup_id,omitempty"`
+	BackupError string `json:"backup_error,omitempty"`
+	// Submodules maps each submodule backed up with it to its backup's ID.
+	Submodules map[string]string `json:"submodules,omitempty"`
+	LeftOut    []string          `json:"left_out,omitempty"` // untracked files too big to back up
+	Fetched    bool              `json:"fetched,omitempty"`
+	FetchError string            `json:"fetch_error,omitempty"`
 	// Offsite is what the push did: refs written or deleted; nil when it
 	// didn't run.
 	Offsite      []string `json:"offsite,omitempty"`
@@ -101,6 +103,12 @@ func copiesJSON(outcomes []copyOutcome) []copyJSON {
 		}
 		if o.backup != nil {
 			c.Backup, c.BackupID = o.backup.Outcome.String(), o.backup.ID
+			for path, sub := range o.backup.Submodules {
+				if c.Submodules == nil {
+					c.Submodules = map[string]string{}
+				}
+				c.Submodules[path] = sub.ID
+			}
 			for _, s := range o.backup.Skipped {
 				c.LeftOut = append(c.LeftOut, s.Path)
 			}
@@ -140,11 +148,13 @@ type backupJSON struct {
 	PatchDir string   `json:"patch_dir,omitempty"`
 	Branch   string   `json:"branch,omitempty"`
 	LeftOut  []string `json:"left_out,omitempty"`
-	Restore  []string `json:"restore"`
+	// Submodules are the submodules' backups restored with it, by path.
+	Submodules map[string]gitops.SubmoduleBackup `json:"submodules,omitempty"`
+	Restore    []string                          `json:"restore"`
 }
 
 func backupInfoJSON(b gitops.BackupInfo) backupJSON {
-	j := backupJSON{ID: b.ID, CopyID: b.CopyID, Ref: b.Ref, Commit: b.Commit, PatchDir: b.PatchDir, Restore: b.RestoreCommands()}
+	j := backupJSON{ID: b.ID, CopyID: b.CopyID, Ref: b.Ref, Commit: b.Commit, PatchDir: b.PatchDir, Submodules: b.Submodules, Restore: b.RestoreCommands()}
 	if b.Meta != nil {
 		j.Branch = b.Meta.Branch
 		for _, s := range b.Meta.Skipped {
