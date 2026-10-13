@@ -554,6 +554,7 @@ agents: []
   #   command: "claude"
   #   resume: "claude --continue"   # typed instead when the agent ran here before
   #   env: {}                       # extra environment for the agent
+  #   status: ""                    # a command whose first line ws status shows while it runs
   # - name: codex
   #   command: "codex"
 

@@ -14,12 +14,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/pathutil"
+	"github.com/ashtonian/git-mgr/internal/procutil"
 )
 
 // Events.
@@ -134,17 +134,7 @@ func (r Runner) run(ctx context.Context, h Hook, command string, out io.Writer) 
 	cmd.Dir = h.Dir
 	cmd.Env = append(append(config.Environ(), gitops.BatchEnv()...), h.environ()...)
 	cmd.Stdout, cmd.Stderr = out, out
-	// A session of its own: no terminal to prompt on, and the whole group --
-	// whatever the command started -- is killed with it.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Cancel = func() error {
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
-		}
-		return err
-	}
-	cmd.WaitDelay = killGrace
+	procutil.Detach(cmd, killGrace)
 	err := cmd.Run()
 	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) && r.Timeout > 0 {
 		return fmt.Errorf("timed out after %s (hooks.timeout): %w", r.Timeout, err)

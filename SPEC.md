@@ -530,6 +530,9 @@ agents:
   - name: claude
     command: "claude"
     resume: "claude --continue"
+    # status: a shell command run in a running agent's replica (its env,
+    # sync.inspect_timeout); its first line is the agent's status in ws status
+    # and fleet status (agent_status in --json). Optional.
 
 # How new clones are made; also accounts[].clone and overrides[].clone, each
 # overriding the one before field by field.
