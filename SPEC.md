@@ -814,7 +814,9 @@ last_sync: "2026-04-17T10:30:00Z"
 # Names this machine in offsite refs; set on first use.
 machine: mac-1a2b3c
 
-# Map of repos, keyed by canonical identifier (host/owner/name).
+# Map of repos, keyed by canonical identifier (host/owner/name). The host
+# never carries a port, whether it came from a provider's URL or a clone's
+# origin, so a repo discovered and the same repo adopted share one key.
 repos:
   github.com/ashtonian/git-mgr:
     # --- What git-mgr applied ---

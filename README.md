@@ -286,6 +286,11 @@ trying another source, which could send one account's token to another
 account's API. A provider that sets none uses `GITHUB_TOKEN` / `GITLAB_TOKEN` /
 `GITEA_TOKEN` / `FORGEJO_TOKEN`, and without those sees only public repos.
 
+A repo's key and `{{.Host}}` are its host without a port --
+`gitea.company.com/acme/app` for a provider at `https://gitea.company.com:3000`
+-- the same key a clone of it gets when adopted, over SSH or HTTPS, and the
+host an account's `hosts:` names.
+
 ### Discovery rules
 
 Each rule selects repos from one provider. Use `org`/`user` for GitHub and

@@ -52,12 +52,14 @@ func newGHClient(token, rawURL string, apiTimeout time.Duration) (*github.Client
 }
 
 // hostFromURL extracts the host from a provider URL, defaulting to fallback.
+// It drops any port, as repourl does: a repo's key is the same whether it was
+// discovered, or adopted from a clone over SSH or HTTPS, whose ports differ.
 func hostFromURL(rawURL, fallback string) string {
 	if rawURL == "" {
 		return fallback
 	}
-	if u, err := url.Parse(rawURL); err == nil && u.Host != "" {
-		return u.Host
+	if u, err := url.Parse(rawURL); err == nil && u.Hostname() != "" {
+		return u.Hostname()
 	}
 	return fallback
 }
