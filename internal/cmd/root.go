@@ -31,6 +31,7 @@ type CLI struct {
 	Backup     BackupCmd     `cmd:"" help:"Backup uncommitted changes."`
 	Restore    RestoreCmd    `cmd:"" help:"Restore a backup (print steps, apply, or --into a scratch dir)."`
 	Status     StatusCmd     `cmd:"" help:"Show state of all managed repos."`
+	Top        TopCmd        `cmd:"" help:"A live view of every repo and workspace copy: working trees, agents, activity."`
 	Doctor     DoctorCmd     `cmd:"" help:"Diagnose tooling, auth, config, and repo health."`
 	Run        RunCmd        `cmd:"" help:"Run a command in each matching repo (after --)."`
 	Clone      CloneCmd      `cmd:"" help:"Manually clone and track a repo."`

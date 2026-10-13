@@ -1532,32 +1532,34 @@ The README's code map says what each package owns.
 
 ## Dependencies
 
+The direct dependencies, from `go.mod`:
+
 ```
-# CLI & Config
-github.com/alecthomas/kong          # CLI framework (struct-based, clean subcommands)
-github.com/knadh/koanf/v2           # Config loading (YAML + env + CLI flag layering)
-github.com/knadh/koanf/parsers/yaml
-github.com/knadh/koanf/providers/file
-github.com/knadh/koanf/providers/env
-github.com/go-playground/validator/v10  # Struct validation
+# CLI and config
+github.com/alecthomas/kong                 # CLI framework
+github.com/willabides/kongplete            # shell completion for kong
+github.com/posener/complete
+github.com/ashtonian/pkg/config   # config loading (koanf underneath); to be its own module
+github.com/go-playground/validator/v10     # struct validation
+gopkg.in/yaml.v3                           # state file, config edits
 
 # Provider APIs
-github.com/google/go-github/v88     # GitHub API (official, Google-maintained)
-code.gitea.io/sdk/gitea             # Gitea/Forgejo API (official)
-gitlab.com/gitlab-org/api/client-go  # GitLab API (official, GitLab-maintained)
-golang.org/x/oauth2                  # Token-based HTTP auth
+github.com/google/go-github/v88            # GitHub
+code.gitea.io/sdk/gitea                    # Gitea / Forgejo
+gitlab.com/gitlab-org/api/client-go        # GitLab
 
-# Concurrency
-golang.org/x/sync/errgroup          # Bounded concurrency
+# Terminal
+charm.land/huh/v2                          # setup wizard and pickers
+charm.land/bubbletea/v2                    # git-mgr top
+charm.land/lipgloss/v2                     # git-mgr top's styling
+golang.org/x/term                          # is this a terminal, and how wide
 
-# State
-gopkg.in/yaml.v3                    # State file YAML
-
-# UI
-github.com/olekukonez/tablewriter   # Status table rendering
+# Concurrency and the OS
+golang.org/x/sync                          # errgroup
+golang.org/x/sys                           # the terminal's foreground job, for ws stop
 
 # Logging
-log/slog (stdlib)                    # Structured logging
+log/slog (stdlib)
 ```
 
 All dependencies pinned to latest stable versions at build time. No go-git.
@@ -1809,9 +1811,11 @@ from:
    non-blocking flock, holding a JSON record of the run (pid, profile, command,
    launcher, terminal session). Held by another run, refuse. The kernel drops
    the lock when the holder exits, so a held lease always means a live run.
-3. Record the run in the replica's `run:` (profile, command, pid, launcher from
-   `GIT_MGR_LAUNCHER`, session from `GIT_MGR_SESSION`, `TMUX_PANE`,
-   `ITERM_SESSION_ID` or `TERM_SESSION_ID`, start time).
+3. Record the run in the replica's `run:` (profile, command, pid, start time,
+   and the terminal: launcher from `GIT_MGR_LAUNCHER`, else tmux, Muxy or iTerm
+   as their variables show; session from `GIT_MGR_SESSION`, else `TMUX_PANE`,
+   `MUXY_SESSION_ID`, `ITERM_SESSION_ID` or `TERM_SESSION_ID`; for tmux the
+   server's socket, from `$TMUX`), so `git-mgr top` can read its activity.
 4. Run `$SHELL -i -c <command>` in the replica, with the profile's `env` and
    `GIT_MGR_WORKSPACE`, `GIT_MGR_AGENT`, `GIT_MGR_REPLICA`. The command is the
    profile's `resume` when the replica has a run on record (unless `--fresh`).
