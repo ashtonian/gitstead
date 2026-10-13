@@ -465,7 +465,10 @@ entry is upserted -- URL, user tags, `config.PortablePath` of its path
 (`""` when templated) -- and `remove` drops the entries of what it untracked.
 Writes hold an flock (30s wait) on a lock file in the user's cache directory (`git-mgr/locks/manifest-<hash of its path>.lock`), never beside the manifest, and replace the file
 through a synced temp file and rename. Entries match by repo key, so a URL's
-transport may differ. Config itself is never written.
+transport may differ. Config itself is never written, with one exception:
+without `manifest:`, `manifest import` keeps an entry's `account` or
+`ssh_key` in config's `repos:`, edited in place (state can't hold them); a
+read-only config fails that entry, naming what to add.
 | `restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` (clone+apply to a scratch dir), or `--apply` onto the tree (refuses dirty without `--force`). id defaults to `latest`. |
 | `report [--since]` / `log [-n]` | Summarize / list recent activity from the operation log (clone/sync/backup/remove/workspace events and applied changes). |
 | `config --redact` | Print the resolved config with inline provider tokens blanked (token_env/token_command kept), safe to share. |

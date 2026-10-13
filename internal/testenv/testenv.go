@@ -1,7 +1,8 @@
 // Package testenv isolates a package's tests from the machine they run on:
 // the user's git config, any repository the temporary directory sits inside,
 // and the real home directory, where caches and lock files would otherwise
-// land.
+// land. Temporary directories and the home directory tests get are made
+// under one directory, deleted once they have run.
 package testenv
 
 import (
@@ -15,20 +16,30 @@ import (
 // Main isolates the environment, runs the tests and returns their exit code;
 // call it from TestMain as os.Exit(testenv.Main(m)).
 func Main(m *testing.M) int {
-	home, err := os.MkdirTemp("", "git-mgr-test-home-")
+	root, err := os.MkdirTemp("", "git-mgr-test-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "testenv:", err)
 		return 1
 	}
-	defer os.RemoveAll(home)
+	defer os.RemoveAll(root)
+	home, tmp := filepath.Join(root, "home"), filepath.Join(root, "tmp")
+	for _, dir := range []string{home, tmp} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			fmt.Fprintln(os.Stderr, "testenv:", err)
+			return 1
+		}
+	}
 
-	// git stops looking for a repository at the temporary directory, so a
-	// test's directory never turns out to be inside the checkout running it.
-	ceilings := []string{os.TempDir()}
-	if real, err := filepath.EvalSymlinks(os.TempDir()); err == nil && real != os.TempDir() {
+	// Every test's temporary directory is made under tmp, and git stops
+	// looking for a repository there, so a test's directory never turns out
+	// to be inside a repository -- the checkout running it, or one the
+	// system's temporary directory happens to be in.
+	ceilings := []string{tmp}
+	if real, err := filepath.EvalSymlinks(tmp); err == nil && real != tmp {
 		ceilings = append(ceilings, real)
 	}
 	for k, v := range map[string]string{
+		"TMPDIR":                  tmp,
 		"GIT_CONFIG_GLOBAL":       os.DevNull,
 		"GIT_CONFIG_NOSYSTEM":     "1",
 		"GIT_CEILING_DIRECTORIES": strings.Join(ceilings, string(os.PathListSeparator)),

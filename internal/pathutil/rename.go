@@ -9,8 +9,10 @@ import (
 
 // RenameNoReplace renames oldpath to newpath, failing with an error that
 // matches fs.ErrExist when anything is at newpath, even an empty directory.
-// Unlike os.Rename it never replaces what another process put there between
-// a check and the rename.
+// Where the filesystem has an exclusive rename (renameat2 RENAME_NOREPLACE,
+// renamex_np RENAME_EXCL) it never replaces what another process put there
+// meanwhile. Elsewhere it checks first, and an empty directory made between
+// the check and the rename can be replaced -- nothing else can be.
 func RenameNoReplace(oldpath, newpath string) error {
 	err := renameNoReplace(oldpath, newpath)
 	if errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.ENOSYS) {
