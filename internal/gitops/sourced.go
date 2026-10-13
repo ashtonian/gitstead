@@ -31,7 +31,7 @@ var ErrPartialSource = errors.New("the repo's clone is partial (clone.filter); o
 // objects the copy may need. branch is checked out tracking origin's when
 // origin has it, else made at base (see ResolveBase). The clone is staged,
 // as Clone's are.
-func CloneFromSource(ctx context.Context, source, dest, upstream, branch, base string, shared bool) error {
+func CloneFromSource(ctx context.Context, source, dest, upstream, branch, base string, shared bool, opts CloneOptions) error {
 	if IsPartial(ctx, source) {
 		return ErrPartialSource
 	}
@@ -40,12 +40,20 @@ func CloneFromSource(ctx context.Context, source, dest, upstream, branch, base s
 			return err
 		}
 	}
-	return staged(dest, func(staging string) error {
+	env := opts.env()
+	err := staged(dest, func(staging string) error {
 		mode := "--local"
 		if shared {
 			mode = "--shared"
 		}
-		if err := runClone(ctx, nil, source, "clone", "--quiet", mode, "--no-checkout", "--origin", SourceRemote, source, staging); err != nil {
+		args := append([]string{"clone", "--quiet", mode, "--no-checkout", "--origin", SourceRemote}, opts.cloneConfig()...)
+		if err := runClone(ctx, nil, source, append(args, source, staging)...); err != nil {
+			return err
+		}
+		if err := shareLFSObjects(ctx, source, staging, opts.Shape); err != nil {
+			return err
+		}
+		if err := opts.setSparse(ctx, staging, env); err != nil {
 			return err
 		}
 		cloned, err := Git(ctx, staging, "for-each-ref", "--format=%(refname)", "refs/heads")
@@ -66,7 +74,7 @@ func CloneFromSource(ctx context.Context, source, dest, upstream, branch, base s
 				return err
 			}
 		}
-		if err := checkoutBranch(ctx, staging, source, branch, base); err != nil {
+		if err := checkoutBranch(ctx, staging, source, branch, base, env); err != nil {
 			return err
 		}
 		// Drop the local branch the clone made of source's checkout: the copy
@@ -85,14 +93,34 @@ func CloneFromSource(ctx context.Context, source, dest, upstream, branch, base s
 		_, err = CopyID(ctx, staging)
 		return err
 	})
+	if err != nil {
+		return err
+	}
+	return opts.checkoutSubmodules(ctx, dest, env, opts.Filter, opts.Depth)
+}
+
+// shareLFSObjects gives a clone made from source the Git LFS content source
+// already has, hardlinked, so checking it out downloads none of it again.
+func shareLFSObjects(ctx context.Context, source, clone string, s Shape) error {
+	if s.SkipLFS {
+		return nil
+	}
+	objects := filepath.Join(ResolveGitDirs(ctx, source).CommonDir, "lfs", "objects")
+	if !hasFiles(objects) {
+		return nil
+	}
+	if err := linkTree(objects, filepath.Join(clone, ".git", "lfs", "objects")); err != nil {
+		return fmt.Errorf("sharing LFS objects: %w", err)
+	}
+	return nil
 }
 
 // checkoutBranch checks out branch in the copy at path: tracking origin's
 // branch when there is one, else made at base, resolved in path and then in
 // source.
-func checkoutBranch(ctx context.Context, path, source, branch, base string) error {
+func checkoutBranch(ctx context.Context, path, source, branch, base string, env []string) error {
 	if remoteBranchExists(ctx, path, branch) {
-		_, err := Git(ctx, path, "checkout", "--quiet", "-b", branch, "--track", "origin/"+branch)
+		_, err := gitWithEnv(ctx, path, env, "checkout", "--quiet", "-b", branch, "--track", "origin/"+branch)
 		return err
 	}
 	start, err := ResolveBase(ctx, path, base)
@@ -101,32 +129,51 @@ func checkoutBranch(ctx context.Context, path, source, branch, base string) erro
 			return err
 		}
 	}
-	_, err = Git(ctx, path, "checkout", "--quiet", "--no-track", "-b", branch, start)
+	_, err = gitWithEnv(ctx, path, env, "checkout", "--quiet", "--no-track", "-b", branch, start)
 	return err
 }
 
 // AddWorktree adds a linked worktree of the repo at source at dest, on
 // branch: the existing local branch, origin's branch when only origin has it,
-// else a new branch at base (see ResolveBase).
-func AddWorktree(ctx context.Context, source, dest, branch, base string) error {
+// else a new branch at base (see ResolveBase). It checks out what opts.Shape
+// asks for; opts' key, filter and depth clone its submodules. A worktree
+// whose submodules can't all be checked out stays, and a *SubmoduleError
+// says so.
+func AddWorktree(ctx context.Context, source, dest, branch, base string, opts CloneOptions) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
-	var args []string
+	args := []string{"worktree", "add", "--quiet"}
+	if opts.noCheckout() {
+		args = append(args, "--no-checkout")
+	}
 	switch {
 	case BranchExists(ctx, source, branch):
-		args = []string{"worktree", "add", "--quiet", dest, branch}
+		args = append(args, dest, branch)
 	case remoteBranchExists(ctx, source, branch):
-		args = []string{"worktree", "add", "--quiet", "--track", "-b", branch, dest, "origin/" + branch}
+		args = append(args, "--track", "-b", branch, dest, "origin/"+branch)
 	default:
 		start, err := ResolveBase(ctx, source, base)
 		if err != nil {
 			return err
 		}
-		args = []string{"worktree", "add", "--quiet", "--no-track", "-b", branch, dest, start}
+		args = append(args, "--no-track", "-b", branch, dest, start)
 	}
-	_, err := Git(ctx, source, args...)
-	return err
+	env := opts.env()
+	if _, err := gitWithEnv(ctx, source, env, args...); err != nil {
+		return err
+	}
+	err := opts.setSparse(ctx, dest, env)
+	if err == nil {
+		err = opts.fill(ctx, dest, env)
+	}
+	if err != nil {
+		// Left empty, it would later pass for a finished copy; it holds no
+		// work yet, so it goes.
+		_ = WorktreeRemove(ctx, source, dest, true)
+		return err
+	}
+	return opts.checkoutSubmodules(ctx, dest, env, opts.Filter, opts.Depth)
 }
 
 // ResolveBase returns the commit new branches in repo start from: base, or

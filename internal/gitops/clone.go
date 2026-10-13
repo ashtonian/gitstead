@@ -25,26 +25,38 @@ func IsStaging(name string) bool {
 	return strings.HasPrefix(name, stagingPrefix)
 }
 
-// CloneOptions shape a clone.
+// CloneOptions shape a clone, and the checkouts made from it.
 type CloneOptions struct {
-	// SSHKey is the key to clone with; "" uses the default SSH configuration.
+	// SSHKey is the key to clone with -- submodules too; "" uses the default
+	// SSH configuration.
 	SSHKey string
 	// Filter is a partial clone filter, such as blob:none; "" clones every
-	// object.
+	// object. Submodules are cloned with it too.
 	Filter string
 	// Depth limits history to that many commits on every branch; 0 is all.
+	// Submodules are cloned with it too.
 	Depth int
+	// Shape is how much of the repository a checkout holds.
+	Shape
 }
 
-// Clone clones url into destPath, creating parent directories. See staged
-// for how destPath is protected.
+// env is the environment git clones and checks out with.
+func (o CloneOptions) env() []string {
+	env := o.Shape.env()
+	if o.SSHKey != "" {
+		env = append(env, gitSSHCommandEnv(o.SSHKey))
+	}
+	return env
+}
+
+// Clone clones url into destPath, creating parent directories, and checks out
+// what opts.Shape asks for. See staged for how destPath is protected. A clone
+// whose submodules can't all be checked out stays at destPath, and a
+// *SubmoduleError says so.
 func Clone(ctx context.Context, url, destPath string, opts CloneOptions) error {
-	return staged(destPath, func(staging string) error {
-		var env []string
-		if opts.SSHKey != "" {
-			env = []string{gitSSHCommandEnv(opts.SSHKey)}
-		}
-		args := []string{"clone", "--quiet"}
+	env := opts.env()
+	err := staged(destPath, func(staging string) error {
+		args := append([]string{"clone", "--quiet"}, opts.cloneConfig()...)
 		if opts.Filter != "" {
 			args = append(args, "--filter="+opts.Filter)
 		}
@@ -53,8 +65,23 @@ func Clone(ctx context.Context, url, destPath string, opts CloneOptions) error {
 			// agents' copies need the others.
 			args = append(args, fmt.Sprintf("--depth=%d", opts.Depth), "--no-single-branch")
 		}
-		return runClone(ctx, env, url, append(args, url, staging)...)
+		if opts.noCheckout() {
+			args = append(args, "--no-checkout")
+		}
+		if err := runClone(ctx, env, url, append(args, url, staging)...); err != nil {
+			return err
+		}
+		if err := opts.setSparse(ctx, staging, env); err != nil {
+			return err
+		}
+		return opts.fill(ctx, staging, env)
 	})
+	if err != nil {
+		return err
+	}
+	// Submodules are checked out in place: a clone that has everything but
+	// some of them is kept rather than cloned again on every sync.
+	return opts.checkoutSubmodules(ctx, destPath, env, opts.Filter, opts.Depth)
 }
 
 // staged makes a repository at destPath with make, which builds it in an

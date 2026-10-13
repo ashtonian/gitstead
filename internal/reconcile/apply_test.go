@@ -2,6 +2,7 @@ package reconcile_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -436,5 +437,47 @@ func TestApply_CloneFilterAndDepth(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(r.LocalPath, ".git", "shallow")); err != nil {
 			t.Error("the clone isn't shallow")
 		}
+	}
+}
+
+// A clone whose submodule can't be fetched is otherwise whole: it is recorded,
+// so the next run doesn't clone it again, and the failure is reported once.
+func TestApply_CloneWithAnUnreachableSubmoduleIsRecorded(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
+	t.Setenv("GIT_CONFIG_VALUE_0", "always")
+	lib := bareRemote(t, root, "lib")
+	remote := bareRemote(t, root, "app")
+	seed := filepath.Join(root, "seed-app")
+	mustGit(t, seed, "submodule", "add", "-q", "file://"+lib, "lib")
+	mustGit(t, seed, "commit", "-qm", "add lib")
+	mustGit(t, seed, "push", "-q", remote, "main")
+	if err := os.RemoveAll(lib); err != nil {
+		t.Fatal(err)
+	}
+
+	w := newWorld(t, root)
+	w.cfg.Clone.Submodules = true
+	w.cfg.Repos = []config.ManualRepo{{URL: remote}}
+	env := &reconcile.Env{
+		State:       w.st,
+		Update:      func(change func(*state.State) error) error { return w.st.Update(time.Second, change) },
+		Concurrency: w.cfg.Concurrency,
+	}
+	results := w.plan().Apply(context.Background(), env, reconcile.All)
+	var sub *gitops.SubmoduleError
+	if len(results) != 1 || !errors.As(results[0].Err, &sub) {
+		t.Fatalf("want one result failing on the submodule, got %+v", results)
+	}
+	repo := w.st.Repos["local/remotes/app"]
+	if repo == nil || !repo.Cloned {
+		t.Fatalf("the clone should be recorded, got %+v", repo)
+	}
+	if _, err := os.Stat(filepath.Join(repo.LocalPath, "README")); err != nil {
+		t.Errorf("the clone should be on disk: %v", err)
+	}
+	if p := w.plan(); !p.Empty() {
+		t.Errorf("the next run should have nothing to do, got %+v", p)
 	}
 }

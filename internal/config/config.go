@@ -270,13 +270,30 @@ type CloneConfig struct {
 	Filter string `koanf:"filter" yaml:"filter,omitempty"`
 	// Depth limits history to that many commits on every branch; 0 is all.
 	Depth int `koanf:"depth" yaml:"depth,omitempty" validate:"min=0"`
+	// Submodules checks out each new checkout's submodules, recursively,
+	// cloned with Filter and Depth too.
+	Submodules bool `koanf:"submodules" yaml:"submodules,omitempty"`
+	// LFS is "auto", where Git LFS downloads what each checkout needs, or
+	// "skip", where LFS files stay pointers and their content is never
+	// downloaded -- kept as lfs.fetchexclude=* in the repo's git config.
+	LFS string `koanf:"lfs" yaml:"lfs,omitempty" default:"auto" validate:"omitempty,oneof=auto skip"`
+	// Sparse lists the only directories new checkouts hold (cone mode: the
+	// files at the top level, and directly in each listed directory's
+	// parents, come too). Empty checks out everything.
+	Sparse []string `koanf:"sparse" yaml:"sparse,omitempty"`
 }
 
+// SkipLFS reports whether Git LFS content is never downloaded.
+func (c CloneConfig) SkipLFS() bool { return c.LFS == "skip" }
+
 // CloneOverride sets CloneConfig fields for an account or repos. A nil
-// pointer means "not set".
+// pointer means "not set"; an empty sparse list checks out everything.
 type CloneOverride struct {
-	Filter *string `koanf:"filter" yaml:"filter,omitempty"`
-	Depth  *int    `koanf:"depth"  yaml:"depth,omitempty"  validate:"omitempty,min=0"`
+	Filter     *string   `koanf:"filter"     yaml:"filter,omitempty"`
+	Depth      *int      `koanf:"depth"      yaml:"depth,omitempty"      validate:"omitempty,min=0"`
+	Submodules *bool     `koanf:"submodules" yaml:"submodules,omitempty"`
+	LFS        *string   `koanf:"lfs"        yaml:"lfs,omitempty"        validate:"omitempty,oneof=auto skip"`
+	Sparse     *[]string `koanf:"sparse"     yaml:"sparse,omitempty"`
 }
 
 func (o *CloneOverride) apply(c *CloneConfig) {
@@ -288,6 +305,15 @@ func (o *CloneOverride) apply(c *CloneConfig) {
 	}
 	if o.Depth != nil {
 		c.Depth = *o.Depth
+	}
+	if o.Submodules != nil {
+		c.Submodules = *o.Submodules
+	}
+	if o.LFS != nil {
+		c.LFS = *o.LFS
+	}
+	if o.Sparse != nil {
+		c.Sparse = *o.Sparse
 	}
 }
 

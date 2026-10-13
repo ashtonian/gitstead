@@ -305,3 +305,36 @@ func TestLoad_EnvUnderscoreKey(t *testing.T) {
 		t.Errorf("base_dir from env: got %q, want /custom/env/repos", cfg.BaseDir)
 	}
 }
+
+// An override's empty sparse list checks out everything, over a sparse
+// default; an override that doesn't mention sparse leaves it alone.
+func TestLoad_CloneShape(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	yaml := `clone:
+  sparse: [services/api]
+  submodules: true
+overrides:
+  - repos: ["github.com/acme/small"]
+    clone:
+      sparse: []
+      lfs: skip
+  - repos: ["github.com/acme/other"]
+    clone:
+      depth: 1
+`
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	small := cfg.CloneFor("github.com/acme/small", "")
+	if len(small.Sparse) != 0 || !small.Submodules || !small.SkipLFS() {
+		t.Errorf("acme/small = %+v", small)
+	}
+	other := cfg.CloneFor("github.com/acme/other", "")
+	if len(other.Sparse) != 1 || other.Depth != 1 || other.SkipLFS() || other.LFS != "auto" {
+		t.Errorf("acme/other = %+v", other)
+	}
+}

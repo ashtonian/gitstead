@@ -482,10 +482,14 @@ agents:
     command: "claude"
     resume: "claude --continue"
 
-# How new clones are made; also accounts[].clone and overrides[].clone.
+# How new clones are made; also accounts[].clone and overrides[].clone, each
+# overriding the one before field by field.
 clone:
   filter: ""                 # blob:none | blob:limit=<size> | tree:<depth>
   depth: 0                   # commits per branch (with --no-single-branch); 0 = all
+  sparse: []                 # cone-mode directories; [] = everything (an override's [] undoes a default)
+  submodules: false          # check out submodules within sparse, recursively, with filter and depth
+  lfs: auto                  # auto | skip (managed lfs.fetchexclude=*, so existing clones get it too)
 
 # Settings every workspace starts from; see Workspaces.
 workspace_defaults:
@@ -1809,6 +1813,26 @@ refs and terminal session names.
 - **reference-clone** — the same with `--shared` (alternates); the source gets
   `gc.pruneExpire=never` first.
 - **shared** — no copies; agents work in `path`, or the one repo's clone.
+
+Every new checkout -- the repo's clone and each copy -- takes the shape the
+repo's `clone` config gives, not its source's:
+
+1. With `sparse`, it is made empty (`clone --no-checkout`, `worktree add
+   --no-checkout`), `git sparse-checkout set --cone -- <dirs>` is run, and
+   only then is it checked out (`checkout`; a copy clone's branch checkout),
+   so nothing outside the cone is checked out or, in a partial clone, fetched.
+2. With `lfs: skip`, the clone is made with `-c lfs.fetchexclude=*` and every
+   checkout step runs with `GIT_LFS_SKIP_SMUDGE=1`, which also covers
+   submodules and worktrees of repos cloned before. Otherwise a copy clone
+   hardlinks the source's `lfs/objects` before checking out.
+3. With `submodules`, the gitlinks the checkout holds (`git ls-files -z -t
+   --stage`: mode 160000, not tagged `S`) are checked out with `git submodule
+   update --init --recursive [--depth N] [--filter F] -- <paths>`, in place
+   after the clone is renamed into its path. `git submodule update` alone
+   would clone gitlinks outside the cone. Under `lfs: skip` each submodule
+   gets `lfs.fetchexclude=*` too. A failure returns `SubmoduleError`: the
+   checkout stays and is recorded, and the action reports the failure, so a
+   repo with an unreachable submodule isn't cloned again on every run.
 
 A partial source (a promisor remote, or `clone.filter` set for the repo) only
 gets worktrees, and `plan` blocks clones of it: a clone's fetches through it

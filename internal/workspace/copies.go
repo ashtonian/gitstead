@@ -10,6 +10,7 @@ import (
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/reconcile"
 )
 
 // ErrUnknownSource reports a copy whose repo git-mgr doesn't track and whose
@@ -17,7 +18,10 @@ import (
 var ErrUnknownSource = errors.New("its repo isn't tracked, so git-mgr doesn't know what to make it from")
 
 // CreateCopy makes copy c at its path from its source, by isolation: a
-// linked worktree, or a clone taking its objects from the source.
+// linked worktree, or a clone taking its objects from the source. It checks
+// out as much of the repo as the repo's clone config asks for. A copy whose
+// submodules can't all be checked out is made otherwise, and a
+// *gitops.SubmoduleError says so.
 func CreateCopy(ctx context.Context, isolation, baseRef string, c Copy) error {
 	if c.Source == "" {
 		return ErrUnknownSource
@@ -25,22 +29,25 @@ func CreateCopy(ctx context.Context, isolation, baseRef string, c Copy) error {
 	if !gitops.HasGitDir(c.Source) {
 		return fmt.Errorf("the repo's clone at %s is missing; git-mgr sync clones it again", c.Source)
 	}
+	opts := reconcile.CloneOptions(c.SSHKey, c.Clone)
+	var made error
 	switch isolation {
 	case config.IsolationWorktree:
 		// A worktree deleted by hand stays registered and blocks its path.
 		_ = gitops.WorktreePrune(ctx, c.Source)
-		if err := gitops.AddWorktree(ctx, c.Source, c.Path, c.Branch, baseRef); err != nil {
-			return err
-		}
+		made = gitops.AddWorktree(ctx, c.Source, c.Path, c.Branch, baseRef, opts)
 	case config.IsolationClone, config.IsolationReferenceClone:
-		if err := gitops.CloneFromSource(ctx, c.Source, c.Path, c.URL, c.Branch, baseRef, isolation == config.IsolationReferenceClone); err != nil {
-			return err
-		}
+		made = gitops.CloneFromSource(ctx, c.Source, c.Path, c.URL, c.Branch, baseRef, isolation == config.IsolationReferenceClone, opts)
 	default:
 		return fmt.Errorf("isolation %s makes no copies", isolation)
 	}
-	_, err := gitops.CopyID(ctx, c.Path)
-	return err
+	if submodules := (*gitops.SubmoduleError)(nil); made != nil && !errors.As(made, &submodules) {
+		return made
+	}
+	if _, err := gitops.CopyID(ctx, c.Path); err != nil {
+		return err
+	}
+	return made
 }
 
 // SourceOf returns where copy c's repo is: its tracked clone, else what the
