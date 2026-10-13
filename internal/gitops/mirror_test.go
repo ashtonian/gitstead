@@ -63,3 +63,28 @@ func TestMirror_RefusesWhatIsntAMirror(t *testing.T) {
 		t.Error("the clone was touched")
 	}
 }
+
+// With LFS, the mirror holds the repo's Git LFS content too.
+func TestMirror_LFS(t *testing.T) {
+	f := shapedRemote(t)
+	if !f.lfs {
+		t.Skip("git-lfs is not installed")
+	}
+	path := filepath.Join(t.TempDir(), "remote.git")
+	if _, err := gitops.Mirror(context.Background(), f.url, path, gitops.MirrorOptions{LFS: true}); err != nil {
+		t.Fatal(err)
+	}
+	var objects []string
+	filepath.WalkDir(filepath.Join(path, "lfs", "objects"), func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			objects = append(objects, p)
+		}
+		return nil
+	})
+	if len(objects) != 1 {
+		t.Fatalf("the mirror should hold the one LFS object, has %v", objects)
+	}
+	if got, _ := os.ReadFile(objects[0]); string(got) != string(f.content) {
+		t.Error("the LFS object isn't the content")
+	}
+}
