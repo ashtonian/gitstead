@@ -341,7 +341,7 @@ func (c *WSExecCmd) Run(ctx *Context) error {
 	results := workspace.ForEach(ctx.GoCtx(), targets, cfg.Concurrency, func(ctx context.Context, t workspace.Located) (string, bool, error) {
 		cmd := exec.CommandContext(ctx, c.Command[0], c.Command[1:]...)
 		cmd.Dir = t.Path
-		cmd.Env = append(os.Environ(), envs[t.Agent]...)
+		cmd.Env = append(config.Environ(), envs[t.Agent]...)
 		out, err := cmd.CombinedOutput()
 		return strings.TrimRight(string(out), "\n"), false, err
 	})

@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/pathutil"
 )
@@ -131,7 +132,7 @@ func (r Runner) run(ctx context.Context, h Hook, command string, out io.Writer) 
 	}
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.Dir = h.Dir
-	cmd.Env = append(append(os.Environ(), gitops.BatchEnv()...), h.environ()...)
+	cmd.Env = append(append(config.Environ(), gitops.BatchEnv()...), h.environ()...)
 	cmd.Stdout, cmd.Stderr = out, out
 	// A session of its own: no terminal to prompt on, and the whole group --
 	// whatever the command started -- is killed with it.

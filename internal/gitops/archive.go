@@ -200,12 +200,19 @@ func ReadArchive(path string) (ArchiveMeta, string, error) {
 // DeleteArchive deletes the archive at path: its bundle or archived clone,
 // its description, its LFS objects and its submodules' archives. What is
 // already gone is skipped. Only files of the archive's own name, beside it,
-// are deleted, whatever its description says.
+// are deleted, whatever its description says, and a directory only when its
+// description names it as the archived clone: a path recorded wrongly can't
+// take someone's working copy with it.
 func DeleteArchive(path string) error {
 	base := archiveBase(path)
 	meta, _, err := ReadArchive(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
+	}
+	if path == base && meta.Clone != path {
+		if _, serr := os.Lstat(path); serr == nil {
+			return fmt.Errorf("%s isn't described as an archived clone (no %s.json naming it), so it is left; delete it by hand if it is one", path, base)
+		}
 	}
 	for _, sub := range slices.Sorted(maps.Values(meta.Submodules)) {
 		if filepath.Dir(sub) != filepath.Dir(base) {
@@ -344,8 +351,16 @@ func ArchiveClone(ctx context.Context, repoPath, dir, name string) (string, erro
 	if !filepath.IsAbs(repoPath) {
 		return "", fmt.Errorf("refusing to archive clone at non-absolute path %q", repoPath)
 	}
-	if _, err := os.Lstat(repoPath); errors.Is(err, fs.ErrNotExist) {
+	info, err := os.Lstat(repoPath)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
 		return "", nil
+	case err != nil:
+		return "", fmt.Errorf("keeping %s: %w", repoPath, err)
+	case info.Mode()&fs.ModeSymlink != 0:
+		// Moving the link would leave the clone where it is.
+		target, _ := os.Readlink(repoPath)
+		return "", fmt.Errorf("keeping %s: it is a symlink to %s; archive that instead", repoPath, target)
 	}
 	if linked, err := LinkedWorktrees(ctx, repoPath); err != nil {
 		return "", fmt.Errorf("keeping %s: listing its worktrees: %w", repoPath, err)
@@ -415,7 +430,7 @@ func deleteRefs(ctx context.Context, repoPath, prefix string) {
 		return
 	}
 	for _, ref := range strings.Split(out, "\n") {
-		Git(ctx, repoPath, "update-ref", "-d", ref)
+		_, _ = Git(ctx, repoPath, "update-ref", "-d", ref) // temporary refs; a leftover is harmless
 	}
 }
 

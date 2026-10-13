@@ -2,6 +2,7 @@ package config
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -67,5 +68,25 @@ func TestWithDefaults_EnvAndPorts(t *testing.T) {
 	off := 0
 	if base, n := cfg.WithDefaults(Workspace{Name: "b", Ports: PortsOverride{Base: &off}}).PortBlock(); base != 0 || n != 0 {
 		t.Errorf("base 0 hands out none, got %d+%d", base, n)
+	}
+}
+
+// An agent's own context doesn't reach what it starts; git-mgr's config
+// variables do.
+func TestEnviron(t *testing.T) {
+	t.Setenv("GIT_MGR_PORT", "41000")
+	t.Setenv("GIT_MGR_WORKSPACE", "caller")
+	t.Setenv("GIT_MGR_CONFIG", "/c.yaml")
+	env := strings.Join(Environ(), "\n")
+	if strings.Contains(env, "GIT_MGR_PORT=") || strings.Contains(env, "GIT_MGR_WORKSPACE=") || !strings.Contains(env, "GIT_MGR_CONFIG=/c.yaml") {
+		t.Errorf("Environ kept the caller's context or dropped config:\n%s", env)
+	}
+	// Every variable an agent is told is one Environ leaves out.
+	full := AgentVars{Workspace: "w", Agent: "a", N: 1, Replica: "/r", Port: 1, Ports: 1, Cache: "/c"}
+	for _, kv := range full.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if !slices.Contains(ContextVars, name) {
+			t.Errorf("%s isn't in ContextVars", name)
+		}
 	}
 }

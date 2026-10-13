@@ -61,6 +61,25 @@ func (v AgentVars) Environ() []string {
 	return env
 }
 
+// ContextVars are the variables git-mgr tells an agent's commands and hooks
+// where they are. A command started from inside one -- an agent running
+// git-mgr -- must not pass its own on to another, so Environ leaves them out.
+var ContextVars = []string{
+	"GIT_MGR_WORKSPACE", "GIT_MGR_AGENT", "GIT_MGR_AGENT_N", "GIT_MGR_REPLICA",
+	"GIT_MGR_PORT", "GIT_MGR_PORTS", "GIT_MGR_CACHE",
+	"GIT_MGR_EVENT", "GIT_MGR_PATH", "GIT_MGR_REPO", "GIT_MGR_SOURCE", "GIT_MGR_BRANCH",
+}
+
+// Environ is this process's environment without its own ContextVars: what
+// git-mgr starts an agent, a hook or a command in a copy with, before adding
+// theirs.
+func Environ() []string {
+	return slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		name, _, _ := strings.Cut(kv, "=")
+		return slices.Contains(ContextVars, name)
+	})
+}
+
 // envFuncs are the functions env templates can call: {{add .Port 1}}.
 var envFuncs = template.FuncMap{"add": func(a, b int) int { return a + b }}
 

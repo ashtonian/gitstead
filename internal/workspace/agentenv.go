@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/pathutil"
@@ -163,12 +164,20 @@ func AllocatePorts(st *state.State, base, count int, free func(port int) bool) (
 	return 0, fmt.Errorf("no %d free ports left from %d", count, base)
 }
 
-// portFree reports whether nothing listens on port.
+// portProbe bounds each connection attempt; a closed loopback port refuses
+// at once.
+const portProbe = 200 * time.Millisecond
+
+// portFree reports whether nothing on this machine listens on port. It
+// connects rather than binds: binding would make macOS's firewall ask
+// whether git-mgr may accept incoming connections.
 func portFree(port int) bool {
-	l, err := net.Listen("tcp", ":"+strconv.Itoa(port))
-	if err != nil {
-		return false
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		c, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), portProbe)
+		if err == nil {
+			_ = c.Close()
+			return false
+		}
 	}
-	l.Close()
 	return true
 }

@@ -2,6 +2,8 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -54,14 +56,18 @@ func ReadManifest(path string) (Manifest, error) {
 }
 
 // UpdateManifest applies change to the manifest at path and writes it, under
-// a lock on path.lock that other git-mgr runs on this machine take too, and
-// atomically, so a reader -- or a sync tool copying it to another machine --
-// never sees half a file.
+// a lock other git-mgr runs on this machine take too, and atomically, so a
+// reader -- or a sync tool copying it to another machine -- never sees half
+// a file.
 func UpdateManifest(path string, change func(*Manifest) error) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	unlock, err := lockFile(path+".lock", manifestLockWait)
+	lock, err := manifestLock(path)
+	if err != nil {
+		return err
+	}
+	unlock, err := lockFile(lock, manifestLockWait)
 	if err != nil {
 		return fmt.Errorf("locking manifest %s: %w", path, err)
 	}
@@ -185,6 +191,26 @@ func loadManifest(cfg *Config) error {
 	}
 	cfg.Repos = append(cfg.Repos, m.Repos...)
 	return nil
+}
+
+// manifestLock is the lock file for the manifest at path: in this user's
+// cache directory, named for the manifest's path, never beside it, where it
+// would end up committed to the dotfiles repo it sits in.
+func manifestLock(path string) (string, error) {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		dir = os.TempDir()
+	}
+	dir = filepath.Join(dir, "git-mgr", "locks")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(abs))
+	return filepath.Join(dir, "manifest-"+hex.EncodeToString(sum[:8])+".lock"), nil
 }
 
 // lockFile takes an exclusive flock on path, retrying until wait passes.
