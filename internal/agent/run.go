@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/ashtonian/git-mgr/internal/config"
 )
 
 // RunOptions is one agent run.
@@ -50,7 +52,7 @@ func Run(opts RunOptions) (int, error) {
 	}
 	cmd := exec.Command(shell, "-i", "-c", opts.Command)
 	cmd.Dir = opts.Dir
-	cmd.Env = append(os.Environ(), opts.Env...)
+	cmd.Env = append(config.Environ(), opts.Env...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 
 	// Caught, not ignored: an ignored signal would stay ignored in the agent.

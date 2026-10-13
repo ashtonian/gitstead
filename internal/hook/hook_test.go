@@ -6,9 +6,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ashtonian/git-mgr/internal/config"
 )
 
 func TestRun(t *testing.T) {
@@ -94,5 +97,27 @@ func TestTailBuffer(t *testing.T) {
 	}
 	if got := string(tb.buf); !strings.HasSuffix(got, "ghij") || len(got) > 8 {
 		t.Errorf("buf = %q", got)
+	}
+}
+
+// A hook started from inside an agent's run gets its own context, not the
+// agent's.
+func TestRun_LeavesTheCallersContext(t *testing.T) {
+	t.Setenv("GIT_MGR_PORT", "41000")
+	t.Setenv("GIT_MGR_WORKSPACE", "caller")
+	dir := t.TempDir()
+	h := Hook{Event: PostClone, Dir: dir, Name: "x", Env: Env{Repo: "github.com/a/b"},
+		Commands: []string{`printf '%s|%s|%s' "$GIT_MGR_PORT" "$GIT_MGR_WORKSPACE" "$GIT_MGR_REPO" > env.txt`}}
+	if err := (Runner{LogDir: t.TempDir()}).Run(context.Background(), h); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "env.txt")); string(got) != "||github.com/a/b" {
+		t.Errorf("env = %q", got)
+	}
+	for _, kv := range h.environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if !slices.Contains(config.ContextVars, name) {
+			t.Errorf("%s isn't in config.ContextVars", name)
+		}
 	}
 }

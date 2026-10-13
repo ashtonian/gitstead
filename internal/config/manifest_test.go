@@ -72,6 +72,9 @@ func TestUpdateManifest(t *testing.T) {
 	if !strings.HasPrefix(string(data), "# Repos tracked by hand") {
 		t.Errorf("the file should say what it is:\n%s", data)
 	}
+	if entries, _ := os.ReadDir(filepath.Dir(path)); len(entries) != 1 {
+		t.Errorf("only the manifest belongs beside it, in a shared folder: %v", entries)
+	}
 	if err := os.WriteFile(path, []byte("repos:\n  - url: https://tok@github.com/a/b.git\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -129,3 +129,29 @@ func TestDeleteArchive_OnlyDeletesItsOwnFiles(t *testing.T) {
 		t.Errorf("a file outside the archive was deleted: %v", err)
 	}
 }
+
+// A catalog entry pointing at a directory that isn't an archived clone --
+// recorded wrongly, or hand-edited -- never gets it deleted.
+func TestDeleteArchive_LeavesADirectoryNotDescribedAsAClone(t *testing.T) {
+	_, clone := remoteAndClone(t)
+	if err := gitops.DeleteArchive(clone); err == nil {
+		t.Fatal("DeleteArchive must refuse a directory with no description naming it")
+	}
+	if _, err := os.Stat(filepath.Join(clone, "a.txt")); err != nil {
+		t.Fatalf("the working copy was deleted: %v", err)
+	}
+}
+
+func TestArchiveClone_RefusesASymlink(t *testing.T) {
+	_, clone := remoteAndClone(t)
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(clone, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitops.ArchiveClone(context.Background(), link, t.TempDir(), "x"); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("ArchiveClone of a symlink = %v", err)
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Error("the link moved")
+	}
+}

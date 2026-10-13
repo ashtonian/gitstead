@@ -633,8 +633,7 @@ manifest: ~/dotfiles/git-mgr/repos.yaml
   here that neither lists.
 
 The config file itself is never written, so this works when it is
-generated -- by the home-manager module, say -- and read-only. Writes take a
-lock on `<manifest>.lock` and replace the file atomically, so a sync tool
+generated -- by the home-manager module, say -- and read-only. Writes take a lock in your cache directory, never beside the manifest, and replace the file atomically, so a sync tool
 copying it never sees half a file; two machines writing at the same moment
 through a sync tool can still conflict, as any synced file can, and the
 next `manifest save` puts back an entry a conflict lost.

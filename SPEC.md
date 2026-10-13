@@ -449,7 +449,7 @@ the repo's `base_dir`, and replaces `path_template` for it. After a hand
 addition is applied (`addByHand`: clone, adopt, manifest import), the repo's
 entry is upserted -- URL, user tags, `config.PortablePath` of its path
 (`""` when templated) -- and `remove` drops the entries of what it untracked.
-Writes hold an flock on `<manifest>.lock` (30s wait) and replace the file
+Writes hold an flock (30s wait) on a lock file in the user's cache directory (`git-mgr/locks/manifest-<hash of its path>.lock`), never beside the manifest, and replace the file
 through a synced temp file and rename. Entries match by repo key, so a URL's
 transport may differ. Config itself is never written.
 | `restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` (clone+apply to a scratch dir), or `--apply` onto the tree (refuses dirty without `--force`). id defaults to `latest`. |

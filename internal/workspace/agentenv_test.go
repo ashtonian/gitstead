@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -86,5 +87,20 @@ func TestAgentEnv(t *testing.T) {
 	reloaded, _ := state.Load(filepath.Join(dir, "state.yaml"))
 	if reloaded.Workspaces["app"].Replica("agent-2").Port != port {
 		t.Error("the port must be saved")
+	}
+}
+
+func TestPortFree(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	busy := l.Addr().(*net.TCPAddr).Port
+	if portFree(busy) {
+		t.Errorf("port %d has a listener", busy)
+	}
+	l.Close()
+	if !portFree(busy) {
+		t.Errorf("port %d is free once its listener closes", busy)
 	}
 }

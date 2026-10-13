@@ -180,7 +180,7 @@ func execShell(dir string, env []string) error {
 		}
 	}
 	shell := agents.Shell()
-	return syscall.Exec(shell, []string{shell}, append(os.Environ(), env...))
+	return syscall.Exec(shell, []string{shell}, append(config.Environ(), env...))
 }
 
 // terminal is what this process runs in, for the run's record: the launcher
