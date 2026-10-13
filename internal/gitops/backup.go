@@ -152,7 +152,9 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 	subs := map[string]SubmoduleBackup{}
 	results := map[string]*BackupResult{}
 	for _, path := range paths {
-		r, err := backupRepo(ctx, filepath.Join(repoPath, path), cfg, nil)
+		// A submodule's backups are kept as long as a backup of the parent
+		// names one, not by their own retention; see pruneSubmoduleBackups.
+		r, err := backupRepo(ctx, filepath.Join(repoPath, path), cfg, nil, false)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("submodule %s: %w", path, err))
 		}
@@ -163,7 +165,10 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 			subs[path] = SubmoduleBackup{CopyID: r.CopyID, ID: r.ID}
 		}
 	}
-	res, err := backupRepo(ctx, repoPath, cfg, subs)
+	res, err := backupRepo(ctx, repoPath, cfg, subs, true)
+	if err == nil && len(paths) > 0 {
+		pruneSubmoduleBackups(ctx, repoPath, cfg.PatchDir, paths)
+	}
 	if len(results) > 0 {
 		res.Submodules = results
 	}
@@ -177,7 +182,8 @@ func Backup(ctx context.Context, repoPath string, cfg BackupConfig) (*BackupResu
 
 // backupRepo backs up one working copy, not its submodules; subs are the
 // submodules' backups that go with it, which make it dirty by themselves.
-func backupRepo(ctx context.Context, repoPath string, cfg BackupConfig, subs map[string]SubmoduleBackup) (*BackupResult, error) {
+// With prune, old backups go by cfg.Retention once a new one is saved.
+func backupRepo(ctx context.Context, repoPath string, cfg BackupConfig, subs map[string]SubmoduleBackup, prune bool) (*BackupResult, error) {
 	res := &BackupResult{}
 	untracked := "--untracked-files=no"
 	if cfg.Limits.Untracked {
@@ -233,10 +239,10 @@ func backupRepo(ctx context.Context, repoPath string, cfg BackupConfig, subs map
 		}
 		// Prune only the kinds this run added to, so a failed run never
 		// pushes out the last good backup.
-		if res.Ref != "" {
+		if prune && res.Ref != "" {
 			pruneBackupRefs(ctx, repoPath, res.CopyID, cfg.Retention, cfg.Now())
 		}
-		if res.PatchDir != "" {
+		if prune && res.PatchDir != "" {
 			prunePatchBackups(cfg.PatchDir, res.CopyID, cfg.Retention, cfg.Now())
 		}
 	}
@@ -504,6 +510,50 @@ func prunePatchBackups(patchRoot, copyID string, r Retention, now time.Time) {
 	for _, id := range r.expired(patchBackupIDs(dir), now) {
 		if err := os.RemoveAll(filepath.Join(dir, id)); err != nil {
 			slog.Warn("pruning patch backup", "dir", filepath.Join(dir, id), "error", err)
+		}
+	}
+}
+
+// pruneSubmoduleBackups drops the backups of the submodules at paths that no
+// backup of the parent at repoPath still names. A parent backup restores the
+// submodule backups it names, so they live exactly as long as it does; each
+// submodule's latest is kept besides. It runs only after the parent's backup
+// succeeded, so a failed run leaves every earlier backup restorable.
+func pruneSubmoduleBackups(ctx context.Context, repoPath, patchRoot string, paths []string) {
+	parents, err := listCopyBackups(ctx, repoPath, patchRoot, ReadCopyID(ctx, repoPath))
+	if err != nil {
+		return
+	}
+	named := map[string]bool{} // copy ID + "/" + backup ID
+	for _, b := range parents {
+		for _, sb := range b.Submodules {
+			named[sb.CopyID+"/"+sb.ID] = true
+		}
+	}
+	for _, path := range paths {
+		subPath := filepath.Join(repoPath, path)
+		copyID := ReadCopyID(ctx, subPath)
+		if copyID == "" {
+			continue
+		}
+		backups, err := listCopyBackups(ctx, subPath, patchRoot, copyID)
+		if err != nil || len(backups) == 0 {
+			continue
+		}
+		for _, b := range backups[:len(backups)-1] {
+			if named[copyID+"/"+b.ID] {
+				continue
+			}
+			if b.Ref != "" {
+				if _, err := Git(ctx, subPath, "update-ref", "-d", b.Ref); err != nil {
+					slog.Warn("pruning submodule backup ref", "repo", subPath, "ref", b.Ref, "error", err)
+				}
+			}
+			if b.PatchDir != "" {
+				if err := os.RemoveAll(b.PatchDir); err != nil {
+					slog.Warn("pruning submodule patch backup", "dir", b.PatchDir, "error", err)
+				}
+			}
 		}
 	}
 }
