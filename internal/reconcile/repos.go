@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -515,10 +514,11 @@ func moveRepo(key, from, to string) RunFunc {
 			return Outcome{}, err
 		}
 		var copies []string
+		var unsynced error
 		return Outcome{
 			Release: release,
 			Record: func(st *state.State) error {
-				if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+				if err := pathutil.MkdirAll(filepath.Dir(to), 0o755); err != nil {
 					return err
 				}
 				if err := pathutil.RenameNoReplace(from, to); err != nil {
@@ -530,13 +530,20 @@ func moveRepo(key, from, to string) RunFunc {
 					}
 					return err
 				}
+				// The repo is at to now, synced or not, so that is recorded;
+				// a failed sync is reported once it is.
+				unsynced = errors.Join(pathutil.SyncDir(filepath.Dir(to)), pathutil.SyncDir(filepath.Dir(from)))
 				recordMoved(st, key, to)
 				copies = copiesOf(st, key, to)
 				RemoveEmptyParents(env, from)
 				return nil
 			},
 			After: func(ctx context.Context) (string, error) {
-				return "", reconnectCopies(ctx, copies, from, to)
+				err := reconnectCopies(ctx, copies, from, to)
+				if unsynced != nil {
+					err = errors.Join(fmt.Errorf("moved, but a crash could still undo it: %w", unsynced), err)
+				}
+				return "", err
 			},
 		}, nil
 	}

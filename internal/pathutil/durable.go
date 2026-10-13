@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"syscall"
 )
 
@@ -97,4 +98,31 @@ func SyncFile(path string) error {
 		return fmt.Errorf("syncing %s: %w", path, err)
 	}
 	return SyncDir(filepath.Dir(path))
+}
+
+// MkdirAll is os.MkdirAll, durably: each directory it makes is synced into
+// its parent, so what is written in them afterwards -- and synced there --
+// can't be lost with them in a crash.
+func MkdirAll(path string, perm fs.FileMode) error {
+	var made []string
+	for dir := filepath.Clean(path); ; dir = filepath.Dir(dir) {
+		if _, err := os.Lstat(dir); err == nil {
+			break
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		made = append(made, dir)
+		if filepath.Dir(dir) == dir {
+			break
+		}
+	}
+	if err := os.MkdirAll(path, perm); err != nil {
+		return err
+	}
+	for _, dir := range slices.Backward(made) {
+		if err := SyncDir(filepath.Dir(dir)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

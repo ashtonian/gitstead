@@ -129,17 +129,22 @@ func runMirrors(ctx context.Context, jobs []mirrorJob, limit int) []mirrorOutcom
 
 func runMirror(ctx context.Context, job mirrorJob) mirrorOutcome {
 	o := mirrorOutcome{job: job}
-	// A repo renamed since keeps its mirror, moved to its new name.
+	// A repo renamed since keeps its mirror, moved to its new name. A move
+	// that went through but not cleanly is reported once the mirror is run.
+	var moveErr error
 	if job.from != "" && job.from != job.path && exists(job.from) && !exists(job.path) {
 		if err := pathutil.Move(job.from, job.path); err != nil {
-			o.err = fmt.Errorf("moving its mirror from %s: %w", job.from, err)
-			return o
+			moveErr = fmt.Errorf("moving its mirror from %s: %w", job.from, err)
+			if moved := (*pathutil.MovedError)(nil); !errors.As(err, &moved) {
+				o.err = moveErr
+				return o
+			}
 		}
 	}
 	mctx, cancel := ctxutil.WithTimeout(ctx, job.timeout)
 	defer cancel()
 	o.created, o.err = gitops.Mirror(mctx, job.url, job.path, job.opts)
-	o.err = ctxutil.TimedOut(mctx, o.err, "mirror", job.timeout, "sync.clone_timeout")
+	o.err = errors.Join(moveErr, ctxutil.TimedOut(mctx, o.err, "mirror", job.timeout, "sync.clone_timeout"))
 	return o
 }
 

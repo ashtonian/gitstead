@@ -187,7 +187,10 @@ func (c *ArchivesRestoreCmd) Run(ctx *Context) error {
 
 	if a.Clone {
 		if err := pathutil.Move(a.Path, dest); err != nil {
-			return fmt.Errorf("restoring %s: %w", a.ID, err)
+			if moved := (*pathutil.MovedError)(nil); !errors.As(err, &moved) {
+				return fmt.Errorf("restoring %s: %w", a.ID, err)
+			}
+			ctx.Logger().Warn("archive restored, but not cleanly", "archive", a.ID, "path", dest, "error", err)
 		}
 		if err := os.Remove(a.Path + ".json"); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			ctx.Logger().Warn("restored archive's description left behind", "archive", a.ID, "error", err)

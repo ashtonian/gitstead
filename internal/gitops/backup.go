@@ -297,7 +297,7 @@ const partialSuffix = ".partial"
 func writePatchBackup(ctx context.Context, repoPath, patchRoot, copyID, id string, snap Snapshot, subs map[string]SubmoduleBackup, now time.Time) (string, error) {
 	dir := filepath.Join(patchRoot, copyID, id)
 	partial := dir + partialSuffix
-	if err := os.MkdirAll(partial, 0o700); err != nil {
+	if err := pathutil.MkdirAll(partial, 0o700); err != nil {
 		return "", fmt.Errorf("creating patch dir: %w", err)
 	}
 	if err := writePatchFiles(ctx, repoPath, partial, copyID, id, snap, subs, now); err != nil {

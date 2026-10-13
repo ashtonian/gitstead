@@ -241,7 +241,7 @@ func (s *State) migrate(data []byte) error {
 // Save writes the state file atomically (write to tmp + rename).
 func (s *State) Save() error {
 	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := pathutil.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating state dir: %w", err)
 	}
 
