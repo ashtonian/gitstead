@@ -1,10 +1,12 @@
 package oplog
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -68,5 +70,54 @@ func TestAppend_RedactsURLCredentials(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	if strings.Contains(string(data), "s3cret") {
 		t.Fatalf("event log holds a credential: %s", data)
+	}
+}
+
+// Appends from several runs while the log is trimmed lose nothing: a trim
+// keeps the newest lines, and these appends are all newer than the rest.
+// The log starts past its bound, so the first appends race a trim.
+func TestAppend_ConcurrentWithTrims(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	pad := strings.Repeat("x", 800)
+	var prefill strings.Builder
+	for i := 0; i < keepLines; i++ {
+		line, _ := json.Marshal(Event{Time: time.Unix(0, 0), Action: "old", Detail: pad})
+		prefill.Write(append(line, '\n'))
+	}
+	if prefill.Len() <= maxBytes {
+		t.Fatalf("fixture: %d bytes doesn't pass the bound", prefill.Len())
+	}
+	if err := os.WriteFile(path, []byte(prefill.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const writers, each = 8, 300
+	var wg sync.WaitGroup
+	for w := 0; w < writers; w++ {
+		wg.Go(func() {
+			for i := 0; i < each; i++ {
+				if err := Append(path, Event{Time: time.Now(), Action: "new", Detail: fmt.Sprintf("%d-%d", w, i)}); err != nil {
+					t.Error(err)
+				}
+			}
+		})
+	}
+	wg.Wait()
+
+	events, err := Read(path, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, ev := range events {
+		if ev.Action == "new" {
+			seen[ev.Detail] = true
+		}
+	}
+	if len(seen) != writers*each {
+		t.Errorf("%d of %d appended events survived", len(seen), writers*each)
+	}
+	if info, err := os.Stat(path); err != nil || info.Size() > maxBytes {
+		t.Errorf("the log was never trimmed: %v, %v", info.Size(), err)
 	}
 }
