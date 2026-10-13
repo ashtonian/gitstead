@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -190,5 +191,26 @@ func TestWorkspacePostCreate(t *testing.T) {
 	cfg.Workspaces = []Workspace{{Name: "c", Hooks: WorkspaceHooks{PostCreate: &blank}}}
 	if err := validateHooks(cfg); err == nil {
 		t.Error("an empty command must be rejected")
+	}
+}
+
+func TestMirrorFor(t *testing.T) {
+	on, off := true, false
+	cfg := &Config{
+		Mirror:    MirrorConfig{Enabled: true, Dir: "/m"},
+		Accounts:  []Account{{Name: "work", Hosts: []string{"github.com"}, Owners: []string{"acme"}, Mirror: &MirrorOverride{LFS: &on}}},
+		Overrides: []Override{{Repos: []string{"github.com/acme/huge"}, Mirror: &MirrorOverride{Enabled: &off}}},
+	}
+	for key, want := range map[string]RepoMirror{
+		"github.com/me/x":      {Enabled: true},
+		"github.com/acme/api":  {Enabled: true, LFS: true},
+		"github.com/acme/huge": {LFS: true},
+	} {
+		if got := cfg.MirrorFor(key, ""); got != want {
+			t.Errorf("%s: %+v, want %+v", key, got, want)
+		}
+	}
+	if got := cfg.MirrorPath("github.com/me/x"); got != filepath.Join("/m", "github.com", "me", "x.git") {
+		t.Errorf("MirrorPath = %s", got)
 	}
 }

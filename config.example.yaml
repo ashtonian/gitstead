@@ -409,6 +409,20 @@ backup:
   archive_dir: ""
 
 # =============================================================================
+# Mirrors
+# =============================================================================
+# A full mirror of each repo's upstream -- every branch, tag and ref the host
+# has -- as a bare repo, made and updated by sync: a copy that outlives the host
+# losing the repo. Updates don't prune, so a branch deleted upstream stays.
+# accounts[].mirror and overrides[].mirror ({enabled, lfs}) set it per repo.
+
+mirror:
+  enabled: false
+  dir: ""                  # <dir>/<host>/<owner>/<name>.git; "" = ~/.local/share/git-mgr/mirrors
+  interval: "24h"          # how often sync updates each mirror
+  lfs: false               # also mirror Git LFS content
+
+# =============================================================================
 # Remote Sync
 # =============================================================================
 

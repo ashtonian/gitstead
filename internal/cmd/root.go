@@ -46,6 +46,7 @@ type CLI struct {
 	Fleet      FleetCmd      `cmd:"" help:"Open fleets: several workspaces' agents side by side, with one launcher."`
 	Archives   ArchivesCmd   `cmd:"" help:"The catalog of what was saved before copies and repos were taken away, and restoring it."`
 	Hooks      HooksCmd      `cmd:"" help:"Run post_clone or post_create hooks again."`
+	Mirror     MirrorCmd     `cmd:"" help:"Make or update full mirrors of repos' upstreams, for an offsite copy (config 'mirror:')."`
 	Path       PathCmd       `cmd:"" help:"Print the path of a repo, workspace or agent's folder from part of its name."`
 	Cd         CdCmd         `cmd:"" help:"Change directory to a repo, workspace or agent's folder (needs shell-init)."`
 	Open       OpenCmd       `cmd:"" help:"Open a repo, workspace or agent's folder in your editor; --web opens the repo's page."`

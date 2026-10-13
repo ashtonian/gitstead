@@ -1129,6 +1129,65 @@ func TestE2E_SharedManifest(t *testing.T) {
 	}
 }
 
+// TestE2E_Mirror: sync mirrors each repo mirroring is on for, once per
+// mirror.interval; `mirror --force` updates them now; a mirror that can't
+// update is reported by status until one can.
+func TestE2E_Mirror(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+	remote := filepath.Join(tmp, "remotes", "app.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	seed := filepath.Join(tmp, "seed")
+	gitCmd(t, tmp, "clone", "-q", remote, seed)
+	commit := func(msg string) string {
+		if err := os.WriteFile(filepath.Join(seed, msg), []byte(msg), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitCmd(t, seed, "add", ".")
+		gitCmd(t, seed, "-c", "user.name=e2e", "-c", "user.email=e2e@test.local", "commit", "-qm", msg)
+		gitCmd(t, seed, "push", "-q", "origin", "HEAD:main")
+		return gitCmd(t, seed, "rev-parse", "HEAD")
+	}
+	commit("one")
+	mirrors := filepath.Join(tmp, "backup-disk")
+	cfg := fmt.Sprintf("base_dir: %s\nmirror: {enabled: true, dir: %s}\nrepos:\n  - url: %s\n", env.baseDir, mirrors, remote)
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, code := env.run(t, "sync")
+	if code != 0 || !strings.Contains(out, "1 mirrored") {
+		t.Fatalf("sync exit %d:\n%s", code, out)
+	}
+	mirror := filepath.Join(mirrors, "local", "remotes", "app.git")
+	if got := gitCmd(t, mirror, "config", "--bool", "remote.origin.mirror"); got != "true" {
+		t.Fatalf("not a mirror: %s", got)
+	}
+
+	tip := commit("two")
+	if out, _ := env.run(t, "mirror"); !strings.Contains(out, "1 skipped") {
+		t.Errorf("a fresh mirror waits for mirror.interval:\n%s", out)
+	}
+	if out, code := env.run(t, "mirror", "--force"); code != 0 || !strings.Contains(out, "updated") {
+		t.Fatalf("mirror --force exit %d:\n%s", code, out)
+	}
+	if got := gitCmd(t, mirror, "rev-parse", "refs/heads/main"); got != tip {
+		t.Errorf("mirror main = %s, want %s", got, tip)
+	}
+
+	if err := os.Rename(remote, remote+".gone"); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := env.run(t, "mirror", "--force"); code == 0 {
+		t.Error("a mirror that can't update must fail the command")
+	}
+	if out, _ := env.run(t, "status"); !strings.Contains(out, "1 mirrors failing") {
+		t.Errorf("status should report the failing mirror:\n%s", out)
+	}
+	if got := gitCmd(t, mirror, "rev-parse", "refs/heads/main"); got != tip {
+		t.Errorf("a failed update must leave the mirror as it was: %s", got)
+	}
+}
+
 // TestE2E_PublishAndRetire: publish pushes an agent's branch to its remote;
 // retire archives the copy's uncommitted work, removes it, and catalogs the
 // archive.

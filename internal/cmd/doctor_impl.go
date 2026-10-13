@@ -154,6 +154,7 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 	checkWorkspaces(ctx, st, d)
 	checkLaunchers(cfg, d)
 	checkManifest(cfg, st, d)
+	checkMirrors(cfg, st, d)
 
 	fmt.Printf("\n%d problem(s), %d warning(s)\n", d.fails, d.warns)
 	if d.fails > 0 {
@@ -192,6 +193,41 @@ func checkManifest(cfg *config.Config, st *state.State, d *doctorReport) {
 	if len(local) > 0 {
 		d.warn(fmt.Sprintf("%d repos tracked by hand aren't in the manifest (%s); `git-mgr manifest save` adds them", len(local), strings.Join(local, ", ")))
 	}
+}
+
+// checkMirrors checks the mirror directory, when any repo is mirrored, and
+// names the mirrors failing to update.
+func checkMirrors(cfg *config.Config, st *state.State, d *doctorReport) {
+	mirrored := 0
+	var failing []string
+	for key, r := range st.Repos {
+		if cfg.MirrorFor(key, r.DiscoveredBy).Enabled {
+			mirrored++
+			if r.LastMirrorError != "" {
+				failing = append(failing, key)
+			}
+		}
+	}
+	if mirrored == 0 {
+		return
+	}
+	switch fi, err := os.Stat(cfg.Mirror.Dir); {
+	case err != nil && os.IsNotExist(err):
+		d.info("mirror.dir " + cfg.Mirror.Dir + " will be created by the first mirror")
+	case err != nil || !fi.IsDir() || !dirWritable(cfg.Mirror.Dir):
+		d.fail("mirror.dir " + cfg.Mirror.Dir + " isn't a writable directory, so " + fmt.Sprint(mirrored) + " repos can't be mirrored")
+	default:
+		d.ok(fmt.Sprintf("mirror.dir %s: %d repos mirrored", cfg.Mirror.Dir, mirrored))
+	}
+	slices.Sort(failing)
+	for _, key := range failing {
+		d.warn(fmt.Sprintf("mirror of %s failing: %s", key, firstLineOf(st.Repos[key].LastMirrorError)))
+	}
+}
+
+func firstLineOf(s string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
+	return line
 }
 
 // dirWritable reports whether a directory accepts new files.

@@ -187,6 +187,8 @@ func repoRow(ctx context.Context, key string, r *state.RepoState) RepoRow {
 		row.Problem = "fetch: " + firstLine(r.LastFetchError)
 	case r.LastBackupError != "":
 		row.Problem = "backup: " + firstLine(r.LastBackupError)
+	case r.LastMirrorError != "":
+		row.Problem = "mirror: " + firstLine(r.LastMirrorError)
 	}
 	if !gitops.HasGitDir(r.LocalPath) {
 		row.State = "missing"

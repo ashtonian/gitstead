@@ -33,9 +33,9 @@ type SyncCmd struct {
 	Tag        string `help:"Filter to repos with this tag." default:"" predictor:"tag"`
 	Set        string `help:"Filter by named set (from config 'sets:')." default:"" predictor:"set"`
 	NoBackup   bool   `help:"Skip the backup step." default:"false" name:"no-backup"`
-	NoFetch    bool   `help:"Skip fetching, only backup." default:"false" name:"no-fetch"`
+	NoFetch    bool   `help:"Skip fetching and mirrors, only back up." default:"false" name:"no-fetch"`
 	NoDiscover bool   `help:"Skip auto-discovery." default:"false" name:"no-discover"`
-	Force      bool   `help:"Ignore min_fetch_interval." default:"false"`
+	Force      bool   `help:"Ignore min_fetch_interval and mirror.interval." default:"false"`
 }
 
 // BackupCmd backs up uncommitted changes.
@@ -131,7 +131,7 @@ func (c *StatusCmd) runTable(st *state.State, pass func(string, *state.RepoState
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "REPO\tSTATUS\tBRANCH\tLAST FETCH\tBACKUP\tTAGS")
 
-	var counts struct{ dirty, errors, stale, clean, total int }
+	var counts struct{ dirty, errors, stale, clean, total, mirrorFailing int }
 	// Collect and sort keys
 	keys := make([]string, 0, len(st.Repos))
 	for k := range st.Repos {
@@ -173,6 +173,9 @@ func (c *StatusCmd) runTable(st *state.State, pass func(string, *state.RepoState
 		}
 
 		tags := strings.Join(repo.Tags, ",")
+		if repo.LastMirrorError != "" {
+			counts.mirrorFailing++
+		}
 
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			key, repo.Status, repo.CurrentBranch, fetchAge, backupAge, tags)
@@ -197,6 +200,9 @@ func (c *StatusCmd) runTable(st *state.State, pass func(string, *state.RepoState
 		fmt.Printf(" (%s)", strings.Join(parts, ", "))
 	}
 	fmt.Println()
+	if counts.mirrorFailing > 0 {
+		fmt.Printf("%d mirrors failing to update; `git-mgr mirror` retries them and says why\n", counts.mirrorFailing)
+	}
 	return nil
 }
 

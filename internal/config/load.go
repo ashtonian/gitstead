@@ -172,6 +172,11 @@ func normalize(cfg *Config) {
 func expandPaths(cfg *Config) {
 	cfg.BaseDir = ExpandHome(cfg.BaseDir)
 	cfg.Manifest = ExpandHome(cfg.Manifest)
+	if cfg.Mirror.Dir == "" {
+		cfg.Mirror.Dir = ExpandHome("~/.local/share/git-mgr/mirrors")
+	} else {
+		cfg.Mirror.Dir = filepath.Clean(ExpandHome(cfg.Mirror.Dir))
+	}
 	cfg.WorkspaceDefaults.Root = ExpandHome(cfg.WorkspaceDefaults.Root)
 	if cfg.WorkspaceDefaults.CacheRoot == "" {
 		cfg.WorkspaceDefaults.CacheRoot = defaultCacheRoot()
