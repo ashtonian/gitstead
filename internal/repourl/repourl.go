@@ -5,6 +5,7 @@ package repourl
 import (
 	"fmt"
 	"net/url"
+	"path"
 	"regexp"
 	"strings"
 )
@@ -63,8 +64,9 @@ func parseURLInner(rawURL string) (*Identity, error) {
 		return nil, fmt.Errorf("unsupported URL scheme: %s", rawURL[:i])
 	}
 
-	// scp-like SSH (user@host:path) — has a colon before any slash and no scheme.
-	if i := strings.Index(rawURL, ":"); i >= 0 && !strings.Contains(rawURL[:i], "/") && strings.Contains(rawURL, "@") {
+	// scp-like SSH (user@host:path) — user@host before the first colon, and no
+	// slash before it.
+	if i := strings.Index(rawURL, ":"); i >= 0 && !strings.Contains(rawURL[:i], "/") && strings.Contains(rawURL[:i], "@") {
 		return parseSCPURL(rawURL)
 	}
 
@@ -97,11 +99,12 @@ func parseSchemeURL(rawURL string) (*Identity, error) {
 
 // parseSCPURL handles scp-like git@host:owner/repo.git.
 func parseSCPURL(rawURL string) (*Identity, error) {
-	at := strings.Index(rawURL, "@")
-	rest := rawURL[at+1:] // host:path
-	colon := strings.Index(rest, ":")
-	host := rest[:colon]
-	owner, name, err := splitOwnerRepo(rest[colon+1:])
+	userHost, path, _ := strings.Cut(rawURL, ":")
+	host := userHost[strings.LastIndex(userHost, "@")+1:]
+	if host == "" {
+		return nil, fmt.Errorf("SSH URL %q has no host", rawURL)
+	}
+	owner, name, err := splitOwnerRepo(path)
 	if err != nil {
 		return nil, fmt.Errorf("SSH URL %q: %w", rawURL, err)
 	}
@@ -109,23 +112,20 @@ func parseSCPURL(rawURL string) (*Identity, error) {
 }
 
 // parseLocalPath derives an identity from a filesystem remote. There is no real
-// host/owner, so Host is "local" and Owner is the immediate parent directory.
-func parseLocalPath(path, _ string) (*Identity, error) {
-	clean := strings.TrimRight(strings.TrimSuffix(strings.TrimSpace(path), ".git"), "/")
-	if clean == "" {
-		return nil, fmt.Errorf("empty local repo path")
+// host/owner, so Host is "local" and Owner is the immediate parent directory,
+// or "local" for a repo with none.
+func parseLocalPath(p, _ string) (*Identity, error) {
+	clean := strings.TrimSuffix(path.Clean(strings.TrimSpace(p)), ".git")
+	name := path.Base(clean)
+	if clean == "" || name == "/" || name == "." || name == ".." {
+		return nil, fmt.Errorf("cannot derive repo name from %q", p)
 	}
-	name := clean[strings.LastIndex(clean, "/")+1:]
-	if name == "" {
-		return nil, fmt.Errorf("cannot derive repo name from %q", path)
-	}
-	owner := "local"
-	if i := strings.LastIndex(clean, "/"); i > 0 {
-		parent := clean[:i]
-		owner = parent[strings.LastIndex(parent, "/")+1:]
+	owner := path.Base(path.Dir(clean))
+	if owner == "/" || owner == "." || owner == ".." {
+		owner = "local"
 	}
 	id := identity("local", owner, name)
-	id.SSHURL = path // keep the original path as the clone source for local remotes
+	id.SSHURL = p // keep the original path as the clone source for local remotes
 	return id, nil
 }
 

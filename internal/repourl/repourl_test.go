@@ -124,6 +124,10 @@ func TestParseURL_Invalid(t *testing.T) {
 		"",                       // empty
 		"https://github.com",     // no owner/repo path
 		"git@github.com:",        // no path
+		"x:y@host",               // an @ after the colon isn't user@host
+		"git@:acme/api",          // no host
+		"/",                      // no name
+		"..",                     // no name
 	}
 	for _, url := range invalids {
 		if _, err := repourl.Parse(url); err == nil {
@@ -184,4 +188,25 @@ func TestWithoutCredentials(t *testing.T) {
 			t.Errorf("WithoutCredentials(%q) = %q, want %q", tt.url, got, tt.want)
 		}
 	}
+}
+
+// Parse never panics, and what it accepts names a repo: a host, an owner and
+// a name, with a key that parses back to itself.
+func FuzzParse(f *testing.F) {
+	for _, seed := range []string{
+		"git@github.com:acme/api.git", "https://github.com/acme/api", "ssh://git@host:2222/g/sub/api.git",
+		"git://host/a/b", "file:///srv/git/a.git", "/srv/git/a.git", "~/x/y.git", "./a/b",
+		"x:y@host", "@:", "a@:b/c", ":@", "git@host:", "https://", "ssh://@/", "git@:o/r",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, raw string) {
+		id, err := repourl.Parse(raw)
+		if err != nil {
+			return
+		}
+		if id.Host == "" || id.Owner == "" || id.Name == "" {
+			t.Errorf("Parse(%q) = %+v: a repo with no host, owner or name", raw, id)
+		}
+	})
 }
