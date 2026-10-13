@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/git-mgr/internal/ctxutil"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/shellutil"
 	"github.com/ashtonian/git-mgr/internal/state"
@@ -87,10 +88,15 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 			return err
 		}
 		defer taken.release()
+		rctx, cancel := ctxutil.WithTimeout(ctx.GoCtx(), cfg.Sync.CloneTimeout)
+		defer cancel()
+		timedOut := func(err error) error {
+			return ctxutil.TimedOut(rctx, err, "archiving "+repo.LocalPath, cfg.Sync.CloneTimeout, "sync.clone_timeout")
+		}
 		if c.Delete {
-			archived, err := gitops.RemoveClone(ctx.GoCtx(), repo.LocalPath, cfg.Backup.ArchiveDir, key, gitops.RemoveOptions{KeepHistory: taken.state.LeansOn(key)})
+			archived, err := gitops.RemoveClone(rctx, repo.LocalPath, cfg.Backup.ArchiveDir, key, gitops.RemoveOptions{KeepHistory: taken.state.LeansOn(key)})
 			if err != nil {
-				return err
+				return timedOut(err)
 			}
 			if archived != "" {
 				fmt.Printf("  Archived unique work of %s to %s\n", key, archived)
@@ -98,9 +104,9 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 			}
 			fmt.Printf("  Deleted %s\n", repo.LocalPath)
 		} else {
-			entry, err := archiveClone(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir, key, repo.LocalPath)
+			entry, err := archiveClone(rctx, ctx.Logger(), cfg.Backup.ArchiveDir, key, repo.LocalPath)
 			if err != nil {
-				return err
+				return timedOut(err)
 			}
 			if entry != nil {
 				fmt.Printf("  Moved %s to %s (git-mgr archives restore %s)\n", repo.LocalPath, entry.Path, entry.ID)
@@ -323,12 +329,22 @@ func detectGitHubCLI(ctx *Context) (string, bool) {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return "", false
 	}
+	// Each call is bounded as a provider's API requests are.
+	timeout := config.Defaults().Sync.APITimeout
+	if cfg, err := ctx.LoadConfig(); err == nil {
+		timeout = cfg.Sync.APITimeout
+	}
+	gh := func(args ...string) ([]byte, error) {
+		cctx, cancel := ctxutil.WithTimeout(ctx.GoCtx(), timeout)
+		defer cancel()
+		return exec.CommandContext(cctx, "gh", args...).Output()
+	}
 	// Pin to github.com: a user whose gh default host is GitHub Enterprise would
 	// otherwise get a github.com provider pointed at the wrong account/host.
-	if exec.CommandContext(ctx.GoCtx(), "gh", "auth", "token", "--hostname", "github.com").Run() != nil {
+	if _, err := gh("auth", "token", "--hostname", "github.com"); err != nil {
 		return "", false
 	}
-	out, err := exec.CommandContext(ctx.GoCtx(), "gh", "api", "user", "--hostname", "github.com", "--jq", ".login").Output()
+	out, err := gh("api", "user", "--hostname", "github.com", "--jq", ".login")
 	if err != nil {
 		return "", false
 	}

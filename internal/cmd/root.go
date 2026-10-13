@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/repourl"
@@ -191,13 +192,50 @@ func (c *Context) Logger() *slog.Logger {
 	if c.logger != nil {
 		return c.logger
 	}
-	level := slog.LevelInfo
-	if c.Verbose {
-		level = slog.LevelDebug
+	// A config that doesn't load is the command's error to report; its log
+	// settings are the defaults meanwhile.
+	settings := config.Defaults().Log
+	if cfg, err := c.LoadConfig(); err == nil {
+		settings = cfg.Log
 	}
-	if c.Quiet {
-		level = slog.LevelError
+	configured := slog.LevelInfo
+	_ = configured.UnmarshalText([]byte(settings.Level)) // validated with the config
+	// --verbose and --quiet are for this terminal; the file, read later, keeps
+	// the configured level unless --verbose asks for more.
+	terminal, file := configured, configured
+	switch {
+	case c.Verbose:
+		terminal, file = slog.LevelDebug, slog.LevelDebug
+	case c.Quiet:
+		terminal = slog.LevelError
 	}
-	c.logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	handler := func(w io.Writer, level slog.Level) slog.Handler {
+		opts := &slog.HandlerOptions{Level: level}
+		if settings.Format == "text" {
+			return slog.NewTextHandler(w, opts)
+		}
+		return slog.NewJSONHandler(w, opts)
+	}
+	h := handler(os.Stderr, terminal)
+	if settings.File != "" {
+		f, err := openLogFile(config.ExpandHome(settings.File))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "git-mgr: logging only to stderr: %v\n", err)
+		} else {
+			h = slog.NewMultiHandler(h, handler(f, file))
+		}
+	}
+	c.logger = slog.New(h)
+	// Packages that log through slog's default logger follow the same
+	// settings.
+	slog.SetDefault(c.logger)
 	return c.logger
+}
+
+// openLogFile opens path for appending, making its directory.
+func openLogFile(path string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 }

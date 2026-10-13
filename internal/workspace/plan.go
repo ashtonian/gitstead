@@ -61,7 +61,7 @@ func Compute(ctx context.Context, cfg *config.Config, st *state.State, scope Sco
 	blocked = append(blocked, b...)
 
 	paths := append(reconcile.RepoPaths(desired, st), Paths(specs, projected)...)
-	seen := reconcile.Observe(ctx, paths, cfg.Concurrency)
+	seen := reconcile.Observe(ctx, paths, cfg.Concurrency, cfg.Sync.InspectTimeout)
 	overwrite := cfg.Reconcile.Drift == "overwrite"
 	p := reconcile.PlanRepos(desired, st, seen, overwrite)
 	p.Merge(Plan(specs, projected, seen, scope.covers, overwrite, cfg.WorkspaceCacheDir))
@@ -136,7 +136,7 @@ func trackReferenced(ctx context.Context, cfg *config.Config, st *state.State, d
 			}
 		}
 	}
-	seen := reconcile.Observe(ctx, slices.Collect(maps.Keys(paths)), cfg.Concurrency)
+	seen := reconcile.Observe(ctx, slices.Collect(maps.Keys(paths)), cfg.Concurrency, cfg.Sync.InspectTimeout)
 	for _, path := range slices.Sorted(maps.Keys(paths)) {
 		c := seen.At(path)
 		if !c.IsRepo || c.Err != nil {

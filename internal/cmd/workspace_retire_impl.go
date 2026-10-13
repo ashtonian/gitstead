@@ -108,7 +108,7 @@ func (c *WSRetireCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	opts := workspace.RetireOptions{StateDir: st.Dir(), ArchiveDir: cfg.Backup.ArchiveDir, Stop: c.Stop, StopTimeout: c.Timeout, Discard: c.Force}
+	opts := workspace.RetireOptions{StateDir: st.Dir(), ArchiveDir: cfg.Backup.ArchiveDir, Stop: c.Stop, StopTimeout: c.Timeout, Discard: c.Force, Timeout: cfg.Sync.CloneTimeout}
 	retired := map[string]workspace.Retired{}
 	var doc retiredJSON
 	kept, total := 0, 0

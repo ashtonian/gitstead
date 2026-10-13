@@ -166,8 +166,8 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		}
 	}
 
-	if cfg.Notify.Enabled && cfg.Notify.OnError && len(failures) > 0 {
-		notify.Send("git-mgr sync errors", fmt.Sprintf("%d repos failed to sync", len(failures)))
+	if cfg.Notify.Enabled {
+		notifySync(ctx, cfg.Notify, len(failures), fetched, backedUp, doc.Stale)
 	}
 	logEvent(ctx, "sync", "", fmt.Sprintf("fetched=%d backed_up=%d mirrored=%d failed=%d skipped_recent=%d skipped_locked=%d",
 		fetched, backedUp, mirrored, len(failures), skippedRecent, skippedLocked))
@@ -287,4 +287,19 @@ func splitJobs(jobs []copyJob) (repos, copies []copyJob) {
 		}
 	}
 	return repos, copies
+}
+
+// notifySync sends the notifications notify asks for of a sync: its
+// failures, the repos it found gone upstream, and its summary.
+func notifySync(ctx *Context, n config.NotifyConfig, failed, fetched, backedUp int, stale *staleJSON) {
+	send := func(title, msg string) { notify.Send(ctx.GoCtx(), n.Timeout, title, msg) }
+	if n.OnError && failed > 0 {
+		send("git-mgr sync errors", fmt.Sprintf("%d repos failed to sync", failed))
+	}
+	if n.OnStale && stale != nil && stale.NewlyStale > 0 {
+		send("git-mgr: repos gone upstream", fmt.Sprintf("%d repos are no longer found upstream and are marked stale; git-mgr status --stale lists them", stale.NewlyStale))
+	}
+	if n.OnCompletion {
+		send("git-mgr sync done", fmt.Sprintf("%d fetched, %d backed up, %d failed", fetched, backedUp, failed))
+	}
 }

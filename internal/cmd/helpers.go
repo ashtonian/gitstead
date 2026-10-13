@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/git-mgr/internal/ctxutil"
 	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/hook"
@@ -60,9 +61,9 @@ func agentEnv(cfg *config.Config, st *state.State, ws, agent string) ([]string, 
 // moving them into the archive through cloneArchiver.
 func staleCleanup(ctx *Context, cfg *config.Config, st *state.State) discovery.Cleanup {
 	take := repoTaker(st.Path(), cfg.LockTimeout)
-	remove := archivingRemover(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir, take)
+	remove := archivingRemover(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir, cfg.Sync.CloneTimeout, take)
 	if cfg.Cleanup.Policy == "archive" {
-		remove = cloneArchiver(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir, take)
+		remove = cloneArchiver(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir, cfg.Sync.CloneTimeout, take)
 	}
 	return discovery.Cleanup{
 		Config: cfg.Cleanup,
@@ -124,7 +125,7 @@ func repoTaker(statePath string, wait time.Duration) func(ctx context.Context, k
 // is bundled into archiveDir first, and a clone that can't be inspected or
 // archived is kept. A repo other archives lean on has its whole history
 // bundled.
-func archivingRemover(ctx context.Context, log *slog.Logger, archiveDir string, take func(context.Context, string, string) (takenRepo, error)) discovery.RemoveFunc {
+func archivingRemover(ctx context.Context, log *slog.Logger, archiveDir string, timeout time.Duration, take func(context.Context, string, string) (takenRepo, error)) discovery.RemoveFunc {
 	return func(key string, repo *state.RepoState) (*state.ArchiveEntry, error) {
 		taken, err := take(ctx, key, repo.LocalPath)
 		if err != nil {
@@ -132,7 +133,10 @@ func archivingRemover(ctx context.Context, log *slog.Logger, archiveDir string, 
 			return nil, err
 		}
 		defer taken.release()
-		archived, err := gitops.RemoveClone(ctx, repo.LocalPath, archiveDir, key, gitops.RemoveOptions{KeepHistory: taken.state.LeansOn(key)})
+		rctx, cancel := ctxutil.WithTimeout(ctx, timeout)
+		defer cancel()
+		archived, err := gitops.RemoveClone(rctx, repo.LocalPath, archiveDir, key, gitops.RemoveOptions{KeepHistory: taken.state.LeansOn(key)})
+		err = ctxutil.TimedOut(rctx, err, "archiving and deleting "+repo.LocalPath, timeout, "sync.clone_timeout")
 		if err != nil {
 			log.Warn("stale repo kept", "repo", key, "path", repo.LocalPath, "error", err)
 			return nil, err
@@ -147,7 +151,7 @@ func archivingRemover(ctx context.Context, log *slog.Logger, archiveDir string, 
 }
 
 // cloneArchiver moves stale clones, whole, into archiveDir.
-func cloneArchiver(ctx context.Context, log *slog.Logger, archiveDir string, take func(context.Context, string, string) (takenRepo, error)) discovery.RemoveFunc {
+func cloneArchiver(ctx context.Context, log *slog.Logger, archiveDir string, timeout time.Duration, take func(context.Context, string, string) (takenRepo, error)) discovery.RemoveFunc {
 	return func(key string, repo *state.RepoState) (*state.ArchiveEntry, error) {
 		taken, err := take(ctx, key, repo.LocalPath)
 		if err != nil {
@@ -155,7 +159,10 @@ func cloneArchiver(ctx context.Context, log *slog.Logger, archiveDir string, tak
 			return nil, err
 		}
 		defer taken.release()
-		entry, err := archiveClone(ctx, log, archiveDir, key, repo.LocalPath)
+		rctx, cancel := ctxutil.WithTimeout(ctx, timeout)
+		defer cancel()
+		entry, err := archiveClone(rctx, log, archiveDir, key, repo.LocalPath)
+		err = ctxutil.TimedOut(rctx, err, "archiving "+repo.LocalPath, timeout, "sync.clone_timeout")
 		switch {
 		case err != nil:
 			log.Warn("stale repo kept", "repo", key, "path", repo.LocalPath, "error", err)

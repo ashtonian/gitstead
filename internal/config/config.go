@@ -341,7 +341,8 @@ type SyncConfig struct {
 	MinFetchInterval time.Duration `koanf:"min_fetch_interval" yaml:"min_fetch_interval" default:"10m"    validate:"min=0"`
 	TimeoutPerRepo   time.Duration `koanf:"timeout_per_repo"   yaml:"timeout_per_repo"   default:"5m"     validate:"min=0"` // one repo's fetch
 	BackupTimeout    time.Duration `koanf:"backup_timeout"     yaml:"backup_timeout"     default:"2m"     validate:"min=0"` // one repo's backup
-	CloneTimeout     time.Duration `koanf:"clone_timeout"      yaml:"clone_timeout"      default:"30m"    validate:"min=0"` // one clone
+	CloneTimeout     time.Duration `koanf:"clone_timeout"      yaml:"clone_timeout"      default:"30m"    validate:"min=0"` // one clone, or one archive of a clone before it is deleted
+	InspectTimeout   time.Duration `koanf:"inspect_timeout"    yaml:"inspect_timeout"    default:"1m"     validate:"min=0"` // one look at a working copy while planning
 	APITimeout       time.Duration `koanf:"api_timeout"        yaml:"api_timeout"        default:"60s"    validate:"min=0"` // one provider API request attempt
 	DiscoveryTimeout time.Duration `koanf:"discovery_timeout"  yaml:"discovery_timeout"  default:"5m"     validate:"min=0"` // one discovery rule, retries and rate-limit waits included
 	Retries          int           `koanf:"retries"            yaml:"retries"            default:"2"      validate:"min=0,max=10"`
@@ -437,6 +438,8 @@ type NotifyConfig struct {
 	// working, to count as waiting for you; 0 stops watching panes, leaving
 	// only what agents say themselves (`git-mgr ws waiting`).
 	WaitingAfter time.Duration `koanf:"waiting_after" yaml:"waiting_after" default:"30s" validate:"min=0"`
+	// Timeout bounds sending one notification.
+	Timeout time.Duration `koanf:"timeout" yaml:"timeout" default:"10s" validate:"min=0"`
 }
 
 // LogConfig controls logging.

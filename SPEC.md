@@ -710,7 +710,8 @@ sync:
   # is killed, and the error names the setting.
   timeout_per_repo: "5m"    # one repo's fetch, retries included
   backup_timeout: "2m"      # one working copy's backup and status read
-  clone_timeout: "30m"      # one clone
+  clone_timeout: "30m"      # one clone; one archive of a clone or copy before it is removed
+  inspect_timeout: "1m"     # one look at a working copy while planning
   api_timeout: "60s"        # one provider API request attempt
   discovery_timeout: "5m"   # one discovery rule: lookups, retries and rate-limit waits included
 
@@ -874,6 +875,7 @@ notify:
   on_completion: false            # Notify on every sync completion (noisy for cron)
   on_stale: true                  # Notify when new stale repos detected
   on_waiting: true                # Notify when an agent is waiting for you
+  timeout: "10s"                  # how long sending one notification may take
   waiting_after: "30s"            # a tmux pane quiet this long after working is waiting; 0 = off
 
 # ============================================================================

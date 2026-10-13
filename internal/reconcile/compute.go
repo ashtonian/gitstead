@@ -20,7 +20,7 @@ type Scope struct {
 // Compute plans every change config asks for of tracked repos within scope.
 func Compute(ctx context.Context, cfg *config.Config, st *state.State, scope Scope) *Plan {
 	desired, blocked := Repos(cfg, st, scope.Discovered, scope.Rules)
-	seen := Observe(ctx, RepoPaths(desired, st), cfg.Concurrency)
+	seen := Observe(ctx, RepoPaths(desired, st), cfg.Concurrency, cfg.Sync.InspectTimeout)
 	p := PlanRepos(desired, st, seen, cfg.Reconcile.Drift == "overwrite")
 	p.Blocked = append(p.Blocked, blocked...)
 	return p

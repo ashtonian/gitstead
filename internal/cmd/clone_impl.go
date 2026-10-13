@@ -50,7 +50,7 @@ func (c *CloneCmd) Run(ctx *Context) error {
 // machine reading it has the repo too.
 func addByHand(ctx *Context, cfg *config.Config, st *state.State, d reconcile.Repo, dryRun bool) error {
 	desired := map[string]reconcile.Repo{d.Key: d}
-	seen := reconcile.Observe(ctx.GoCtx(), reconcile.RepoPaths(desired, st), 1)
+	seen := reconcile.Observe(ctx.GoCtx(), reconcile.RepoPaths(desired, st), 1, cfg.Sync.InspectTimeout)
 	plan := reconcile.PlanRepos(desired, st, seen, false)
 	if dryRun {
 		printPlan(plan, "all")
