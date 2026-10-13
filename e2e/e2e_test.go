@@ -226,10 +226,12 @@ func (e *testEnv) api(t *testing.T, method, path string, body any, token string)
 // httpClone clones a seeded repo over HTTP (basic auth) to destPath. The
 // Forgejo container only exposes HTTP conveniently; git-mgr's own clone path is
 // SSH, so adopt/backup/sync tests operate on these pre-cloned working trees.
+// httpClone clones a public repo over HTTP. The URL carries no credential:
+// git-mgr refuses one in an origin, and git's credential helper is where
+// credentials belong.
 func (e *testEnv) httpClone(t *testing.T, owner, repo, destPath string) {
 	t.Helper()
-	host := strings.TrimPrefix(e.httpURL, "http://")
-	url := fmt.Sprintf("http://%s:%s@%s/%s/%s.git", e.adminUser, e.adminPass, host, owner, repo)
+	url := fmt.Sprintf("%s/%s/%s.git", e.httpURL, owner, repo)
 	if out, err := exec.Command("git", "clone", url, destPath).CombinedOutput(); err != nil {
 		t.Fatalf("http clone %s/%s: %v\n%s", owner, repo, err, out)
 	}
