@@ -58,7 +58,7 @@ func agentEnv(cfg *config.Config, st *state.State, ws, agent string) ([]string, 
 // configured cleanup policy, deleting clones through archivingRemover or
 // moving them into the archive through cloneArchiver.
 func staleCleanup(ctx *Context, cfg *config.Config, st *state.State) discovery.Cleanup {
-	remove := archivingRemover(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir)
+	remove := archivingRemover(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir, st.LeansOn)
 	if cfg.Cleanup.Policy == "archive" {
 		remove = cloneArchiver(ctx.GoCtx(), ctx.Logger(), cfg.Backup.ArchiveDir)
 	}
@@ -80,10 +80,11 @@ func discoveredKeys[V any](discovered map[string]V) map[string]bool {
 
 // archivingRemover deletes stale clones through gitops.RemoveClone: unique work
 // is bundled into archiveDir first, and a clone that can't be inspected or
-// archived is kept.
-func archivingRemover(ctx context.Context, log *slog.Logger, archiveDir string) discovery.RemoveFunc {
+// archived is kept. A repo other archives lean on has its whole history
+// bundled.
+func archivingRemover(ctx context.Context, log *slog.Logger, archiveDir string, leansOn func(string) bool) discovery.RemoveFunc {
 	return func(key string, repo *state.RepoState) (*state.ArchiveEntry, error) {
-		archived, err := gitops.RemoveClone(ctx, repo.LocalPath, archiveDir, key, false)
+		archived, err := gitops.RemoveClone(ctx, repo.LocalPath, archiveDir, key, gitops.RemoveOptions{KeepHistory: leansOn(key)})
 		if err != nil {
 			log.Warn("stale repo kept", "repo", key, "path", repo.LocalPath, "error", err)
 			return nil, err

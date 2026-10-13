@@ -14,11 +14,14 @@ import (
 // UniqueWork is local work in a repository that exists nowhere else, so
 // deleting the repository would lose it.
 type UniqueWork struct {
-	Changed         int    // tracked files with staged or unstaged changes
-	Untracked       int    // untracked files; ignored files don't count
-	Stashes         int    // stash entries
-	UnpushedCommits int    // commits on local branches or HEAD that no remote-tracking ref reaches
-	DetachedCommits int    // commits reachable only from a detached HEAD
+	Changed         int // tracked files with staged or unstaged changes
+	Untracked       int // untracked files; ignored files don't count
+	Stashes         int // stash entries
+	UnpushedCommits int // commits on local branches or HEAD that no remote-tracking ref reaches
+	DetachedCommits int // commits reachable only from a detached HEAD
+	// OtherRefCommits counts commits that only tags or other refs of the
+	// repository's own reach: no branch, HEAD, stash or remote does.
+	OtherRefCommits int
 	InProgress      string // "rebase", "merge", "cherry-pick" or "revert" when one is under way
 	// Submodules holds, by path, the unique work of each checked-out
 	// submodule that has some. A submodule's repository goes with the copy
@@ -28,11 +31,11 @@ type UniqueWork struct {
 
 // LostWithClone reports whether deleting a whole clone would lose work.
 func (u UniqueWork) LostWithClone() bool {
-	return u.inWorkingTree() || u.Stashes > 0 || u.UnpushedCommits > 0 || len(u.Submodules) > 0
+	return u.inWorkingTree() || u.Stashes > 0 || u.UnpushedCommits > 0 || u.OtherRefCommits > 0 || len(u.Submodules) > 0
 }
 
 // LostWithWorktree reports whether removing a linked worktree would lose work.
-// Its branches and stashes live in the shared repository and survive; its
+// Its branches, tags and stashes live in the shared repository and survive; its
 // working tree, index, submodules and commits reachable only from a detached
 // HEAD don't.
 func (u UniqueWork) LostWithWorktree() bool {
@@ -58,6 +61,7 @@ func (u UniqueWork) String() string {
 	add(u.Stashes, "stash", "stashes")
 	add(u.UnpushedCommits, "unpushed commit", "unpushed commits")
 	add(u.DetachedCommits, "commit on a detached HEAD", "commits on a detached HEAD")
+	add(u.OtherRefCommits, "commit only a tag or other ref reaches", "commits only tags or other refs reach")
 	if u.InProgress != "" {
 		parts = append(parts, u.InProgress+" in progress")
 	}
@@ -146,22 +150,26 @@ func inspectRepo(ctx context.Context, repoPath string) (UniqueWork, error) {
 	if u.UnpushedCommits, err = gitCount(ctx, repoPath, append(unpushed, "--not", "--remotes")...); err != nil {
 		return u, err
 	}
+	// git-mgr's own refs hold backups of work counted here already, and
+	// refs/prefetch holds copies of remote branches.
+	others := []string{"rev-list", "--count"}
+	for _, ref := range []string{"refs/heads/*", "refs/remotes/*", "refs/stash", "refs/git-mgr/*", "refs/prefetch/*"} {
+		others = append(others, "--exclude="+ref)
+	}
+	others = append(others, "--all", "--not", "--branches", "--remotes")
+	if hasHead {
+		others = append(others, "HEAD")
+	}
+	if u.OtherRefCommits, err = gitCount(ctx, repoPath, others...); err != nil {
+		return u, err
+	}
 	if hasHead && GitExitCode(ctx, repoPath, "symbolic-ref", "-q", "HEAD") != 0 {
 		if u.DetachedCommits, err = gitCount(ctx, repoPath, "rev-list", "--count", "HEAD", "--not", "--branches", "--remotes"); err != nil {
 			return u, err
 		}
 	}
 
-	gitDir := ResolveGitDirs(ctx, repoPath).GitDir
-	for _, op := range []struct{ marker, name string }{
-		{"rebase-merge", "rebase"}, {"rebase-apply", "rebase"},
-		{"MERGE_HEAD", "merge"}, {"CHERRY_PICK_HEAD", "cherry-pick"}, {"REVERT_HEAD", "revert"},
-	} {
-		if fileExists(filepath.Join(gitDir, op.marker)) {
-			u.InProgress = op.name
-			break
-		}
-	}
+	u.InProgress = operationInProgress(ResolveGitDirs(ctx, repoPath).GitDir)
 	return u, nil
 }
 

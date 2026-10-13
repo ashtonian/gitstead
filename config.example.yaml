@@ -348,8 +348,10 @@ cleanup:
   #                       restore` puts it back); a clone with linked worktrees
   #                       or workspace copies is kept and stays tracked
   #   remove_and_delete - Remove from state AND delete from disk after grace_period
-  #                       (unique work is archived to backup.archive_dir first;
-  #                       a repo that can't be archived is kept and stays tracked)
+  #                       (unique work is archived to backup.archive_dir first,
+  #                       in a bundle of the repo's whole history that restores
+  #                       with no upstream; a repo that can't be archived, or
+  #                       that git is busy in, is kept and stays tracked)
   #   ignore           - Never mark stale: such repos keep syncing. Manual cleanup only.
   # A stale repo is no longer fetched or pushed offsite (its upstream is gone),
   # but its local work is still backed up.

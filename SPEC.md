@@ -326,7 +326,7 @@ Stop tracking repos.
 
 | Flag | Description |
 |---|---|
-| `--delete` | Also delete the clone from disk. Unique work is archived to `backup.archive_dir` first; a clone that can't be inspected or archived is kept and stays tracked, and the command exits non-zero. |
+| `--delete` | Also delete the clone from disk. Unique work -- including commits only a tag or other ref reaches -- is archived to `backup.archive_dir` first, in a bundle of the repo's whole history; a repo workspace copies' archives lean on is bundled whole even without unique work. A clone that can't be inspected or archived, or that git is busy in (a lock file, a running gc, a rebase or merge under way), is kept and stays tracked, and the command exits non-zero. |
 | `--archive` | Also move the clone, whole, to `backup.archive_dir/<id>/` and catalog it; `archives restore` puts it back. A clone with linked worktrees is kept and stays tracked, and the command exits non-zero. Exclusive with `--delete`. |
 | `--yes` | Skip confirmation prompt |
 
@@ -351,8 +351,8 @@ or the directory `<archive_dir>/<id>/`, with `<id>.json` describing it.
 | Subcommand | Description |
 |---|---|
 | `ls [--workspace w] [--repo glob]` | ID, when, where it came from, the repo, what it saved. |
-| `show <id>` | The description and the restore steps: the bundle's fetch-and-apply commands, or `archives restore` for a clone. |
-| `restore <id> [--to path]` | Move an archived clone back to where it was (or `--to`), drop it from the catalog and track it by hand (`adopt`), so it is never judged stale again. Refuses a bundle (its steps are in `show`), an occupied destination, and -- without `--to` -- a repo tracked again meanwhile; with `--to` such a repo's archive is restored untracked. |
+| `show <id>` | The description -- for a bundle, whether it holds the repo's whole history or leans on a base -- and the restore steps, by hand as well. |
+| `restore <id> [--to path] [--base path]` | Put an archive back where it was (or `--to`). An archived clone is moved back and dropped from the catalog; a bundle is rebuilt into a clone -- branches, tags, remotes, HEAD, stash list, index, working tree, untracked files, LFS objects, submodules' archives -- and stays in the catalog. A bundle that leans on a base is restored into a clone of it (`--base` names another, such as a restored archive of that repo), or of origin when it is gone. A repo's archive is then tracked by hand (`adopt`), so it is never judged stale again; a workspace copy's is not tracked. Refuses an occupied destination and -- without `--to` -- a repo tracked again meanwhile; with `--to` such a repo's archive is restored untracked. |
 | `rm <id>... [--yes]` | Delete archives for good -- bundle or clone, description, LFS objects, submodules' archives -- and drop them from the catalog. Only files named for the archive, beside it, are deleted. Asks first; without a terminal, needs `--yes`. |
 
 #### `git-mgr mirror [--repos g] [--tag t] [--set s] [--force]`
@@ -737,8 +737,9 @@ cleanup:
   #   to backup.archive_dir/<id>/, catalogued; `archives restore` puts it back.
   #   A clone with linked worktrees or workspace copies is kept and stays tracked.
   # - remove_and_delete: remove from state AND delete from disk after grace_period.
-  #   Unique work is archived to backup.archive_dir first; a repo that can't be
-  #   archived is kept, stays tracked and records the reason in its error.
+  #   Unique work is archived to backup.archive_dir first, in a bundle of the
+  #   repo's whole history that restores with no upstream; a repo that can't be
+  #   archived, or that git is busy in, is kept, stays tracked and is reported.
   # - ignore: never mark stale, never remove; such repos keep syncing. Manual cleanup only.
   # A stale repo is no longer fetched or pushed offsite, but is still backed up.
   policy: "mark_stale"

@@ -98,7 +98,13 @@ func RemoveCopy(ctx context.Context, isolation string, c Copy, archiveDir, name 
 		}
 		return gitops.RemoveWorktree(ctx, source, c.Path, archiveDir, name, discard)
 	}
-	return gitops.RemoveClone(ctx, c.Path, archiveDir, name, discard)
+	// The repo the copy was made from keeps what the copy shares with its
+	// remotes, so its bundle needn't hold that again.
+	base := SourceOf(ctx, c)
+	if !gitops.HasGitDir(base) {
+		base = ""
+	}
+	return gitops.RemoveClone(ctx, c.Path, archiveDir, name, gitops.RemoveOptions{Discard: discard, Base: base})
 }
 
 // MoveCopy moves copy c to dest: with `git worktree move` for a worktree, so

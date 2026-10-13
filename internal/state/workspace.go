@@ -235,6 +235,18 @@ type ArchiveEntry struct {
 	Created   time.Time `yaml:"created" json:"created"`
 }
 
+// LeansOn reports whether an archive of a workspace copy of repo may need
+// the repo's history to be restored: its bundle holds only what the repo
+// lacked.
+func (s *State) LeansOn(repo string) bool {
+	for _, a := range s.Archives {
+		if a.Repo == repo && a.Workspace != "" && !a.Clone {
+			return true
+		}
+	}
+	return false
+}
+
 // Tombstone records a workspace copy that was retired.
 type Tombstone struct {
 	Workspace string    `yaml:"workspace" json:"workspace"`

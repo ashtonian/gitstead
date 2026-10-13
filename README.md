@@ -143,7 +143,7 @@ writes a config without asking anything.
 | `git-mgr fleet` | Open several workspaces' agents side by side with tmux, iTerm, Muxy or a plugin; `open`, `plan`, `ls`, `status`, `stop`. See [Fleets](#fleets-and-launchers). |
 | `git-mgr mirror` | Make or update full mirrors of repos' upstreams now; `sync` does it every `mirror.interval`. `--repos`/`--tag`/`--set`, `--force`. See [Mirrors](#mirrors-surviving-the-host). |
 | `git-mgr hooks post-clone\|post-create` | Run repos' `post_clone` or a workspace's `post_create` hooks again, output on the terminal. See [Hooks](#hooks). |
-| `git-mgr archives ls\|show\|restore\|rm` | The catalog of what was saved before copies and repos were taken away -- bundles of unique work, and whole clones -- and how to restore each; `restore` moves an archived clone back, `rm` deletes archives for good. |
+| `git-mgr archives ls\|show\|restore\|rm` | The catalog of what was saved before copies and repos were taken away -- bundles of unique work, and whole clones -- and how to restore each; `restore` moves an archived clone back or rebuilds a clone from a bundle, `rm` deletes archives for good. |
 | `git-mgr cd\|path\|open <query>` | Jump to, print, or open in your editor (`--web`: the repo's page) a repo, workspace or agent's folder from part of its name. See [Jump and open](#jump-and-open). |
 | `git-mgr shell-init bash\|zsh\|fish` | Print the shell function that makes `git-mgr cd` change directory. |
 | `git-mgr install-agent` | Install, list (`--list`) or remove (`--uninstall`) background syncs (launchd/systemd/cron); `--name` and `--repos`/`--tag`/`--set` for several. |
@@ -858,34 +858,55 @@ for a working copy, or `git push --mirror <new remote>` from it to re-host.
 ### Deleting without losing work
 
 Every command that deletes a clone or worktree — `remove --delete`,
-`ws rm --delete`, `ws prune` and the `remove_and_delete` stale-cleanup policy —
-first inspects it for work that exists nowhere else: changed or untracked files,
-stashes, commits no remote has, commits on a detached HEAD and an unfinished
-rebase or merge. If there is any, it is written to one git bundle in
-`backup.archive_dir` (default `~/.local/share/git-mgr/archive/`) and verified with
-`git bundle verify` before anything is deleted. For a worktree, its branches stay
-in the source repo, so only the working tree and detached commits are archived.
-Each checked-out submodule is inspected the same way, and gets its own bundle;
-a clone's Git LFS objects are kept beside its bundle (hardlinked). Every archive
-is recorded in the catalog, `git-mgr archives ls`.
-If git-mgr can't inspect the repo or write the bundle, nothing is deleted and the
-repo stays tracked. A repo that workspace copies are made from, or that has
-linked worktrees, is never untracked or deleted until they are gone. Stale cleanup lists each repo it kept and why: `discover
---apply` prints them, and `sync` reports each as a failure (exit code 3) until a
-later run deletes it.
+`ws rm --delete`, `ws retire`, `ws prune` and the `remove_and_delete`
+stale-cleanup policy — first inspects it for work that exists nowhere else:
+changed or untracked files, stashes, commits no remote has (on a branch, a
+detached HEAD, a tag or any other ref of its own) and an unfinished rebase or
+merge. If there is any, it is written to one git bundle in `backup.archive_dir`
+(default `~/.local/share/git-mgr/archive/`) and verified before anything is
+deleted. Each checked-out submodule is inspected the same way, and gets its own
+bundle; a clone's Git LFS objects are kept beside its bundle (hardlinked).
+Every archive is recorded in the catalog, `git-mgr archives ls`.
 
-Each bundle has a `.json` file beside it recording the source path, remotes,
-branch, what was saved and the restore command:
+What a bundle holds depends on what else keeps the history it shares with its
+remotes:
+
+| Deleting | The bundle holds | Restores from |
+| --- | --- | --- |
+| A tracked repo's clone | All of its history: branches, tags, remote-tracking refs, stashes, the working tree | The bundle alone. A clone deleted because its repo went upstream may be the last copy of it. |
+| A workspace copy that is a clone | What the repo it was made from lacks, checked against that repo; all of its history when the repo lacks some of it | A clone of that repo, or of origin when it is gone |
+| A workspace copy that is a worktree | The working tree, index and detached commits; its branches stay in the repo | The repo |
+
+A tracked repo that workspace copies' archives lean on is bundled whole when it
+is deleted, unique work or not, so those archives stay restorable.
+
+Nothing is deleted while git is busy in the repo or one of its submodules --
+a lock such as `index.lock` or a ref's `.lock` exists, `gc` is running, or a
+rebase, merge, cherry-pick or revert is under way -- since a command running
+there could be caught half-done. A lock a crashed git command left behind
+counts too: delete it once no git command is running there. If git-mgr can't
+inspect the repo or write and verify the bundle, nothing is deleted and the
+repo stays tracked. A repo that workspace copies are made from, or that has
+linked worktrees, is never untracked or deleted until they are gone. Stale
+cleanup lists each repo it kept and why: `discover --apply` prints them, and
+`sync` reports each as a failure (exit code 3) until a later run deletes it.
+
+`git-mgr archives restore <id> --to <dir>` rebuilds a clone from a bundle:
+its branches, tags and remotes, HEAD, the stash list, the index, working tree
+and untracked files, its LFS objects, and its submodules' archives in their
+places. The bundle stays in the catalog. Each bundle has a `.json` file beside
+it recording the source path, remotes, branch, what was saved and how to
+restore it by hand:
 
 ```bash
-git clone <remote> restored && cd restored
+git init restored && cd restored     # a bundle that leans on a repo: git clone <that repo> restored
 git fetch ~/.local/share/git-mgr/archive/<name>-<time>.bundle '+refs/*:refs/restored/*'
-git for-each-ref refs/restored   # heads/*, git-mgr/archive/<id>/{head,worktree,stash-N}
+git for-each-ref refs/restored   # heads/*, tags/*, git-mgr/archive/<id>/{head,worktree,stash-N}
 ```
 
-The `worktree` ref is a commit of the working tree including untracked files;
-`git checkout <ref> -- .` brings them back. Archives are never pruned
-automatically; `git-mgr archives rm <id>` deletes one for good.
+The `worktree` ref is a stash-shaped commit of the index, working tree and
+untracked files; `git stash apply --index <ref>` brings them back. Archives are
+never pruned automatically; `git-mgr archives rm <id>` deletes one for good.
 
 ### Archiving instead of deleting
 
@@ -904,7 +925,7 @@ nothing in the archive. `adopt --scan` skips the archive directory.
 
 ```bash
 git-mgr archives ls                    # ID, where it was, what it held
-git-mgr archives restore <id>          # move it back and track it again
+git-mgr archives restore <id>          # move it back and track it again (a bundle: rebuild a clone from it)
 git-mgr archives restore <id> --to ~/scratch/app   # the repo is tracked again meanwhile
 git-mgr archives rm <id>               # delete it for good
 ```

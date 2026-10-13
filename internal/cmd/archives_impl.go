@@ -23,7 +23,7 @@ import (
 type ArchivesCmd struct {
 	List    ArchivesListCmd    `cmd:"" name:"ls" help:"List the archives saved before copies and repos were taken away: bundles of unique work, and whole clones."`
 	Show    ArchivesShowCmd    `cmd:"" help:"Show an archive: what it saved, and how to restore it."`
-	Restore ArchivesRestoreCmd `cmd:"" help:"Move an archived clone back and track it again."`
+	Restore ArchivesRestoreCmd `cmd:"" help:"Put an archive back: move an archived clone back, or rebuild a clone from a bundle, and track a repo's again."`
 	Remove  ArchivesRemoveCmd  `cmd:"" name:"rm" help:"Delete archives, for good, and drop them from the catalog."`
 }
 
@@ -119,7 +119,13 @@ func (c *ArchivesShowCmd) Run(ctx *Context) error {
 		fmt.Printf("\nRestore:\n  git-mgr archives restore %s\n", a.ID)
 	case meta.Bundle != "":
 		fmt.Printf("  bundle:    %s\n", tildify(meta.Bundle))
-		fmt.Printf("\nRestore:\n  %s\n", strings.ReplaceAll(meta.Restore, " && ", " &&\n    "))
+		switch {
+		case meta.Complete:
+			fmt.Println("             all of the repository's history: it restores on its own")
+		case meta.Base != "":
+			fmt.Printf("             only what %s lacked: it restores into a clone of that, or of origin\n", tildify(meta.Base))
+		}
+		fmt.Printf("\nRestore:\n  git-mgr archives restore %s --to <dir>\nor by hand:\n  %s\n", a.ID, strings.ReplaceAll(meta.Restore, " && ", " &&\n    "))
 	}
 	for _, sub := range slices.Sorted(maps.Keys(meta.Submodules)) {
 		fmt.Printf("  submodule %s: git-mgr archives show %s\n", sub, archiveID(meta.Submodules[sub]))
@@ -130,10 +136,11 @@ func (c *ArchivesShowCmd) Run(ctx *Context) error {
 	return nil
 }
 
-// ArchivesRestoreCmd puts an archived clone back.
+// ArchivesRestoreCmd puts an archive back.
 type ArchivesRestoreCmd struct {
-	ID string `arg:"" help:"Archive ID, from archives ls." predictor:"archive"`
-	To string `help:"Restore it here instead of where it was." type:"path"`
+	ID   string `arg:"" help:"Archive ID, from archives ls." predictor:"archive"`
+	To   string `help:"Restore it here instead of where it was." type:"path"`
+	Base string `help:"For a bundle that holds only what its base lacked: clone this instead of the base it records, such as a restored archive of that repo." type:"path"`
 }
 
 func (c *ArchivesRestoreCmd) Run(ctx *Context) error {
@@ -149,38 +156,47 @@ func (c *ArchivesRestoreCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	if !a.Clone {
-		return fmt.Errorf("archive %s is a bundle of unique work, not a whole clone; `git-mgr archives show %s` prints how to restore it", a.ID, a.ID)
-	}
 	dest := a.Source
 	if c.To != "" {
 		dest = c.To
 	}
-	tracked := st.Repos[a.Repo]
+	// A workspace copy's archive comes back as a clone of its own; only a
+	// repo's is tracked again.
+	repoKey := a.Repo
+	if a.Workspace != "" {
+		repoKey = ""
+	}
+	tracked := st.Repos[repoKey]
 	if tracked != nil && c.To == "" {
-		return fmt.Errorf("%s is tracked again, at %s; restore the archive elsewhere with --to", a.Repo, tildify(tracked.LocalPath))
+		return fmt.Errorf("%s is tracked again, at %s; restore the archive elsewhere with --to", repoKey, tildify(tracked.LocalPath))
 	}
-	if err := pathutil.Move(a.Path, dest); err != nil {
-		return fmt.Errorf("restoring %s: %w", a.ID, err)
-	}
-	if err := os.Remove(a.Path + ".json"); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		ctx.Logger().Warn("restored archive's description left behind", "archive", a.ID, "error", err)
-	}
-	err = st.Update(cfg.LockTimeout, func(st *state.State) error {
-		st.Archives = slices.DeleteFunc(st.Archives, func(e state.ArchiveEntry) bool { return e.ID == a.ID })
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("restored %s to %s, but dropping it from the catalog: %w", a.ID, dest, err)
+
+	if a.Clone {
+		if err := pathutil.Move(a.Path, dest); err != nil {
+			return fmt.Errorf("restoring %s: %w", a.ID, err)
+		}
+		if err := os.Remove(a.Path + ".json"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			ctx.Logger().Warn("restored archive's description left behind", "archive", a.ID, "error", err)
+		}
+		err = st.Update(cfg.LockTimeout, func(st *state.State) error {
+			st.Archives = slices.DeleteFunc(st.Archives, func(e state.ArchiveEntry) bool { return e.ID == a.ID })
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("restored %s to %s, but dropping it from the catalog: %w", a.ID, dest, err)
+		}
+	} else if err := gitops.RestoreArchive(ctx.GoCtx(), a.Path, dest, c.Base); err != nil {
+		// A bundle stays in the catalog: restoring it copies it out.
+		return err
 	}
 	logEvent(ctx, "restore", a.Repo, dest)
 	fmt.Printf("Restored %s to %s\n", a.ID, tildify(dest))
 	doc := map[string]any{"id": a.ID, "repo": a.Repo, "path": dest, "tracked": false}
 	if tracked != nil {
-		fmt.Printf("  Not tracked: %s is already tracked at %s\n", a.Repo, tildify(tracked.LocalPath))
+		fmt.Printf("  Not tracked: %s is already tracked at %s\n", repoKey, tildify(tracked.LocalPath))
 		return ctx.finish(doc, nil)
 	}
-	if a.Repo == "" {
+	if repoKey == "" {
 		return ctx.finish(doc, nil)
 	}
 	// Tracked by hand, its repo is never judged stale again: it is gone
