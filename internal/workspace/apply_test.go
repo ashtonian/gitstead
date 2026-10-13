@@ -15,17 +15,12 @@ import (
 	"github.com/ashtonian/git-mgr/internal/hook"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
 	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/git-mgr/internal/testenv"
 	"github.com/ashtonian/git-mgr/internal/workspace"
 )
 
 func TestMain(m *testing.M) {
-	os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	for _, kv := range []string{"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t"} {
-		k, v, _ := strings.Cut(kv, "=")
-		os.Setenv(k, v)
-	}
-	os.Exit(m.Run())
+	os.Exit(testenv.Main(m))
 }
 
 func mustGit(t *testing.T, dir string, args ...string) string {

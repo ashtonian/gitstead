@@ -13,12 +13,11 @@ import (
 	agents "github.com/ashtonian/git-mgr/internal/agent"
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/git-mgr/internal/testenv"
 )
 
 func TestMain(m *testing.M) {
-	os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	os.Exit(m.Run())
+	os.Exit(testenv.Main(m))
 }
 
 func git(t *testing.T, dir string, args ...string) {
