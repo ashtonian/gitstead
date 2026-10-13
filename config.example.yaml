@@ -443,6 +443,10 @@ log:
                            # e.g., "~/.local/share/git-mgr/git-mgr.log"
   events: true             # write the operation log (events.jsonl, read by report/log); false to disable
 
+# The command `git-mgr open` opens a repo or workspace with; the path is added
+# as its last argument. Empty uses $VISUAL, then $EDITOR.
+editor: ""                          # e.g. "code -n", "cursor", "nvim"
+
 # =============================================================================
 # Agents and Workspaces
 # =============================================================================

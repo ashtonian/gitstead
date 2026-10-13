@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/git-mgr/internal/jump"
 	"github.com/ashtonian/git-mgr/internal/state"
 	"github.com/posener/complete"
 	"github.com/willabides/kongplete"
@@ -20,6 +21,7 @@ func CompletionPredictors() []kongplete.Option {
 		kongplete.WithPredictor("set", complete.PredictFunc(func(complete.Args) []string { return completionSetNames() })),
 		kongplete.WithPredictor("workspace", complete.PredictFunc(func(complete.Args) []string { return completionWorkspaces() })),
 		kongplete.WithPredictor("fleet", complete.PredictFunc(func(complete.Args) []string { return completionFleets() })),
+		kongplete.WithPredictor("target", complete.PredictFunc(func(complete.Args) []string { return completionTargets() })),
 	}
 }
 
@@ -123,6 +125,18 @@ func completionFleets() []string {
 	out := make([]string, 0, len(cfg.Fleets))
 	for _, f := range cfg.Fleets {
 		out = append(out, f.Name)
+	}
+	return out
+}
+
+func completionTargets() []string {
+	st := completionState()
+	if st == nil {
+		return nil
+	}
+	var out []string
+	for _, t := range jump.Targets(st) {
+		out = append(out, t.Label)
 	}
 	return out
 }
