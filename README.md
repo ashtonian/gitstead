@@ -125,6 +125,7 @@ writes a config without asking anything.
 | `git-mgr apply` | Make repos and workspaces match config, including the moves and removals sync leaves for you. Asks first; `--yes`. |
 | `git-mgr backup` | Back up only (no fetch). `--list` to see backups, `--restore <id>` for instructions. |
 | `git-mgr restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` to clone+apply into a scratch dir, or `--apply` onto the tree (dirty-guarded). |
+| `git-mgr top` | A live view of every workspace copy (agent state, terminal activity, branch, dirty, ahead/behind, last backup, PR) and every repo needing attention. See [Live view](#live-view-git-mgr-top). |
 | `git-mgr status` | Table of managed repos. `--live` inspects working trees now (dirty + ahead/behind, no network); `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
 | `git-mgr doctor` | Diagnose tooling, auth (tokens/SSH keys), config, and repo-on-disk health. Read-only; `plan`/`apply` fix what config can. |
 | `git-mgr clone <url>` | Clone and track one repo by hand, at its templated path or `--path`. `--tag`. A repo added by hand keeps the path and URL it was given. |
@@ -146,6 +147,35 @@ writes a config without asking anything.
 
 Global flags: `--config`, `--state`, `--verbose`/`-v`, `--quiet`/`-q`,
 `--concurrency`/`-j`.
+
+## Live view: git-mgr top
+
+`git-mgr top` is a full-screen view that looks again every `--every` (10s):
+
+```
+git-mgr top  14:03:22  ·  12 copies, 5 agents running  ·  140 repos, 3 need attention
+
+COPY           AGENT    ACTIVITY         BRANCH              STATE  AHEAD/BEHIND  BACKUP  NOTES
+app/agent-1    running  printed 8s ago   agents/app/agent-1  dirty  3/0           2m ago
+app/agent-2    running  quiet ≥ 4m       agents/app/agent-2  clean  1/0           1h ago  https://github.com/me/app/pull/12
+worker/agent-1 stopped  -                agents/worker/...   clean  0/2           1d ago  behind origin/HEAD by 2
+
+REPO                  STATE  BRANCH  AHEAD/BEHIND  FETCHED  BACKUP  NOTES
+github.com/me/notes   dirty  main    0/0           9m ago   9m ago
+github.com/acme/api   clean  main    0/0           2d ago   -       fetch: Permission denied (publickey)
+```
+
+Every workspace copy shows its agent's state (see [Running agents](#running-agents))
+and what its terminal shows. In tmux, an agent alone in its window shows when
+the window last printed; agents sharing a window show when their pane's
+screen was last seen to change (`quiet ≥ 4m` until a change is seen), so an
+agent waiting for you stands out. In Muxy, `muxy activity list` gives each
+agent's own state. Repos show only when they need a look -- not clean, ahead,
+behind, or failing to fetch or back up -- unless you press `a` (or pass
+`--all`). Everything is read from disk, never the network; `--repos`, `--tag`
+and `--set` narrow the repos. `q` quits, `r` looks again now. `--once` prints
+one view (also what happens when output isn't a terminal) and `--json` one
+snapshot.
 
 ## Jump and open
 

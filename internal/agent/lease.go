@@ -16,12 +16,14 @@ var ErrRunning = errors.New("the agent is already running")
 
 // Holder is what a lease file says about the run holding it.
 type Holder struct {
-	PID      int       `json:"pid"`
-	Profile  string    `json:"profile,omitempty"`
-	Command  string    `json:"command,omitempty"`
-	Launcher string    `json:"launcher,omitempty"`
-	Session  string    `json:"session,omitempty"`
-	Started  time.Time `json:"started"`
+	PID      int    `json:"pid"`
+	Profile  string `json:"profile,omitempty"`
+	Command  string `json:"command,omitempty"`
+	Launcher string `json:"launcher,omitempty"`
+	Session  string `json:"session,omitempty"`
+	// Socket is the tmux server a tmux run's pane is on.
+	Socket  string    `json:"socket,omitempty"`
+	Started time.Time `json:"started"`
 }
 
 // Lease is an agent's claim on its replica while it runs: an exclusive

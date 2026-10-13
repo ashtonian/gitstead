@@ -71,12 +71,13 @@ func (c *WSRunCmd) run(ctx *Context) error {
 		return err
 	}
 	now := time.Now()
+	launcher, session, socket := terminal()
 	run := state.RunState{
 		Profile: profile.Name, Command: command, PID: os.Getpid(), Started: now,
-		Launcher: os.Getenv("GIT_MGR_LAUNCHER"), Session: sessionID(),
+		Launcher: launcher, Session: session, Socket: socket,
 	}
 	lease, err := agents.Acquire(agents.LeasePath(st.Dir(), c.Name, c.Agent), agents.Holder{
-		PID: run.PID, Profile: run.Profile, Command: command, Launcher: run.Launcher, Session: run.Session, Started: now,
+		PID: run.PID, Profile: run.Profile, Command: command, Launcher: launcher, Session: session, Socket: socket, Started: now,
 	})
 	if err != nil {
 		return fmt.Errorf("%s/%s: %w", c.Name, c.Agent, err)
@@ -165,15 +166,28 @@ func execShell(dir string, env []string) error {
 	return syscall.Exec(shell, []string{shell}, append(os.Environ(), env...))
 }
 
-// sessionID names the terminal session this process runs in, for the run's
-// record: what a launcher set, else what the terminal set.
-func sessionID() string {
-	for _, k := range []string{"GIT_MGR_SESSION", "TMUX_PANE", "ITERM_SESSION_ID", "TERM_SESSION_ID"} {
-		if v := os.Getenv(k); v != "" {
-			return v
-		}
+// terminal is what this process runs in, for the run's record: the launcher
+// that opened it (as it said, else as the terminal shows), the terminal
+// session, and for tmux the server's socket, which `git-mgr top` reads the
+// pane's activity from.
+func terminal() (launcher, session, socket string) {
+	launcher, session = os.Getenv("GIT_MGR_LAUNCHER"), os.Getenv("GIT_MGR_SESSION")
+	switch {
+	case os.Getenv("TMUX_PANE") != "":
+		launcher = orDefault(launcher, "tmux")
+		session = orDefault(session, os.Getenv("TMUX_PANE"))
+		// $TMUX is the socket, the server's pid and the session, comma-separated.
+		socket, _, _ = strings.Cut(os.Getenv("TMUX"), ",")
+	case os.Getenv("MUXY_SESSION_ID") != "":
+		launcher = orDefault(launcher, "muxy")
+		session = orDefault(session, os.Getenv("MUXY_SESSION_ID"))
+	case os.Getenv("ITERM_SESSION_ID") != "":
+		launcher = orDefault(launcher, "iterm")
+		session = orDefault(session, os.Getenv("ITERM_SESSION_ID"))
+	default:
+		session = orDefault(session, os.Getenv("TERM_SESSION_ID"))
 	}
-	return ""
+	return launcher, session, socket
 }
 
 func envList(m map[string]string) []string {

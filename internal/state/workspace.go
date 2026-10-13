@@ -48,12 +48,14 @@ type ReplicaState struct {
 
 // RunState is an agent's latest run in its replica.
 type RunState struct {
-	Profile  string    `yaml:"profile,omitempty"  json:"profile,omitempty"`
-	Command  string    `yaml:"command"            json:"command"`
-	PID      int       `yaml:"pid"                json:"pid"`
-	Launcher string    `yaml:"launcher,omitempty" json:"launcher,omitempty"`
-	Session  string    `yaml:"session,omitempty"  json:"session,omitempty"`
-	Started  time.Time `yaml:"started"            json:"started"`
+	Profile  string `yaml:"profile,omitempty"  json:"profile,omitempty"`
+	Command  string `yaml:"command"            json:"command"`
+	PID      int    `yaml:"pid"                json:"pid"`
+	Launcher string `yaml:"launcher,omitempty" json:"launcher,omitempty"`
+	Session  string `yaml:"session,omitempty"  json:"session,omitempty"`
+	// Socket is the tmux server a tmux run's pane is on.
+	Socket  string    `yaml:"socket,omitempty"   json:"socket,omitempty"`
+	Started time.Time `yaml:"started"            json:"started"`
 	// StopRequested is when `ws stop` asked it to end.
 	StopRequested time.Time `yaml:"stop_requested,omitempty" json:"stop_requested,omitzero"`
 	Ended         time.Time `yaml:"ended,omitempty"          json:"ended,omitzero"`
