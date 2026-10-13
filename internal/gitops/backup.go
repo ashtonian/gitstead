@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ashtonian/git-mgr/internal/pathutil"
 )
 
 // BackupConfig holds backup-related settings.
@@ -296,9 +298,17 @@ func writePatchBackup(ctx context.Context, repoPath, patchRoot, copyID, id strin
 		os.RemoveAll(partial)
 		return "", err
 	}
+	// On disk before it is published: older backups are pruned against it.
+	if err := pathutil.SyncTree(partial); err != nil {
+		os.RemoveAll(partial)
+		return "", err
+	}
 	if err := os.Rename(partial, dir); err != nil {
 		os.RemoveAll(partial)
 		return "", fmt.Errorf("publishing patch backup: %w", err)
+	}
+	if err := pathutil.SyncDir(filepath.Dir(dir)); err != nil {
+		return "", err
 	}
 	if err := writeCopyRecord(ctx, repoPath, patchRoot, copyID); err != nil {
 		slog.Warn("recording copy for patch backups", "repo", repoPath, "error", err)
@@ -467,15 +477,7 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
+	return pathutil.WriteFileAtomic(path, append(data, '\n'), 0o600)
 }
 
 func pruneBackupRefs(ctx context.Context, repoPath, copyID string, r Retention, now time.Time) {

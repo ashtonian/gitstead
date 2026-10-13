@@ -16,6 +16,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/ashtonian/git-mgr/internal/pathutil"
 	"github.com/ashtonian/git-mgr/internal/repourl"
 )
 
@@ -86,26 +87,7 @@ func UpdateManifest(path string, change func(*Manifest) error) error {
 	if err := enc.Encode(m); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".manifest-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(b.Bytes()); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return pathutil.WriteFileAtomic(path, b.Bytes(), 0o644)
 }
 
 // Upsert adds r, or replaces the entry for the same repo.

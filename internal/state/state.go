@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/ashtonian/git-mgr/internal/pathutil"
 )
 
 // CurrentVersion is the state schema this build reads and writes.
@@ -248,16 +250,9 @@ func (s *State) Save() error {
 		return fmt.Errorf("marshaling state: %w", err)
 	}
 
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return fmt.Errorf("writing state tmp: %w", err)
+	if err := pathutil.WriteFileAtomic(s.path, data, 0o600); err != nil {
+		return fmt.Errorf("saving state: %w", err)
 	}
-
-	if err := os.Rename(tmp, s.path); err != nil {
-		os.Remove(tmp)
-		return fmt.Errorf("renaming state tmp: %w", err)
-	}
-
 	return nil
 }
 
