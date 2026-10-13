@@ -1221,7 +1221,11 @@ backup, and for a snapshot ref in a blob at
 `refs/git-mgr/backup-submodules/<copy-id>/<backup-id>`, written before the
 snapshot ref and pruned with it. A dirty submodule makes its parent's backup
 dirty even when the parent has no work of its own, and a changed submodule
-backup makes a new parent backup. Restoring the parent applies each recorded
+backup makes a new parent backup. A submodule's backups aren't pruned by their
+own retention: each lives as long as a retained parent backup names it (plus
+the submodule's latest), and they are pruned only after a parent backup
+succeeds, so a run that fails after saving a submodule's backup leaves every
+earlier parent backup restorable. Restoring the parent applies each recorded
 submodule backup in the submodule (`--into`: clones the submodule into its
 place in the scratch clone and restores there), found by its recorded copy
 ID. Untracked paths a submodule's backup left out are reported as

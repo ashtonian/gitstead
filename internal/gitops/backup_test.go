@@ -644,3 +644,69 @@ func TestBackup_SubmoduleChangeIsANewBackup(t *testing.T) {
 		t.Fatalf("second backup: %+v, first %s", second, first.ID)
 	}
 }
+
+// A parent backup names the submodule backups it restores, so they are kept
+// as long as it is: a run whose parent backup fails after saving the
+// submodule's leaves the previous backup restorable, and a later run prunes
+// what no parent backup names.
+func TestBackup_SubmoduleBackupsLiveAsLongAsTheirParents(t *testing.T) {
+	ctx := context.Background()
+	super, lib := superWithSubmodule(t)
+	clock := newTestClock()
+	patchRoot := t.TempDir()
+	cfg := gitops.NewBackupConfig(gitops.WithStrategy("patch"), gitops.WithPatchDir(patchRoot), gitops.WithClock(clock.Now),
+		gitops.WithRetention(gitops.Retention{Max: 1}))
+
+	writeFile(t, filepath.Join(lib, "lib.txt"), []byte("first\n"))
+	first, err := gitops.Backup(ctx, super, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The next run saves the submodule's new state, then fails to write the
+	// parent's: its patch folder is read-only.
+	clock.Advance(time.Minute)
+	writeFile(t, filepath.Join(lib, "lib.txt"), []byte("second\n"))
+	parentDir := filepath.Join(patchRoot, first.CopyID)
+	if err := os.Chmod(parentDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	second, err := gitops.Backup(ctx, super, cfg)
+	if err == nil || second.Submodules["lib"] == nil || second.Submodules["lib"].Outcome != gitops.BackupSaved {
+		t.Fatalf("want the submodule saved and the parent failed: %+v, %v", second, err)
+	}
+	if err := os.Chmod(parentDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := gitops.FindBackup(ctx, super, patchRoot, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scratch := filepath.Join(t.TempDir(), "scratch")
+	if err := gitops.RestoreBackupInto(ctx, super, b, scratch); err != nil {
+		t.Fatalf("the earlier backup is no longer restorable: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(scratch, "lib", "lib.txt")); string(got) != "first\n" {
+		t.Errorf("restored lib.txt = %q", got)
+	}
+
+	// A successful run replaces the parent's backup; the submodule backup
+	// only the old one named goes with it.
+	clock.Advance(time.Minute)
+	third, err := gitops.Backup(ctx, super, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subBackups, err := gitops.ListBackups(ctx, lib, patchRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, sb := range subBackups {
+		ids = append(ids, sb.ID)
+	}
+	if want := third.Submodules["lib"].ID; len(ids) != 1 || ids[0] != want {
+		t.Errorf("submodule backups = %v, want only %s", ids, want)
+	}
+}
