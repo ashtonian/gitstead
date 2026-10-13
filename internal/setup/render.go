@@ -45,6 +45,32 @@ func Render(doc *config.Document, a Answers) error {
 			return err
 		}
 	}
+	if w := a.Workspaces; w != nil {
+		for _, p := range w.Profiles {
+			if err := doc.Upsert("agents", config.Named(p.Name), p); err != nil {
+				return err
+			}
+		}
+		for _, kv := range []struct {
+			key   string
+			value any
+		}{
+			{"workspace_defaults.root", w.Root},
+			{"workspace_defaults.agents", w.Agents},
+			{"launchers.default", w.Launcher},
+		} {
+			if err := set(kv.key, kv.value); err != nil {
+				return err
+			}
+		}
+		if w.Agent != "" {
+			if err := set("workspace_defaults.agent", w.Agent); err != nil {
+				return err
+			}
+		} else {
+			doc.Delete("workspace_defaults.agent")
+		}
+	}
 	return nil
 }
 

@@ -12,9 +12,9 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 )
 
-// detected are the profiles offered when config declares none, for the
-// agents found on PATH.
-var detected = []config.AgentProfile{
+// Known are the agents git-mgr offers when config declares none, if they
+// are on PATH.
+var Known = []config.AgentProfile{
 	{Name: "claude", Command: "claude", Resume: "claude --continue"},
 	{Name: "codex", Command: "codex", Resume: "codex resume --last"},
 }
@@ -29,7 +29,7 @@ func Profiles(cfg *config.Config) []config.AgentProfile {
 		return cfg.Agents
 	}
 	var out []config.AgentProfile
-	for _, p := range detected {
+	for _, p := range Known {
 		if _, err := exec.LookPath(p.Command); err == nil {
 			out = append(out, p)
 		}
