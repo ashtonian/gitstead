@@ -179,7 +179,15 @@ or only change your shell -- `ws run`, `open`, `shell-init`, `config --edit`,
 `ws create --open`, interactive `setup` -- refuse `--json`; `ws open` and
 `fleet open` under `--json` open without attaching tmux and print what they
 opened (`--print --json` prints the launch plan). A fleet on another host
-passes `--json` there and its document through.
+passes `--json` there and its document through. `setup` includes the schedule
+it installed as `schedule`.
+
+Whatever happens, stdout holds exactly one document. A command that fails
+before it has a result to print -- a config that doesn't load, a repo that
+doesn't match, a refused `--json` -- prints `{"error": "...", "exit_code": N}`;
+so does a command line that doesn't parse (exit 80), whose usage goes to
+stderr, as `--help` does under `--json`. A command with nothing to report
+prints `{}`.
 
 ## Live view: git-mgr top
 
@@ -1499,7 +1507,7 @@ broken setup. With `--quiet`, only failures are printed, to stderr.
 | 0 | Everything succeeded. `sync` also exits 0 when another run holds the lock, since overlapping scheduled runs are routine. |
 | 1 | The command failed: bad config, unreadable state, every target failed, or it has no `--json` output or needs `--yes`. |
 | 2 | A check ran and found problems: `doctor`, `ws check`. |
-| 3 | Partial failure: some repos, copies or changes failed and the rest succeeded. Each failure is printed to stderr. |
+| 3 | Partial failure: some repos, copies or changes failed and the rest succeeded, or `bootstrap` finished but couldn't install its schedule. Each failure is printed to stderr. |
 | 75 | Another git-mgr run held the state lock, or a repo's lock (`.git/git-mgr.lock`, held while a repo is deleted, moved or copied into a workspace), for longer than `lock_timeout`; try again (EX_TEMPFAIL). `git-mgr doctor` reports a stuck state-lock holder; `lsof <repo>/.git/git-mgr.lock` shows a repo lock's. |
 | 80 | Usage error: unknown command or flag. |
 

@@ -125,8 +125,9 @@ func (e *testEnv) run(t *testing.T, args ...string) (string, int) {
 	return buf.String(), code
 }
 
-// runJSON runs git-mgr with --json and returns its stdout, which must be one
-// JSON document, decoded into v; its stderr; and its exit code.
+// runJSON runs git-mgr with --json and returns its stdout, which must be
+// exactly one JSON document whatever the outcome, decoded into v; its
+// stderr; and its exit code.
 func (e *testEnv) runJSON(t *testing.T, v any, args ...string) (stderr string, code int) {
 	t.Helper()
 	cmd := exec.Command(e.bin, append([]string{"--json"}, args...)...)
@@ -139,9 +140,6 @@ func (e *testEnv) runJSON(t *testing.T, v any, args ...string) (stderr string, c
 			t.Fatalf("running git-mgr %v: %v", args, err)
 		}
 		code = ee.ExitCode()
-	}
-	if v == nil && out.Len() == 0 {
-		return errOut.String(), code
 	}
 	if v == nil {
 		v = new(json.RawMessage)
@@ -1815,4 +1813,36 @@ func TestE2E_ConfigPath(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "pwned")); err == nil {
 		t.Error("the path was run as shell")
 	}
+}
+
+// TestE2E_JSONErrors: under --json a command that fails, a config that
+// doesn't load and a command line that doesn't parse each print one
+// document, the error, and exit with its code.
+func TestE2E_JSONErrors(t *testing.T) {
+	env := newLocalEnv(t)
+	if err := os.WriteFile(env.configFile, []byte("base_dir: "+env.baseDir+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	type errorDoc struct {
+		Error    string `json:"error"`
+		ExitCode int    `json:"exit_code"`
+	}
+	check := func(t *testing.T, wantCode int, args ...string) {
+		t.Helper()
+		var doc errorDoc
+		_, code := env.runJSON(t, &doc, args...)
+		if code != wantCode || doc.Error == "" || doc.ExitCode != code {
+			t.Errorf("git-mgr --json %v: exit %d, document %+v; want exit %d and the error", args, code, doc, wantCode)
+		}
+	}
+	t.Run("a failing command", func(t *testing.T) { check(t, 1, "restore", "nothing-matches") })
+	t.Run("a missing selector", func(t *testing.T) { check(t, 1, "remove") })
+	t.Run("a command that doesn't exist", func(t *testing.T) { check(t, 80, "no-such-command") })
+	t.Run("a bad flag", func(t *testing.T) { check(t, 80, "status", "--no-such-flag") })
+	t.Run("a config that doesn't load", func(t *testing.T) {
+		if err := os.WriteFile(env.configFile, []byte("unknown_key: true\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		check(t, 1, "sync")
+	})
 }

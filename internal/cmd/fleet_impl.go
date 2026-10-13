@@ -1,9 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -473,12 +473,18 @@ func onHost(ctx *Context, f *config.Fleet, args ...string) error {
 		quoted[i] = shellutil.Quote(a)
 	}
 	sshArgs := []string{"-t", f.Host, remote + " " + strings.Join(quoted, " ")}
-	out := io.Writer(os.Stdout)
-	if ctx.JSON {
-		// A terminal would mix the remote's stderr into its JSON.
-		sshArgs, out = sshArgs[1:], ctx.Out
+	if !ctx.JSON {
+		cmd := exec.Command("ssh", sshArgs...)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		return cmd.Run()
 	}
-	cmd := exec.Command("ssh", sshArgs...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, out, os.Stderr
-	return cmd.Run()
+	// A terminal would mix the remote's stderr into its JSON.
+	var out bytes.Buffer
+	cmd := exec.Command("ssh", sshArgs[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, &out, os.Stderr
+	err := cmd.Run()
+	if out.Len() == 0 {
+		return err // the run concludes with the error as its document
+	}
+	return errors.Join(err, ctx.relay(out.Bytes(), f.Host))
 }
