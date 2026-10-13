@@ -180,6 +180,9 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 	checkLaunchers(cfg, d)
 	checkManifest(cfg, st, d)
 	checkMirrors(cfg, st, d)
+	if n := uncatalogued(cfg, st); n > 0 {
+		d.warn(fmt.Sprintf("%d archives in %s aren't on record, made by a run interrupted before recording them; `git-mgr archives ls` lists them", n, cfg.Backup.ArchiveDir))
+	}
 
 	fmt.Printf("\n%d problem(s), %d warning(s)\n", d.fails, d.warns)
 	return ctx.finish(doctorJSON{Checks: d.checks, Problems: d.fails, Warnings: d.warns},

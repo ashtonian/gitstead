@@ -233,6 +233,9 @@ type ArchiveEntry struct {
 	CopyID    string    `yaml:"copy_id,omitempty" json:"copy_id,omitempty"`
 	Work      string    `yaml:"work" json:"work"` // what was saved
 	Created   time.Time `yaml:"created" json:"created"`
+	// Uncatalogued marks an archive found in the archive directory but not
+	// on record: one a run made and was interrupted before recording.
+	Uncatalogued bool `yaml:"-" json:"uncatalogued,omitempty"`
 }
 
 // LeansOn reports whether an archive of a workspace copy of repo may need

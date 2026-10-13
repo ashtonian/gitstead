@@ -132,6 +132,9 @@ func archive(ctx context.Context, repoPath, dir, name string, opts archiveOption
 			if err := linkTree(lfs, meta.LFS); err != nil {
 				return "", fmt.Errorf("keeping LFS objects: %w", err)
 			}
+			if err := pathutil.SyncTree(meta.LFS); err != nil {
+				return "", fmt.Errorf("keeping LFS objects: %w", err)
+			}
 		}
 	}
 	if !ownLost {
@@ -240,7 +243,8 @@ func writeArchiveBundle(ctx context.Context, repoPath, base, path string, revs .
 		os.Remove(path)
 		return fmt.Errorf("verifying bundle: %w", err)
 	}
-	return nil
+	// On disk before anything is deleted against it.
+	return pathutil.SyncFile(path)
 }
 
 // bundlePrerequisites lists the commits the bundle at path needs a
@@ -359,7 +363,7 @@ func writeMeta(path string, meta ArchiveMeta) error {
 	if err := enc.Encode(meta); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data.Bytes(), 0o600); err != nil {
+	if err := pathutil.WriteFileAtomic(path, data.Bytes(), 0o600); err != nil {
 		return fmt.Errorf("writing archive metadata: %w", err)
 	}
 	return nil

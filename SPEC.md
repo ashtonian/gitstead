@@ -1139,8 +1139,9 @@ the outcome with an update:
 2. Re-read the state file
 3. Apply the change to what was read, skipping anything that changed meanwhile
    (a repo moved or untracked by another run keeps its new record)
-4. Write state to `<state_file>.tmp` and `os.Rename` it over the state file
-   (atomic on POSIX)
+4. Write state to a temporary file beside it, fsync it, rename it over the
+   state file (atomic on POSIX) and fsync the directory, so a crash leaves
+   the old state or the new one
 5. Release the lock
 
 Commands that apply a plan (`sync`, `apply`, `clone`, `adopt`, `discover

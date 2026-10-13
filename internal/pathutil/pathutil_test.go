@@ -50,3 +50,24 @@ func TestSafeRemoveAll_ReadOnlyDirectory(t *testing.T) {
 		t.Errorf("%s should be gone: %v", dir, err)
 	}
 }
+
+// WriteFileAtomic replaces a file whole, with the mode asked for, leaving no
+// temporary file behind.
+func TestWriteFileAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.yaml")
+	for _, data := range []string{"first\n", "second, longer than the first\n"} {
+		if err := pathutil.WriteFileAtomic(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := os.ReadFile(path); string(got) != data {
+			t.Errorf("file holds %q, want %q", got, data)
+		}
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v, %v", info.Mode(), err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("left in the directory: %v", entries)
+	}
+}

@@ -43,6 +43,11 @@ func move(src, dst string, rename func(string, string) error) error {
 		return err
 	}
 	err := rename(src, dst)
+	if err == nil {
+		// Both directories' entries changed; a crash mustn't undo the move
+		// in one and not the other.
+		return errors.Join(SyncDir(filepath.Dir(dst)), SyncDir(filepath.Dir(src)))
+	}
 	if !errors.Is(err, syscall.EXDEV) {
 		return err
 	}
@@ -55,8 +60,17 @@ func move(src, dst string, rename func(string, string) error) error {
 		_ = SafeRemoveAll(staging) // the copy's error is the one to report
 		return fmt.Errorf("copying %s to %s: %w", src, dst, err)
 	}
+	// The copy is on disk, whole, before the source is deleted.
+	if err := SyncTree(staging); err != nil {
+		_ = SafeRemoveAll(staging)
+		return err
+	}
 	if err := RenameNoReplace(staging, dst); err != nil {
 		_ = SafeRemoveAll(staging)
+		return err
+	}
+	if err := SyncDir(filepath.Dir(dst)); err != nil {
+		_ = SafeRemoveAll(dst)
 		return err
 	}
 	if err := SafeRemoveAll(src); err != nil {

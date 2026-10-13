@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/ashtonian/git-mgr/internal/pathutil"
 )
 
 // Document is a config file edited in place: changes go into its YAML tree,
@@ -236,24 +238,7 @@ func writeDocumentAtomic(path string, root *yaml.Node) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".git-mgr-config-*.tmp")
-	if err != nil {
-		return fmt.Errorf("creating temp config: %w", err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once renamed
-	if _, err := tmp.Write(out); err != nil {
-		tmp.Close()
-		return fmt.Errorf("writing temp config: %w", err)
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := pathutil.WriteFileAtomic(path, out, 0o600); err != nil {
 		return fmt.Errorf("replacing config: %w", err)
 	}
 	return nil

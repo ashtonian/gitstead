@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/pathutil"
 	"github.com/ashtonian/git-mgr/internal/state"
@@ -34,12 +35,16 @@ type ArchivesListCmd struct {
 }
 
 func (c *ArchivesListCmd) Run(ctx *Context) error {
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return err
+	}
 	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}
 	var rows []state.ArchiveEntry
-	for _, a := range st.Archives {
+	for _, a := range catalog(cfg, st) {
 		if c.Workspace != "" && a.Workspace != c.Workspace {
 			continue
 		}
@@ -68,7 +73,11 @@ func (c *ArchivesListCmd) Run(ctx *Context) error {
 		if a.Workspace != "" {
 			from = a.Workspace + "/" + a.Agent
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", a.ID, a.Created.Local().Format(time.DateTime), from, dashIfEmpty(a.Repo), a.Work)
+		work := a.Work
+		if a.Uncatalogued {
+			work += " (not on record: found in the archive directory)"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", a.ID, a.Created.Local().Format(time.DateTime), from, dashIfEmpty(a.Repo), work)
 	}
 	return tw.Flush()
 }
@@ -79,11 +88,15 @@ type ArchivesShowCmd struct {
 }
 
 func (c *ArchivesShowCmd) Run(ctx *Context) error {
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return err
+	}
 	st, err := ctx.LoadState()
 	if err != nil {
 		return err
 	}
-	a, err := catalogEntry(st, c.ID)
+	a, err := catalogEntry(cfg, st, c.ID)
 	if err != nil {
 		return err
 	}
@@ -152,7 +165,7 @@ func (c *ArchivesRestoreCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	a, err := catalogEntry(st, c.ID)
+	a, err := catalogEntry(cfg, st, c.ID)
 	if err != nil {
 		return err
 	}
@@ -225,7 +238,7 @@ func (c *ArchivesRemoveCmd) Run(ctx *Context) error {
 	}
 	var doomed []state.ArchiveEntry
 	for _, id := range c.IDs {
-		a, err := catalogEntry(st, id)
+		a, err := catalogEntry(cfg, st, id)
 		if err != nil {
 			return err
 		}
@@ -274,12 +287,60 @@ func (c *ArchivesRemoveCmd) Run(ctx *Context) error {
 }
 
 // catalogEntry is the catalog's entry for archive id.
-func catalogEntry(st *state.State, id string) (state.ArchiveEntry, error) {
-	i := slices.IndexFunc(st.Archives, func(a state.ArchiveEntry) bool { return a.ID == id })
-	if i < 0 {
-		return state.ArchiveEntry{}, fmt.Errorf("no archive %q on record; git-mgr archives ls lists them", id)
+// catalog is every archive: the catalog in state, then any archive in
+// backup.archive_dir it lacks -- one a run made and was interrupted before
+// recording, which would otherwise be on disk with nothing to find it by.
+// A submodule's archive is reached through its parent's.
+func catalog(cfg *config.Config, st *state.State) []state.ArchiveEntry {
+	entries := slices.Clone(st.Archives)
+	known := map[string]bool{}
+	for _, a := range entries {
+		known[a.ID] = true
 	}
-	return st.Archives[i], nil
+	descriptions, _ := filepath.Glob(filepath.Join(cfg.Backup.ArchiveDir, "*.json"))
+	metas := map[string]gitops.ArchiveMeta{}
+	for _, d := range descriptions {
+		meta, id, err := gitops.ReadArchive(d)
+		if err != nil {
+			continue
+		}
+		metas[id] = meta
+		for _, sub := range meta.Submodules {
+			known[archiveID(sub)] = true
+		}
+	}
+	for _, id := range slices.Sorted(maps.Keys(metas)) {
+		if known[id] {
+			continue
+		}
+		meta := metas[id]
+		path := filepath.Join(cfg.Backup.ArchiveDir, id+".json")
+		switch {
+		case meta.Clone != "":
+			path = meta.Clone
+		case meta.Bundle != "":
+			path = meta.Bundle
+		}
+		entries = append(entries, state.ArchiveEntry{
+			ID: id, Path: path, Clone: meta.Clone != "", Source: meta.Source, Branch: meta.Branch,
+			Work: meta.Work, Created: meta.Created, Uncatalogued: true,
+		})
+	}
+	return entries
+}
+
+// Uncatalogued counts the archives in backup.archive_dir not on record.
+func uncatalogued(cfg *config.Config, st *state.State) int {
+	return len(catalog(cfg, st)) - len(st.Archives)
+}
+
+func catalogEntry(cfg *config.Config, st *state.State, id string) (state.ArchiveEntry, error) {
+	all := catalog(cfg, st)
+	i := slices.IndexFunc(all, func(a state.ArchiveEntry) bool { return a.ID == id })
+	if i < 0 {
+		return state.ArchiveEntry{}, fmt.Errorf("no archive %q on record or in %s; git-mgr archives ls lists them", id, cfg.Backup.ArchiveDir)
+	}
+	return all[i], nil
 }
 
 func archiveID(path string) string {

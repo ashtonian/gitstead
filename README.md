@@ -905,7 +905,11 @@ rebase, merge, cherry-pick or revert is under way -- since a command running
 there could be caught half-done. A lock a crashed git command left behind
 counts too: delete it once no git command is running there. If git-mgr can't
 inspect the repo or write and verify the bundle, nothing is deleted and the
-repo stays tracked. A repo that workspace copies are made from, or that has
+repo stays tracked. An archive is synced to disk -- bundle, description, LFS
+objects, a whole clone copied across filesystems -- before its source is
+deleted, and a run interrupted after deleting but before recording the
+archive leaves it findable: `archives ls` lists archives in `archive_dir`
+that aren't on record, marked so, and `doctor` warns about them. A repo that workspace copies are made from, or that has
 linked worktrees, is never untracked or deleted until they are gone -- including
 a copy another command is making at that moment: deleting, archiving or moving
 a repo waits for it (see `lock_timeout`) and then keeps the repo. Stale
