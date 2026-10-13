@@ -1965,22 +1965,25 @@ func TestE2E_SyncUpdate(t *testing.T) {
 
 // TestE2E_AccountsGitconfig: accounts gitconfig --install makes each
 // account's identity git's own for repos under its folders, through
-// includeIf, including repos git-mgr never touched.
+// includeIf, including repos git-mgr never touched. Account names that make
+// the same file name stay apart, and folders and files whose paths hold
+// characters git config quotes or git's wildcards match only themselves.
 func TestE2E_AccountsGitconfig(t *testing.T) {
 	env := newLocalEnv(t)
-	base, err := filepath.EvalSymlinks(t.TempDir())
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	global := filepath.Join(t.TempDir(), "gitconfig")
-	cfg := fmt.Sprintf(`base_dir: %s
+	base := filepath.Join(tmp, "src #1 [x]")
+	global := filepath.Join(tmp, "gitconfig")
+	cfg := fmt.Sprintf(`base_dir: %q
 accounts:
-  - name: work
+  - name: work/a
     hosts: [github.com]
     owners: [acme]
     ssh_key: ~/.ssh/id_work
     git: {name: Work Me, email: me@acme.example}
-  - name: personal
+  - name: work_a
     hosts: [github.com]
     owners: [me]
     git: {email: me@home.example}
@@ -1988,7 +1991,7 @@ accounts:
 	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env.extraEnv = []string{"GIT_CONFIG_GLOBAL=" + global}
+	env.extraEnv = []string{"GIT_CONFIG_GLOBAL=" + global, "XDG_CONFIG_HOME=" + filepath.Join(tmp, `config #"\ dir`)}
 	if out, code := env.run(t, "accounts", "gitconfig", "--install"); code != 0 {
 		t.Fatalf("accounts gitconfig --install exit %d:\n%s", code, out)
 	}

@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"os"
@@ -116,12 +118,15 @@ func (c *AccountsGitconfigCmd) Run(ctx *Context) error {
 		case len(a.Folders) == 0:
 			a.Skipped = "its repos have no folder of their own (under layout name, every repo is directly in base_dir)"
 		default:
-			a.File = filepath.Join(dir, pathutil.FileName(a.Name)+".gitconfig")
+			a.File = filepath.Join(dir, accountFileName(a.Name))
 			for _, f := range a.Folders {
 				claims[f] = append(claims[f], a.Name)
 			}
 		}
 		doc.Accounts = append(doc.Accounts, a)
+	}
+	if err := checkDistinctFiles(doc.Accounts); err != nil {
+		return err
 	}
 	type include struct{ folder, file string }
 	var includes []include
@@ -135,12 +140,14 @@ func (c *AccountsGitconfigCmd) Run(ctx *Context) error {
 	slices.SortStableFunc(includes, func(x, y include) int {
 		return strings.Count(x.folder, string(filepath.Separator)) - strings.Count(y.folder, string(filepath.Separator))
 	})
-	var text strings.Builder
-	text.WriteString("# Written by git-mgr accounts gitconfig: each account's git config for repos\n# under its folders. Change accounts in git-mgr's config and run it again.\n")
-	for _, inc := range includes {
-		fmt.Fprintf(&text, "[includeIf \"gitdir:%s/\"]\n\tpath = %s\n", inc.folder, inc.file)
+	entries := make([]gitConfigEntry, len(includes))
+	for i, inc := range includes {
+		entries[i] = gitConfigEntry{"includeIf.gitdir:" + gitdirPattern(inc.folder) + ".path", inc.file}
 	}
-	doc.Text = text.String()
+	const header = "# Written by git-mgr accounts gitconfig: each account's git config for repos\n# under its folders. Change accounts in git-mgr's config and run it again.\n"
+	if doc.Text, err = gitConfigText(ctx, header, entries); err != nil {
+		return fmt.Errorf("making %s: %w", doc.File, err)
+	}
 	for _, f := range slices.Sorted(maps.Keys(claims)) {
 		if len(claims[f]) > 1 {
 			fmt.Fprintf(os.Stderr, "warning: %s is left out: accounts %s all put repos there\n", tildify(f), strings.Join(claims[f], ", "))
@@ -170,10 +177,19 @@ func (c *AccountsGitconfigCmd) Run(ctx *Context) error {
 		return err
 	}
 	for _, a := range doc.Accounts {
-		if a.File != "" {
-			if err := writeGitConfigFile(ctx, a.File, a.Config); err != nil {
-				return fmt.Errorf("account %s: %w", a.Name, err)
-			}
+		if a.File == "" {
+			continue
+		}
+		var settings []gitConfigEntry
+		for _, k := range slices.Sorted(maps.Keys(a.Config)) {
+			settings = append(settings, gitConfigEntry{k, a.Config[k]})
+		}
+		text, err := gitConfigText(ctx, "", settings)
+		if err == nil {
+			err = pathutil.WriteFileAtomic(a.File, []byte(text), 0o600)
+		}
+		if err != nil {
+			return fmt.Errorf("account %s: %w", a.Name, err)
 		}
 	}
 	if err := pathutil.WriteFileAtomic(doc.File, []byte(doc.Text), 0o600); err != nil {
@@ -200,23 +216,98 @@ func (c *AccountsGitconfigCmd) Run(ctx *Context) error {
 	return ctx.finish(doc, nil)
 }
 
-// writeGitConfigFile replaces the git config file at path with settings,
-// written by git, so its quoting is git's.
-func writeGitConfigFile(ctx *Context, path string, settings map[string]string) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
+// accountFileName is the name of account name's git config file: the name
+// made a file name, which can make two names one, so with a digest of the
+// name itself, which keeps them apart -- also where case doesn't.
+func accountFileName(name string) string {
+	sum := sha256.Sum256([]byte(name))
+	return pathutil.FileName(name) + "-" + hex.EncodeToString(sum[:4]) + ".gitconfig"
+}
+
+// checkDistinctFiles refuses accounts that would share a git config file,
+// on a filesystem that ignores case too: one would overwrite the other.
+func checkDistinctFiles(accounts []accountJSON) error {
+	owners := map[string]string{}
+	for _, a := range accounts {
+		if a.File == "" {
+			continue
+		}
+		key := strings.ToLower(a.File)
+		if other, ok := owners[key]; ok {
+			return fmt.Errorf("accounts %q and %q would share the git config file %s; rename one", other, a.Name, a.File)
+		}
+		owners[key] = a.Name
 	}
-	tmp.Close()
+	return nil
+}
+
+// gitdirPattern is the includeIf gitdir pattern for repos under folder: the
+// folder with git's wildcard characters escaped, so it matches only itself,
+// and a trailing slash, which matches everything under it.
+func gitdirPattern(folder string) string {
+	var b strings.Builder
+	for _, r := range folder {
+		if strings.ContainsRune(`\*?[`, r) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	b.WriteByte('/')
+	return b.String()
+}
+
+// gitConfigEntry is one setting in a git config file.
+type gitConfigEntry struct{ key, value string }
+
+// gitConfigText is a git config file holding header (comment lines) and then
+// entries in order. git writes it, so its quoting and escaping are git's, and
+// reads it back, which must give entries exactly.
+func gitConfigText(ctx *Context, header string, entries []gitConfigEntry) (string, error) {
+	tmp, err := os.CreateTemp("", "git-mgr-gitconfig-*")
+	if err != nil {
+		return "", err
+	}
 	defer os.Remove(tmp.Name())
-	for _, k := range slices.Sorted(maps.Keys(settings)) {
-		if _, err := gitops.Git(ctx.GoCtx(), filepath.Dir(path), "config", "--file", tmp.Name(), k, settings[k]); err != nil {
-			return err
+	_, err = tmp.WriteString(header)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Dir(tmp.Name())
+	for _, e := range entries {
+		if _, err := gitops.Git(ctx.GoCtx(), dir, "config", "--file", tmp.Name(), e.key, e.value); err != nil {
+			return "", fmt.Errorf("setting %s: %w", e.key, err)
 		}
 	}
-	data, err := os.ReadFile(tmp.Name())
+	listed, err := gitops.GitOutput(ctx.GoCtx(), dir, "config", "--file", tmp.Name(), "--list", "-z")
 	if err != nil {
-		return err
+		return "", err
 	}
-	return pathutil.WriteFileAtomic(path, data, 0o600)
+	var got []gitConfigEntry
+	for _, item := range strings.Split(strings.TrimSuffix(string(listed), "\x00"), "\x00") {
+		if key, value, ok := strings.Cut(item, "\n"); ok {
+			got = append(got, gitConfigEntry{key, value})
+		}
+	}
+	want := make([]gitConfigEntry, len(entries))
+	for i, e := range entries {
+		want[i] = gitConfigEntry{canonicalGitConfigKey(e.key), e.value}
+	}
+	if !slices.Equal(got, want) {
+		return "", fmt.Errorf("git reads back %q, not %q", got, want)
+	}
+	data, err := os.ReadFile(tmp.Name())
+	return string(data), err
+}
+
+// canonicalGitConfigKey is key as git lists it: section and variable names
+// lower-cased, a subsection as it is.
+func canonicalGitConfigKey(key string) string {
+	first, last := strings.Index(key, "."), strings.LastIndex(key, ".")
+	if first < 0 {
+		return strings.ToLower(key)
+	}
+	return strings.ToLower(key[:first]) + key[first:last] + strings.ToLower(key[last:])
 }
