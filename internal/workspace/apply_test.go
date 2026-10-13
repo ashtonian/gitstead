@@ -573,6 +573,32 @@ func TestRetire(t *testing.T) {
 	}
 }
 
+// A retirement cut short -- its copies taken away, but not yet recorded --
+// is left to ws retire to finish: the copies aren't made again.
+func TestPlan_LeavesAnUnfinishedRetirement(t *testing.T) {
+	root := t.TempDir()
+	w := newWorld(t, root)
+	w.cfg.Repos = []config.ManualRepo{{URL: bareRemote(t, root, "app")}}
+	w.cfg.Workspaces = []config.Workspace{{Name: "app", Repos: []string{"local/remotes/app"}, Agents: 2}}
+	w.converge()
+	ws := w.st.Workspaces["app"]
+	if err := w.st.Update(time.Second, func(st *state.State) error {
+		st.Workspaces["app"].Replica("agent-1").Retiring = time.Now()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	opts := workspace.RetireOptions{StateDir: w.st.Dir(), ArchiveDir: w.cfg.Backup.ArchiveDir}
+	if r := workspace.Retire(context.Background(), workspace.FromState(w.cfg, w.st, ws), ws, "agent-1", nil, opts); len(r.Removed) != 1 {
+		t.Fatalf("retired = %+v", r)
+	}
+
+	p := workspace.Compute(context.Background(), w.cfg, w.st, w.scope())
+	if len(p.Actions) != 0 || len(p.Blocked) != 1 || p.Blocked[0].Target != "app/agent-1" || !strings.Contains(p.Blocked[0].Reason, "ws retire app agent-1") {
+		t.Fatalf("plan = %+v, want agent-1 left to ws retire", p)
+	}
+}
+
 // New checkouts -- the repo's clone and each agent's copy -- take clone's
 // shape; clone.lfs: skip reaches clones made before, through managed config.
 func TestApply_CopiesTakeTheRepoShape(t *testing.T) {

@@ -2194,7 +2194,10 @@ recorded as the copy's `pr`.
 
 `ws retire` first records `retiring` on each agent; it is cleared with the
 replica once every copy is gone, and an agent left with copies shows as
-`retiring`.
+`retiring`. While it is set, `ensure` and `apply` plan nothing for the agent
+and report it blocked (`ws retire` finishes it): a retire interrupted after
+taking a copy away but before recording that would otherwise have the copy
+made again.
 
 ### WIP safety
 

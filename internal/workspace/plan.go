@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
@@ -287,8 +288,21 @@ func (pl *planner) workspace(spec *Spec, ws *state.WorkspaceState) {
 		return
 	}
 
+	// An agent being retired is the retirement's to finish: a copy it took
+	// away isn't made again, nor one it kept touched, until it does.
+	retiring := map[string]bool{}
+	for _, rr := range ws.Replicas {
+		if !rr.Retiring.IsZero() {
+			retiring[rr.Agent] = true
+			pl.block(spec.Name+"/"+rr.Agent, fmt.Sprintf("retiring it began %s and hasn't finished; `git-mgr ws retire %s %s` finishes it",
+				rr.Retiring.Local().Format(time.DateTime), spec.Name, rr.Agent))
+		}
+	}
 	matched := map[string]bool{}
 	for _, r := range spec.Replicas {
+		if retiring[r.Agent] {
+			continue
+		}
 		rr := ws.Replica(r.Agent)
 		for _, c := range r.Copies {
 			var rec *state.CopyState
@@ -306,6 +320,9 @@ func (pl *planner) workspace(spec *Spec, ws *state.WorkspaceState) {
 		}
 	}
 	for _, rr := range ws.Replicas {
+		if retiring[rr.Agent] {
+			continue
+		}
 		for _, rc := range rr.Copies {
 			if matched[rr.Agent+"\x00"+rc.Path] {
 				continue
