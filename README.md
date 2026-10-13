@@ -1261,7 +1261,9 @@ When an agent is done, `git-mgr ws retire <workspace> <agent...>` (or
    request, its archive) and the archive's catalog entry are kept in state.
 
 `--force` discards the unique work instead. A copy that can't be inspected or
-archived is kept, and its agent shows as `retiring` until a retire finishes.
+archived is kept, and its agent shows as `retiring` until a retire finishes;
+meanwhile `ws ensure` and `apply` leave the agent alone and report it, so a
+retire cut short is never undone by making its copies again.
 `ws rm --delete`, `ws prune` and removals on `git-mgr apply` retire copies the
 same way. `git-mgr archives ls` lists what was saved, from copies and from
 repos `remove --delete`, `remove --archive` or stale cleanup took away;
