@@ -330,6 +330,17 @@ Stop tracking repos.
 | `--archive` | Also move the clone, whole, to `backup.archive_dir/<id>/` and catalog it; `archives restore` puts it back. A clone with linked worktrees is kept and stays tracked, and the command exits non-zero. Exclusive with `--delete`. |
 | `--yes` | Skip confirmation prompt |
 
+#### `git-mgr hooks post-clone|post-create`
+
+Runs hooks again, printing their output as well as logging it.
+
+| Subcommand | Description |
+|---|---|
+| `post-clone [<pattern>] [--tag t] [--set s]` | Each selected repo's `post_clone` hooks, in its clone. A repo not on disk is skipped and said so. |
+| `post-create <workspace> [<agent>...]` | The `post_create` hooks of the workspace's copies (only these agents'): the repo's, then the workspace's. |
+
+Exits non-zero (3) when any hook fails.
+
 #### `git-mgr archives ls|show|restore|rm`
 
 The catalog of archives git-mgr made before taking copies and repos away:
@@ -498,6 +509,8 @@ workspace_defaults:
   agents: 1
   agent_name: "agent-{{.N}}"
   branch: "agents/{{.Workspace}}/{{.Agent}}"
+  hooks:
+    post_create: []          # after the repo's post_create; a workspace's own replaces it
 
 workspaces:
   - name: app
@@ -778,6 +791,18 @@ remote_sync:
 
   # How long a pushed WIP ref stays; the current one always stays.
   keep: "720h"
+
+# ============================================================================
+# Hooks
+# ============================================================================
+
+# Commands run with /bin/sh -c in a checkout git-mgr just made; also
+# accounts[].hooks and overrides[].hooks (most specific list wins, [] = none),
+# and workspace_defaults.hooks / workspaces[].hooks for post_create.
+hooks:
+  post_clone: []                  # in a repo's new clone; never in one adopted
+  post_create: []                 # in each new workspace copy, then the workspace's own
+  timeout: "15m"                  # each command; 0 = none
 
 # ============================================================================
 # Notifications
@@ -1813,6 +1838,19 @@ refs and terminal session names.
 - **reference-clone** — the same with `--shared` (alternates); the source gets
   `gc.pruneExpire=never` first.
 - **shared** — no copies; agents work in `path`, or the one repo's clone.
+
+A new copy's `post_create` hooks -- the repo's (`hooks`, `accounts[].hooks`,
+`overrides[].hooks`, most specific wins), then the workspace's
+(`workspaces[].hooks`, else `workspace_defaults.hooks`) -- run after it is
+made and its managed config written, as do a new clone's `post_clone` hooks
+in the clone action (never on adopt). Each command: `/bin/sh -c` in the
+checkout, stdin empty, its own session (no terminal), git's batch
+environment plus `GIT_MGR_EVENT`, `GIT_MGR_PATH`, `GIT_MGR_REPO`,
+`GIT_MGR_SOURCE`, `GIT_MGR_WORKSPACE`, `GIT_MGR_AGENT`, `GIT_MGR_BRANCH`,
+killed with its process group at `hooks.timeout`; output replaces
+`<state dir>/hooks/<name>.<event>.log`. The first failure stops the rest and
+returns `hook.Error` (command, log path, last 10 lines); the action still
+records the checkout and reports the failure with the command that re-runs it.
 
 Every new checkout -- the repo's clone and each copy -- takes the shape the
 repo's `clone` config gives, not its source's:

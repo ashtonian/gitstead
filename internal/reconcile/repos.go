@@ -14,6 +14,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/ctxutil"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/hook"
 	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
@@ -270,10 +271,11 @@ func recordRepo(d Repo, here Copy) func(context.Context, *state.State) {
 }
 
 // cloneRepo clones d to its path, or with adopt takes the clone already
-// there, then writes its managed git config and records it. The clone runs
-// outside the state lock, within env.CloneTimeout; one that fails removes
-// what it left behind, so a half-made clone is never adopted later. A clone
-// whose submodules couldn't all be checked out is whole otherwise: it is
+// there, then writes its managed git config, runs a new clone's post_clone
+// hooks and records it. The clone runs outside the state lock, within
+// env.CloneTimeout; one that fails removes what it left behind, so a
+// half-made clone is never adopted later. A clone whose submodules couldn't
+// all be checked out, or whose hooks failed, is whole otherwise: it is
 // recorded, and the failure reported.
 func cloneRepo(d Repo, adopt bool) RunFunc {
 	return func(ctx context.Context, env *Env) (Outcome, error) {
@@ -309,8 +311,15 @@ func cloneRepo(d Repo, adopt bool) RunFunc {
 		if err != nil {
 			return Outcome{}, err
 		}
+		var info string
+		if !adopt && len(d.PostClone) > 0 {
+			info = "ran post_clone hooks"
+			if err := env.Hooks.Run(ctx, PostCloneHook(d.Key, d.Path, d.PostClone)); err != nil {
+				partly = errors.Join(partly, fmt.Errorf("cloned, but %w\n(`git-mgr hooks post-clone %s` runs them again)", err, d.Key))
+			}
+		}
 
-		return Outcome{Record: func(st *state.State) error {
+		return Outcome{Info: info, Record: func(st *state.State) error {
 			a := st.Repos[d.Key]
 			if a == nil {
 				a = &state.RepoState{ManuallyAdded: d.Pinned}
@@ -339,6 +348,11 @@ func cloneInto(ctx context.Context, env *Env, d Repo) error {
 	ctx, cancel := ctxutil.WithTimeout(ctx, env.CloneTimeout)
 	defer cancel()
 	return ctxutil.TimedOut(ctx, gitops.Clone(ctx, d.URL, d.Path, CloneOptions(sshKey, d.Clone)), "clone", env.CloneTimeout, "sync.clone_timeout")
+}
+
+// PostCloneHook is the post_clone hook of the clone of repo key at path.
+func PostCloneHook(key, path string, commands []string) hook.Hook {
+	return hook.Hook{Event: hook.PostClone, Commands: commands, Dir: path, Name: key, Env: hook.Env{Repo: key, Source: path}}
 }
 
 // CloneOptions is how git-mgr clones a repo with clone config c, fetching

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -22,6 +23,10 @@ var batchEnv = []string{
 	"GCM_INTERACTIVE=never",     // Git Credential Manager's dialogs
 	"SSH_ASKPASS_REQUIRE=never", // ssh's graphical passphrase prompt
 }
+
+// BatchEnv is the environment that keeps git and its helpers from prompting,
+// for other programs git-mgr runs unattended.
+func BatchEnv() []string { return slices.Clone(batchEnv) }
 
 // killGrace bounds how long Wait waits for output after git is killed; a
 // helper git started (ssh, git-remote-https) can hold the pipes open.

@@ -13,6 +13,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/hook"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
@@ -100,6 +101,7 @@ func (w *world) apply(p *reconcile.Plan, include func(reconcile.Action) bool) []
 		Concurrency: w.cfg.Concurrency,
 		ArchiveDir:  w.cfg.Backup.ArchiveDir,
 		KeepDirs:    []string{w.cfg.BaseDir},
+		Hooks:       hook.Runner{LogDir: filepath.Join(w.st.Dir(), "hooks")},
 	}
 	results := p.Apply(context.Background(), env, include)
 	for _, r := range results {
@@ -476,6 +478,55 @@ func TestApply_CloneWithAnUnreachableSubmoduleIsRecorded(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repo.LocalPath, "README")); err != nil {
 		t.Errorf("the clone should be on disk: %v", err)
+	}
+	if p := w.plan(); !p.Empty() {
+		t.Errorf("the next run should have nothing to do, got %+v", p)
+	}
+}
+
+// post_clone runs in a clone git-mgr makes, told which repo it is; a clone
+// adopted where it already was is left alone.
+func TestApply_PostCloneHooks(t *testing.T) {
+	root := t.TempDir()
+	app, lib := bareRemote(t, root, "app"), bareRemote(t, root, "lib")
+	w := newWorld(t, root)
+	w.cfg.Hooks.PostClone = []string{`printf '%s' "$GIT_MGR_REPO" > hooked`}
+	w.cfg.Repos = []config.ManualRepo{{URL: app}, {URL: lib}}
+	// lib is already cloned where it belongs.
+	libPath := filepath.Join(w.cfg.BaseDir, "local", "remotes", "lib")
+	mustGit(t, root, "clone", "-q", lib, libPath)
+	w.converge()
+
+	appPath := w.st.Repos["local/remotes/app"].LocalPath
+	if got, err := os.ReadFile(filepath.Join(appPath, "hooked")); err != nil || string(got) != "local/remotes/app" {
+		t.Errorf("post_clone in the new clone: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(libPath, "hooked")); err == nil {
+		t.Error("post_clone ran in an adopted clone")
+	}
+}
+
+// A failing post_clone leaves the clone recorded, so it isn't cloned again,
+// and reports the failure.
+func TestApply_FailingPostCloneIsRecorded(t *testing.T) {
+	root := t.TempDir()
+	remote := bareRemote(t, root, "app")
+	w := newWorld(t, root)
+	w.cfg.Hooks.PostClone = []string{"echo nope >&2; exit 4"}
+	w.cfg.Repos = []config.ManualRepo{{URL: remote}}
+	env := &reconcile.Env{
+		State:       w.st,
+		Update:      func(change func(*state.State) error) error { return w.st.Update(time.Second, change) },
+		Concurrency: 1,
+		Hooks:       hook.Runner{LogDir: filepath.Join(root, "hooks")},
+	}
+	results := w.plan().Apply(context.Background(), env, reconcile.All)
+	var hookErr *hook.Error
+	if len(results) != 1 || !errors.As(results[0].Err, &hookErr) || !strings.Contains(hookErr.Tail, "nope") {
+		t.Fatalf("want the hook's failure, got %+v", results)
+	}
+	if r := w.st.Repos["local/remotes/app"]; r == nil || !r.Cloned {
+		t.Fatalf("the clone should be recorded, got %+v", r)
 	}
 	if p := w.plan(); !p.Empty() {
 		t.Errorf("the next run should have nothing to do, got %+v", p)

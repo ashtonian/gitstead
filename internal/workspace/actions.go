@@ -106,7 +106,17 @@ func createCopy(spec *Spec, r Replica, c Copy, replaces string) reconcile.RunFun
 			return reconcile.Outcome{}, err
 		}
 		cs, err := copyState(ctx, spec.Isolation, c)
-		return reconcile.Outcome{Record: recordCopyState(spec.Name, r, cs, replaces)}, errors.Join(partly, err)
+		if err != nil {
+			return reconcile.Outcome{Record: recordCopyState(spec.Name, r, cs, replaces)}, errors.Join(partly, err)
+		}
+		var info string
+		if len(c.PostCreate) > 0 {
+			info = "ran post_create hooks"
+			if err := env.Hooks.Run(ctx, PostCreateHook(spec.Name, r.Agent, c)); err != nil {
+				partly = errors.Join(partly, fmt.Errorf("made, but %w\n(`git-mgr hooks post-create %s %s` runs them again)", err, spec.Name, r.Agent))
+			}
+		}
+		return reconcile.Outcome{Info: info, Record: recordCopyState(spec.Name, r, cs, replaces)}, partly
 	}
 }
 

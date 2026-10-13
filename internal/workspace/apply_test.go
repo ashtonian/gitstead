@@ -12,6 +12,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/hook"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
 	"github.com/ashtonian/git-mgr/internal/state"
 	"github.com/ashtonian/git-mgr/internal/workspace"
@@ -101,6 +102,7 @@ func (w *world) apply(p *reconcile.Plan, include func(reconcile.Action) bool) []
 		ArchiveDir:  w.cfg.Backup.ArchiveDir,
 		StateDir:    w.st.Dir(),
 		KeepDirs:    []string{w.cfg.BaseDir, w.cfg.WorkspaceDefaults.Root},
+		Hooks:       hook.Runner{LogDir: filepath.Join(w.st.Dir(), "hooks")},
 	}
 	results := workspace.Apply(context.Background(), w.cfg, env, p, w.scope(), include)
 	for _, r := range results {
@@ -582,5 +584,33 @@ func TestApply_CopiesTakeTheRepoShape(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// post_create runs in each new copy: the repo's hooks, then the workspace's,
+// told where the repo's clone is.
+func TestApply_PostCreateHooks(t *testing.T) {
+	root := t.TempDir()
+	remote := bareRemote(t, root, "app")
+	w := newWorld(t, root)
+	repoHook := []string{`echo repo >> order`}
+	wsHook := []string{`echo workspace >> order`, `cp "$GIT_MGR_SOURCE/.env" .env`}
+	w.cfg.Repos = []config.ManualRepo{{URL: remote}}
+	w.cfg.Overrides = []config.Override{{Repos: []string{"local/remotes/app"}, Hooks: &config.HooksOverride{PostCreate: &repoHook}}}
+	// The repo's clone is made first; its .env is what agents get.
+	w.converge()
+	writeFile(t, filepath.Join(w.st.Repos["local/remotes/app"].LocalPath, ".env"), "SECRET=1\n")
+	w.cfg.Workspaces = []config.Workspace{{Name: "app", Repos: []string{"local/remotes/app"}, Agents: 2,
+		Hooks: config.WorkspaceHooks{PostCreate: &wsHook}}}
+	w.converge()
+
+	for _, agent := range []string{"agent-1", "agent-2"} {
+		copyPath := filepath.Join(w.cfg.WorkspaceDefaults.Root, "app", agent)
+		if got, _ := os.ReadFile(filepath.Join(copyPath, "order")); string(got) != "repo\nworkspace\n" {
+			t.Errorf("%s: hooks ran as %q", agent, got)
+		}
+		if got, _ := os.ReadFile(filepath.Join(copyPath, ".env")); string(got) != "SECRET=1\n" {
+			t.Errorf("%s: .env = %q", agent, got)
+		}
 	}
 }

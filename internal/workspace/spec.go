@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/git-mgr/internal/hook"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
 	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/state"
@@ -65,6 +66,9 @@ type Copy struct {
 	// Clone is the repo's clone config: how much of it a copy checks out,
 	// and how its submodules are cloned.
 	Clone config.CloneConfig
+	// PostCreate is run in a new copy: the repo's post_create hooks, then the
+	// workspace's.
+	PostCreate []string
 }
 
 // Shared reports whether every agent of the workspace works in one folder.
@@ -160,6 +164,7 @@ func Resolve(cfg *config.Config, st *state.State, decl config.Workspace) (*Spec,
 			}
 			c.SSHKey, c.Config = reconcile.CopyAccess(cfg, key, repo.DiscoveredBy, repo.CloneURL)
 			c.Clone = cfg.CloneFor(key, repo.DiscoveredBy)
+			c.PostCreate = postCreate(cfg, key, repo.DiscoveredBy, w)
 			if spec.Isolation == config.IsolationWorktree {
 				c.Config = nil // worktrees share their repo's
 			}
@@ -170,10 +175,18 @@ func Resolve(cfg *config.Config, st *state.State, decl config.Workspace) (*Spec,
 	return spec, nil
 }
 
-// FromState returns a recorded workspace as it is, with the access config
-// gives its clones of tracked repos.
+// FromState returns a recorded workspace as it is, with the access, clone
+// config and hooks config gives its copies of tracked repos.
 func FromState(cfg *config.Config, st *state.State, ws *state.WorkspaceState) *Spec {
 	spec := &Spec{Name: ws.Name, Dir: ws.Dir, Isolation: ws.Isolation, BaseRef: ws.BaseRef, Declared: ws.Declared}
+	var decl config.Workspace
+	if cfg != nil {
+		decl = config.Workspace{Name: ws.Name}
+		if d := cfg.FindWorkspace(ws.Name); d != nil {
+			decl = *d
+		}
+		decl = cfg.WithDefaults(decl)
+	}
 	for _, rs := range ws.Replicas {
 		r := Replica{Agent: rs.Agent, Path: rs.Path}
 		for _, cs := range rs.Copies {
@@ -186,6 +199,7 @@ func FromState(cfg *config.Config, st *state.State, ws *state.WorkspaceState) *S
 				if cfg != nil {
 					c.SSHKey, c.Config = reconcile.CopyAccess(cfg, cs.Repo, repo.DiscoveredBy, c.URL)
 					c.Clone = cfg.CloneFor(cs.Repo, repo.DiscoveredBy)
+					c.PostCreate = postCreate(cfg, cs.Repo, repo.DiscoveredBy, decl)
 					if spec.Isolation == config.IsolationWorktree {
 						c.Config = nil // worktrees share their repo's
 					}
@@ -196,6 +210,26 @@ func FromState(cfg *config.Config, st *state.State, ws *state.WorkspaceState) *S
 		spec.Replicas = append(spec.Replicas, r)
 	}
 	return spec
+}
+
+// postCreate is what runs in a new copy of repo key in workspace w, which
+// has its defaults: the repo's post_create hooks, then the workspace's.
+func postCreate(cfg *config.Config, key, rule string, w config.Workspace) []string {
+	commands := slices.Clone(cfg.HooksFor(key, rule).PostCreate)
+	return append(commands, w.PostCreate()...)
+}
+
+// PostCreateHook is the post_create hook of copy c of agent's replica in
+// workspace ws.
+func PostCreateHook(ws, agent string, c Copy) hook.Hook {
+	name := ws + "/" + agent
+	if c.Repo != "" {
+		name += "/" + c.Repo
+	}
+	return hook.Hook{
+		Event: hook.PostCreate, Commands: c.PostCreate, Dir: c.Path, Name: name,
+		Env: hook.Env{Repo: c.Repo, Source: c.Source, Workspace: ws, Agent: agent, Branch: c.Branch},
+	}
 }
 
 // ErrNoRepos reports a workspace whose repos select no tracked repo.

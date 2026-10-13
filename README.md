@@ -141,6 +141,7 @@ writes a config without asking anything.
 | `git-mgr report` / `log` | Summarize / list recent activity (clones, backups, syncs…) from the operation log. `--since`, `-n`. |
 | `git-mgr workspace` (`ws`, `wg`) | Manage workspaces: repos × agents, each agent in a copy of its own. See [Workspaces](#workspaces). |
 | `git-mgr fleet` | Open several workspaces' agents side by side with tmux, iTerm, Muxy or a plugin; `open`, `plan`, `ls`, `status`, `stop`. See [Fleets](#fleets-and-launchers). |
+| `git-mgr hooks post-clone\|post-create` | Run repos' `post_clone` or a workspace's `post_create` hooks again, output on the terminal. See [Hooks](#hooks). |
 | `git-mgr archives ls\|show\|restore\|rm` | The catalog of what was saved before copies and repos were taken away -- bundles of unique work, and whole clones -- and how to restore each; `restore` moves an archived clone back, `rm` deletes archives for good. |
 | `git-mgr cd\|path\|open <query>` | Jump to, print, or open in your editor (`--web`: the repo's page) a repo, workspace or agent's folder from part of its name. See [Jump and open](#jump-and-open). |
 | `git-mgr shell-init bash\|zsh\|fish` | Print the shell function that makes `git-mgr cd` change directory. |
@@ -470,6 +471,56 @@ with `filter` need git 2.36 or later.
 
 Workspace worktrees share their repo's clone, filter and depth included.
 Workspace clones can't be made from a partial clone, so `plan` blocks them.
+
+### Hooks
+
+Hooks are commands git-mgr runs in a checkout it has just made: `post_clone`
+in a repo's new clone, `post_create` in a new workspace copy -- install
+dependencies, `direnv allow`, copy a `.env` the repo doesn't track.
+
+```yaml
+hooks:
+  post_clone: ["direnv allow"]
+overrides:
+  - repos: ["github.com/acme/web"]
+    hooks:
+      post_clone: ["direnv allow", "npm ci"]
+      post_create: ["npm ci"]          # in every copy of web, in any workspace
+workspace_defaults:
+  hooks:
+    post_create: ['cp "$GIT_MGR_SOURCE/.env" .env', "direnv allow"]
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `hooks.post_clone` | `[]` | Run in a repo's new clone. Never in a clone adopted where it was. |
+| `hooks.post_create` | `[]` | Run in each new workspace copy of a repo, before the workspace's own. |
+| `hooks.timeout` | `15m` | Each command's limit; 0 for none. |
+| `workspace_defaults.hooks.post_create` | `[]` | A workspace's own post_create, after its repos'; `workspaces[].hooks.post_create` replaces it. |
+
+`hooks` is set at the top, per account (`accounts[].hooks`) or per repo
+(`overrides[].hooks`); the most specific list wins and an empty list runs
+nothing. A copy runs its repo's `post_create`, then its workspace's. Each
+command runs with `/bin/sh -c` in the checkout, in order, with no input and
+no terminal, in a process group of its own that the timeout kills whole. Each
+is told where it is:
+
+| Variable | Value |
+| --- | --- |
+| `GIT_MGR_EVENT` | `post_clone` or `post_create` |
+| `GIT_MGR_PATH` | The checkout (also the working directory) |
+| `GIT_MGR_REPO` | The tracked repo's key |
+| `GIT_MGR_SOURCE` | The repo's clone -- where a copy's untracked files can come from |
+| `GIT_MGR_WORKSPACE`, `GIT_MGR_AGENT`, `GIT_MGR_BRANCH` | The copy's workspace, agent and branch (`post_create`) |
+
+The first command that fails stops the rest. The checkout is kept and
+recorded either way -- a failed `npm ci` doesn't cost the clone -- and the
+failure is reported with the end of its output; the whole run is in
+`<state dir>/hooks/<checkout>.<event>.log` (the last run of each). Fix it and
+run the hooks again with `git-mgr hooks post-clone <repos>` or `git-mgr hooks
+post-create <workspace> [agents]`. Moving a copy or a repo runs nothing.
+Hooks come only from your config, never from a repository, so cloning
+someone else's repo never runs their code.
 
 ### Manual repos, excludes, overrides, tags
 
@@ -1259,6 +1310,7 @@ go build -ldflags="-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD)" .
 | `internal/state` | The state file: schema, migrations, locking, atomic writes, and `GroupCommit`, which saves concurrent changes in one write. |
 | `internal/gitops` | Everything that runs git: clone, fetch, status, snapshots, backups, restore, archives, copy IDs, worktrees. |
 | `internal/workspace` | Workspaces: resolving config into replicas and copies, planning their changes on the reconcile engine, making, moving and removing copies, health. Depends on the inventory, never the reverse. |
+| `internal/hook` | Running `post_clone` and `post_create` hooks: environment, timeouts, logs. |
 | `internal/agent` | Running agents: profile commands, the lease that marks an agent running, and `ws run` itself. |
 | `internal/launch` | Fleets' terminals: the launch plan, and the tmux, iTerm, Muxy and plugin launchers. |
 | `internal/view` | `git-mgr top`: collecting every repo and copy's state and terminal activity, and laying it out. |
