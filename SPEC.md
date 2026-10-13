@@ -364,8 +364,12 @@ elsewhere (`mirror_path`, the repo renamed since) is moved to
 `<dir>/<key>.git` first; missing, it is made with `git clone --mirror <url>`
 in a staging directory, renamed into place; present, it must have
 `remote.origin.mirror=true` (else it is left alone and reported), gets the
-recorded URL as origin, and fetches `origin` (`+refs/*:refs/*`, no
-`--prune`); with `lfs`, `git lfs fetch --all origin`. Each within
+recorded URL as origin, and fetches `origin` (`+refs/*:refs/*`, with
+`--no-prune --no-prune-tags`, overriding `fetch.prune` and the like). A ref
+the fetch moved to a commit that doesn't descend from its old tip (a
+force-push) keeps that tip as `refs/git-mgr-rewritten/<UTC time>/<ref>`, and
+such refs older than `mirror.keep_rewritten` are deleted; with `lfs`,
+`git lfs fetch --all origin`. Each within
 `sync.clone_timeout`, with the repo's SSH key over SSH. Records `mirror_path`,
 `last_mirror`, or `last_mirror_error`. `sync` runs the same after its
 fetches unless `--no-fetch`. Mirrors are never deleted.
@@ -800,6 +804,7 @@ mirror:
   dir: ""                         # "" = ~/.local/share/git-mgr/mirrors; <dir>/<key>.git
   interval: "24h"                 # sync updates a mirror at most this often (a failing one every sync)
   lfs: false                      # git lfs fetch --all into the mirror
+  keep_rewritten: "2160h"         # keep the old tips of rewritten refs; 0 keeps none
 
 # ============================================================================
 # Remote Sync Settings

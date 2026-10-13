@@ -840,12 +840,15 @@ overrides:
 | `mirror.dir` | `~/.local/share/git-mgr/mirrors` | Holds `<host>/<owner>/<name>.git`. |
 | `mirror.interval` | `24h` | How long `sync` leaves a mirror before updating it again; a failing one is retried every sync. |
 | `mirror.lfs` | `false` | Also mirror Git LFS content (`git lfs fetch --all`); per account or repo too. |
+| `mirror.keep_rewritten` | `2160h` (90 days) | How long a mirror keeps the old tip of a ref its upstream rewrote (a force-pushed branch), under `refs/git-mgr-rewritten/<time>/`; `0s` keeps none. |
 
 A mirror is made with `git clone --mirror`, staged like any clone, from the
 repo's upstream URL with its SSH key -- not from your clone, which may be
-partial, shallow or behind. Updates fetch every ref without pruning: a branch
-deleted upstream stays in the mirror, while one moved -- force-pushed included
--- follows the remote. `sync` updates the mirrors that are due after its
+partial, shallow or behind. Updates fetch every ref and never prune, whatever
+`fetch.prune` says: a branch deleted upstream stays in the mirror. A branch
+moved upstream follows the remote; when the move rewrote its history -- a
+force-push -- the old tip is kept as `refs/git-mgr-rewritten/<time>/heads/<branch>`
+for `mirror.keep_rewritten`, so the rewritten commits stay too. `sync` updates the mirrors that are due after its
 fetches (`--force` all of them, `--no-fetch` none); `git-mgr mirror` does it
 now (`--repos`, `--tag`, `--set`, `--force`). A stale repo's mirror is left as
 it was: its upstream is gone, which is what the mirror is for. A renamed repo's

@@ -415,7 +415,9 @@ backup:
 # =============================================================================
 # A full mirror of each repo's upstream -- every branch, tag and ref the host
 # has -- as a bare repo, made and updated by sync: a copy that outlives the host
-# losing the repo. Updates don't prune, so a branch deleted upstream stays.
+# losing the repo. Updates never prune, so a branch deleted upstream stays,
+# and the old tip of a branch rewritten upstream (force-pushed) is kept for
+# keep_rewritten under refs/git-mgr-rewritten/<time>/.
 # accounts[].mirror and overrides[].mirror ({enabled, lfs}) set it per repo.
 
 mirror:
@@ -423,6 +425,7 @@ mirror:
   dir: ""                  # <dir>/<host>/<owner>/<name>.git; "" = ~/.local/share/git-mgr/mirrors
   interval: "24h"          # how often sync updates each mirror
   lfs: false               # also mirror Git LFS content
+  keep_rewritten: "2160h"  # keep rewritten branches' old tips 90 days; "0s" keeps none
 
 # =============================================================================
 # Remote Sync
