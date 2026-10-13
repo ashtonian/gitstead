@@ -66,7 +66,8 @@ func TestRepoKeys(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got, err := RepoKeys(cfg, st, tt.decl)
-		if !reflect.DeepEqual(got, tt.want) || !errors.Is(err, tt.err) && !(tt.err == nil && err == nil) {
+		errOK := errors.Is(err, tt.err) || tt.err == nil && err == nil
+		if !reflect.DeepEqual(got, tt.want) || !errOK {
 			t.Errorf("RepoKeys(%+v) = %v, %v; want %v, %v", tt.decl, got, err, tt.want, tt.err)
 		}
 	}

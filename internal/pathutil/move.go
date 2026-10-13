@@ -52,11 +52,11 @@ func move(src, dst string, rename func(string, string) error) error {
 		return err
 	}
 	if err := copyTree(src, staging); err != nil {
-		SafeRemoveAll(staging)
+		_ = SafeRemoveAll(staging) // the copy's error is the one to report
 		return fmt.Errorf("copying %s to %s: %w", src, dst, err)
 	}
 	if err := os.Rename(staging, dst); err != nil {
-		SafeRemoveAll(staging)
+		_ = SafeRemoveAll(staging)
 		return err
 	}
 	if err := SafeRemoveAll(src); err != nil {

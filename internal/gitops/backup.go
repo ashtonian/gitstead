@@ -357,7 +357,7 @@ func writeTreeTarball(ctx context.Context, repoPath, tree, path string) error {
 	}()
 	if writeErr != nil {
 		cancel()
-		cmd.Wait()
+		_ = cmd.Wait() // killed: the write's error is the one to report
 		return writeErr
 	}
 	waitErr := cmd.Wait()

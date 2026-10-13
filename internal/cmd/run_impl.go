@@ -16,7 +16,7 @@ import (
 // in a stable order so concurrent runs stay readable.
 func (c *RunCmd) Run(ctx *Context) error {
 	if len(c.Command) == 0 {
-		return fmt.Errorf("no command given; usage: git-mgr run [--set/--tag/--repos] -- <cmd>...")
+		return errors.New("no command given; usage: git-mgr run [--set/--tag/--repos] -- <command> [args]")
 	}
 	cfg, err := ctx.LoadConfig()
 	if err != nil {
@@ -84,7 +84,7 @@ func (c *RunCmd) Run(ctx *Context) error {
 			status = "FAIL: " + r.err.Error()
 		}
 		fmt.Printf("== %s (%s) ==\n", r.key, status)
-		os.Stdout.Write(r.out)
+		_, _ = os.Stdout.Write(r.out)
 		if n := len(r.out); n > 0 && r.out[n-1] != '\n' {
 			fmt.Println()
 		}

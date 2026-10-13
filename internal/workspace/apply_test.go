@@ -122,13 +122,6 @@ func (w *world) converge() {
 	}
 }
 
-func (w *world) edit(change func(*state.State)) {
-	w.t.Helper()
-	if err := w.st.Update(time.Second, func(st *state.State) error { change(st); return nil }); err != nil {
-		w.t.Fatal(err)
-	}
-}
-
 func kinds(p *reconcile.Plan) string {
 	var out []string
 	for _, a := range p.Actions {

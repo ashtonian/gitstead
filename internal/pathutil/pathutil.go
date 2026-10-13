@@ -44,7 +44,7 @@ func SafeRemoveAll(path string) error {
 	// WalkDir doesn't follow symlinks, so nothing outside the tree changes.
 	_ = filepath.WalkDir(abs, func(p string, d fs.DirEntry, err error) error {
 		if err == nil && d.IsDir() {
-			os.Chmod(p, 0o700)
+			_ = os.Chmod(p, 0o700) // what still can't go, RemoveAll reports
 		}
 		return nil
 	})

@@ -102,12 +102,13 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 		untrack[key] = repo.LocalPath
 	}
 
+	tookClones := c.Delete || c.Archive
 	err = st.Update(cfg.LockTimeout, func(st *state.State) error {
 		st.Archives = append(st.Archives, archives...)
 		for key, path := range untrack {
 			// A repo moved meanwhile wasn't the one deleted, and one a
 			// workspace started using meanwhile is still needed.
-			if repo := st.Repos[key]; repo != nil && (!(c.Delete || c.Archive) || repo.LocalPath == path) && st.CheckRemovable(key) == nil {
+			if repo := st.Repos[key]; repo != nil && (!tookClones || repo.LocalPath == path) && st.CheckRemovable(key) == nil {
 				delete(st.Repos, key)
 			}
 		}
