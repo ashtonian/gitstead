@@ -248,12 +248,12 @@ func TestRemoveClone_BundleLeansOnItsBase(t *testing.T) {
 		copyPath := newCopy(t)
 		commitFile(t, copyPath, "agent.txt", "work\n")
 		tip := mustGit(t, copyPath, "rev-parse", "HEAD")
-		bundle, err := gitops.RemoveClone(ctx, copyPath, t.TempDir(), "copy", gitops.RemoveOptions{Base: base})
+		bundle, err := gitops.RemoveClone(ctx, copyPath, t.TempDir(), "copy", gitops.RemoveOptions{Base: base, Repo: "example.com/o/app"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if meta := readMeta(t, bundle); meta.Complete || meta.Base != base {
-			t.Fatalf("meta = %+v, want a bundle leaning on %s", meta, base)
+		if meta := readMeta(t, bundle); meta.Complete || meta.Base != base || meta.Repo != "example.com/o/app" {
+			t.Fatalf("meta = %+v, want a bundle leaning on example.com/o/app at %s", meta, base)
 		}
 		restored := filepath.Join(t.TempDir(), "restored")
 		if err := gitops.RestoreArchive(ctx, bundle, restored, ""); err != nil {
@@ -373,7 +373,7 @@ func TestRemoveWorktree_KeepsBranchAndArchivesWorkingTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bundle, err := gitops.RemoveWorktree(ctx, source, wt, t.TempDir(), "app-agent-1", false)
+	bundle, err := gitops.RemoveWorktree(ctx, source, wt, t.TempDir(), "app-agent-1", gitops.RemoveOptions{})
 	if err != nil {
 		t.Fatalf("RemoveWorktree: %v", err)
 	}

@@ -964,7 +964,10 @@ remotes:
 | A workspace copy that is a worktree | The working tree, index and detached commits; its branches stay in the repo | The repo |
 
 A tracked repo that workspace copies' archives lean on is bundled whole when it
-is deleted, unique work or not, so those archives stay restorable.
+is deleted, unique work or not, so those archives stay restorable. That counts
+every such archive in `backup.archive_dir`, recorded in the catalog or not (a
+run interrupted before recording one), and any archive whose description can't
+be read, since it might be one.
 
 Nothing is deleted while git is busy in the repo or one of its submodules --
 a lock such as `index.lock` or a ref's `.lock` exists, `gc` is running, or a

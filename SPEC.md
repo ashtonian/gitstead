@@ -326,7 +326,7 @@ Stop tracking repos.
 
 | Flag | Description |
 |---|---|
-| `--delete` | Also delete the clone from disk. Unique work -- including commits only a tag or other ref reaches -- is archived to `backup.archive_dir` first, in a bundle of the repo's whole history; a repo workspace copies' archives lean on is bundled whole even without unique work. A clone that can't be inspected or archived, or that git is busy in (a lock file, a running gc, a rebase or merge under way), is kept and stays tracked, and the command exits non-zero. |
+| `--delete` | Also delete the clone from disk. Unique work -- including commits only a tag or other ref reaches -- is archived to `backup.archive_dir` first, in a bundle of the repo's whole history; a repo workspace copies' archives lean on -- any in `backup.archive_dir`, on record or not, or one whose description can't be read -- is bundled whole even without unique work. A clone that can't be inspected or archived, or that git is busy in (a lock file, a running gc, a rebase or merge under way), is kept and stays tracked, and the command exits non-zero. |
 | `--archive` | Also move the clone, whole, to `backup.archive_dir/<id>/` and catalog it; `archives restore` puts it back. A clone with linked worktrees is kept and stays tracked, and the command exits non-zero. Exclusive with `--delete`. |
 | `--yes` | Skip confirmation prompt |
 

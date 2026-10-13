@@ -287,7 +287,6 @@ func (c *ArchivesRemoveCmd) Run(ctx *Context) error {
 		outcome(len(failed), len(doomed), "archives could not be deleted: %s", strings.Join(failed, ", ")))
 }
 
-// catalogEntry is the catalog's entry for archive id.
 // catalog is every archive: the catalog in state, then any archive in
 // backup.archive_dir it lacks -- one a run made and was interrupted before
 // recording, which would otherwise be on disk with nothing to find it by.
@@ -323,7 +322,7 @@ func catalog(cfg *config.Config, st *state.State) []state.ArchiveEntry {
 			path = meta.Bundle
 		}
 		entries = append(entries, state.ArchiveEntry{
-			ID: id, Path: path, Clone: meta.Clone != "", Source: meta.Source, Branch: meta.Branch,
+			ID: id, Path: path, Repo: meta.Repo, Clone: meta.Clone != "", Source: meta.Source, Branch: meta.Branch,
 			Work: meta.Work, Created: meta.Created, Uncatalogued: true,
 		})
 	}
@@ -335,6 +334,7 @@ func uncatalogued(cfg *config.Config, st *state.State) int {
 	return len(catalog(cfg, st)) - len(st.Archives)
 }
 
+// catalogEntry is the catalog's entry for archive id.
 func catalogEntry(cfg *config.Config, st *state.State, id string) (state.ArchiveEntry, error) {
 	all := catalog(cfg, st)
 	i := slices.IndexFunc(all, func(a state.ArchiveEntry) bool { return a.ID == id })
