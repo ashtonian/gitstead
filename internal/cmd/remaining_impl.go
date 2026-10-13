@@ -209,12 +209,21 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 			}
 		}
 		resolved := cfg.ResolveForRepo(c.ForRepo)
+		remoteSync := cfg.RemoteSyncFor(c.ForRepo, rule)
 		if ctx.JSON {
-			doc := map[string]any{
-				"repo": c.ForRepo, "discovered_by": rule, "path_template": resolved.PathTemplate,
-				"ssh_key": cfg.ResolveSSHKey(c.ForRepo, rule), "sync": resolved.Sync, "backup": resolved.Backup,
-				"remote_sync": cfg.RemoteSyncFor(c.ForRepo, rule), "clone": cfg.CloneFor(c.ForRepo, rule),
-				"hooks": cfg.HooksFor(c.ForRepo, rule), "mirror": cfg.MirrorFor(c.ForRepo, rule),
+			doc := map[string]any{"repo": c.ForRepo, "discovered_by": rule, "path_template": resolved.PathTemplate,
+				"ssh_key": cfg.ResolveSSHKey(c.ForRepo, rule)}
+			// Each section as the config file spells it: its keys, and
+			// durations such as "5m0s".
+			for key, section := range map[string]any{
+				"sync": resolved.Sync, "backup": resolved.Backup, "remote_sync": remoteSync,
+				"clone": cfg.CloneFor(c.ForRepo, rule), "hooks": cfg.HooksFor(c.ForRepo, rule), "mirror": cfg.MirrorFor(c.ForRepo, rule),
+			} {
+				v, err := asConfigValue(section)
+				if err != nil {
+					return err
+				}
+				doc[key] = v
 			}
 			if a := cfg.AccountFor(c.ForRepo, rule); a != nil {
 				doc["account"] = a.Name
@@ -239,7 +248,7 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 		fmt.Printf("  sync.min_fetch_interval: %s\n", resolved.Sync.MinFetchInterval)
 		fmt.Printf("  backup.enabled: %v\n", resolved.Backup.Enabled)
 		fmt.Printf("  backup.strategy: %s\n", resolved.Backup.Strategy)
-		fmt.Printf("  remote_sync.enabled: %v\n", resolved.RemoteSync.Enabled)
+		fmt.Printf("  remote_sync.enabled: %v\n", remoteSync.Enabled)
 		return nil
 	}
 
@@ -377,3 +386,15 @@ const initExamples = `
 #     repos: ["github.com/your-username/app"]
 #     agents: 4
 `
+
+// asConfigValue is v as config spells it, for JSON: marshalled by its YAML
+// keys, so a duration reads "5m0s" and a field its config key.
+func asConfigValue(v any) (any, error) {
+	data, err := yaml.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var out any
+	err = yaml.Unmarshal(data, &out)
+	return out, err
+}

@@ -26,8 +26,8 @@ type HooksOverride struct {
 
 // RepoHooks are the hooks a repo resolves to.
 type RepoHooks struct {
-	PostClone  []string
-	PostCreate []string
+	PostClone  []string `yaml:"post_clone"`
+	PostCreate []string `yaml:"post_create"`
 }
 
 func (o *HooksOverride) apply(h *RepoHooks) {
