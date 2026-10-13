@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/ashtonian/git-mgr/internal/pathutil"
 	"github.com/ashtonian/git-mgr/internal/repourl"
 )
 
@@ -115,13 +116,17 @@ func staged(destPath string, make func(staging string) error) error {
 	if err := make(staging); err != nil {
 		return err
 	}
-	// os.Remove takes only an empty directory, and rename(2) won't replace a
-	// non-empty one, so anything that appeared at destPath meanwhile -- say,
+	// rmdir(2) removes only an empty directory, and the rename replaces
+	// nothing, so whatever appeared at destPath meanwhile -- a file, a link,
 	// another run's clone -- is kept.
-	if err := os.Remove(destPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("%s appeared while cloning; leaving it as it is", destPath)
+	appeared := fmt.Errorf("%s appeared while cloning; leaving it as it is", destPath)
+	if err := syscall.Rmdir(destPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return appeared
 	}
-	if err := os.Rename(staging, destPath); err != nil {
+	if err := pathutil.RenameNoReplace(staging, destPath); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return appeared
+		}
 		return fmt.Errorf("moving the clone into %s: %w", destPath, err)
 	}
 	return nil
