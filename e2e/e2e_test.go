@@ -29,6 +29,46 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/forgejo"
 )
 
+// --- isolation ---
+
+// binHome is the home directory git-mgr runs with in these tests, so its
+// caches and lock files never land in the real one. The test process keeps
+// its own HOME, where the Docker client finds its context.
+var binHome string
+
+// TestMain keeps git -- the tests' and git-mgr's -- from the developer's git
+// config and from any repository the temporary directory sits inside.
+func TestMain(m *testing.M) {
+	home, err := os.MkdirTemp("", "git-mgr-e2e-home-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	binHome = home
+	ceilings := []string{os.TempDir()}
+	if real, err := filepath.EvalSymlinks(os.TempDir()); err == nil && real != os.TempDir() {
+		ceilings = append(ceilings, real)
+	}
+	os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	os.Setenv("GIT_CEILING_DIRECTORIES", strings.Join(ceilings, string(os.PathListSeparator)))
+	code := m.Run()
+	os.RemoveAll(home)
+	os.Exit(code)
+}
+
+// binEnv is the environment git-mgr runs with: this process's, with
+// binHome as its home, then extra.
+func binEnv(extra ...string) []string {
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		name, _, _ := strings.Cut(kv, "=")
+		return name == "HOME" || strings.HasPrefix(name, "XDG_")
+	})
+	env = append(env, "HOME="+binHome, "XDG_CACHE_HOME="+filepath.Join(binHome, ".cache"),
+		"XDG_CONFIG_HOME="+filepath.Join(binHome, ".config"), "XDG_DATA_HOME="+filepath.Join(binHome, ".local", "share"))
+	return append(env, extra...)
+}
+
 // --- git-mgr binary (built once for the whole suite) ---
 
 var (
@@ -105,10 +145,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 func (e *testEnv) run(t *testing.T, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(e.bin, args...)
-	cmd.Env = append(os.Environ(),
-		"GIT_MGR_CONFIG="+e.configFile,
-		"GIT_MGR_STATE="+e.stateFile,
-	)
+	cmd.Env = binEnv("GIT_MGR_CONFIG="+e.configFile, "GIT_MGR_STATE="+e.stateFile)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -131,7 +168,7 @@ func (e *testEnv) run(t *testing.T, args ...string) (string, int) {
 func (e *testEnv) runJSON(t *testing.T, v any, args ...string) (stderr string, code int) {
 	t.Helper()
 	cmd := exec.Command(e.bin, append([]string{"--json"}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_MGR_CONFIG="+e.configFile, "GIT_MGR_STATE="+e.stateFile)
+	cmd.Env = binEnv("GIT_MGR_CONFIG="+e.configFile, "GIT_MGR_STATE="+e.stateFile)
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	if err := cmd.Run(); err != nil {
@@ -1575,7 +1612,7 @@ exit $rc
 func (e *testEnv) start(t *testing.T, path string, args ...string) func() (string, int) {
 	t.Helper()
 	cmd := exec.Command(e.bin, args...)
-	cmd.Env = append(os.Environ(), "GIT_MGR_CONFIG="+e.configFile, "GIT_MGR_STATE="+e.stateFile, "PATH="+path)
+	cmd.Env = binEnv("GIT_MGR_CONFIG="+e.configFile, "GIT_MGR_STATE="+e.stateFile, "PATH="+path)
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	if err := cmd.Start(); err != nil {
