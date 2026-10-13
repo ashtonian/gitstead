@@ -12,7 +12,7 @@
 2. **Clone** repos into a templated directory structure (e.g., `github.com/owner/repo`)
 3. **Sync** (fetch-only) all tracked repos periodically -- safe to run every 15 minutes via cron. Optionally auto-discovers new repos before fetching.
 4. **Backup** uncommitted changes transparently without interfering with any git operations in progress
-5. **Track** all managed repos in a local state file. The state file is optional -- `git-mgr` can operate statelessly (discover + clone each run) or use a state file for incremental sync. The state file is also portable: copy it to a new machine and run `git-mgr sync` to re-clone everything. When remote_sync is enabled, the state file is included so it can bootstrap a fresh machine from the remote.
+5. **Track** all managed repos in a local state file: what git-mgr applied to each (path, URL, managed git config, provider ID), what the last run found, workspaces and the archive catalog. It is this machine's; another machine gets the same repos from the shared config and the manifest of repos added by hand (`manifest:`), not by copying state.
 6. **Adopt** existing locally-cloned repos into management without re-cloning
 7. **Cleanup** stale repos (deleted upstream, removed from org) with configurable policy
 8. **Notify** on errors/completion via native OS notifications (macOS/Linux) or log file
@@ -472,7 +472,7 @@ entries.
 
 ## Configuration
 
-**File**: `~/.config/git-mgr/config.yaml` (XDG-compliant, overridable with `--config` or `GIT_MGR_CONFIG` env var)
+**File**: `$XDG_CONFIG_HOME/git-mgr/config.yaml`, else `~/.config/git-mgr/config.yaml` (overridable with `--config` or `GIT_MGR_CONFIG`). State, the operation log, backups, archives and mirrors default to `$XDG_DATA_HOME/git-mgr`, else `~/.local/share/git-mgr`; workspace caches to `$XDG_CACHE_HOME/git-mgr`, else `~/.cache/git-mgr`.
 
 **Loading precedence** (koanf, highest wins): CLI flags -> env vars (`GIT_MGR_*`) -> config file -> defaults.
 

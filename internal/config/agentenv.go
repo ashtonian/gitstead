@@ -128,8 +128,5 @@ func (c *Config) WorkspaceCacheDir(name string) string {
 // defaultCacheRoot is where workspaces' shared caches go unless
 // workspace_defaults.cache_root says otherwise.
 func defaultCacheRoot() string {
-	if xdg := os.Getenv("XDG_CACHE_HOME"); filepath.IsAbs(xdg) {
-		return filepath.Join(xdg, "git-mgr", "workspaces")
-	}
-	return ExpandHome("~/.cache/git-mgr/workspaces")
+	return filepath.Join(CacheDir(), "workspaces")
 }

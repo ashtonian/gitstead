@@ -104,7 +104,7 @@ func (c *WSRunCmd) run(ctx *Context) error {
 
 	// Not ctx.GoCtx(): a Ctrl-C is the agent's, and mustn't end the watch.
 	watchCtx, stopWatch := context.WithCancel(context.Background())
-	go watchPane(watchCtx, cfg, ctx.State, c.Name, c.Agent, agents.Holder{Launcher: launcher, Session: session, Socket: socket})
+	go watchPane(watchCtx, cfg, ctx.StatePath(), c.Name, c.Agent, agents.Holder{Launcher: launcher, Session: session, Socket: socket})
 	code, runErr := agents.Run(agents.RunOptions{Dir: r.Path, Command: command, Env: env})
 	stopWatch()
 	err = c.record(cfg, st, func(rs *state.ReplicaState) {

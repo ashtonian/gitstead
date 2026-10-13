@@ -85,12 +85,29 @@ func TestLoad_MalformedFileIsAnError(t *testing.T) {
 	}
 }
 
-func TestIsDefaultPath(t *testing.T) {
-	if !config.IsDefaultPath(config.DefaultPath) || !config.IsDefaultPath(config.ExpandHome(config.DefaultPath)) {
-		t.Fatal("the default path, with or without ~, must be recognised")
+// The default locations follow the XDG base directories when they are set
+// to absolute paths, and fall back to ~/.config, ~/.local/share and ~/.cache.
+func TestDefaultDirs(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	t.Setenv("XDG_CONFIG_HOME", "/xdg/config")
+	t.Setenv("XDG_DATA_HOME", "/xdg/data")
+	t.Setenv("XDG_CACHE_HOME", "relative/is/ignored")
+	if got := config.DefaultConfigPath(); got != "/xdg/config/git-mgr/config.yaml" {
+		t.Errorf("DefaultConfigPath = %s", got)
 	}
-	if config.IsDefaultPath("/etc/git-mgr.yaml") {
-		t.Fatal("another path is not the default")
+	if got := config.DefaultStatePath(); got != "/xdg/data/git-mgr/state.yaml" {
+		t.Errorf("DefaultStatePath = %s", got)
+	}
+	if got := config.CacheDir(); got != filepath.Join(home, ".cache", "git-mgr") {
+		t.Errorf("CacheDir = %s", got)
+	}
+	cfg := config.Defaults()
+	if cfg.Backup.ArchiveDir != "/xdg/data/git-mgr/archive" || cfg.Mirror.Dir != "/xdg/data/git-mgr/mirrors" {
+		t.Errorf("data defaults: archive %s, mirrors %s", cfg.Backup.ArchiveDir, cfg.Mirror.Dir)
+	}
+	t.Setenv("XDG_CONFIG_HOME", "")
+	if got := config.DefaultConfigPath(); got != filepath.Join(home, ".config", "git-mgr", "config.yaml") {
+		t.Errorf("DefaultConfigPath without XDG = %s", got)
 	}
 }
 

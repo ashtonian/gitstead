@@ -32,7 +32,7 @@ type InstallAgentCmd struct {
 	Bin       string        `help:"git-mgr binary the schedule runs (default: the git-mgr on PATH)." default:"" type:"path"`
 	Daemon    bool          `help:"macOS: install a LaunchDaemon that runs as you, so sync runs when nobody is logged in (uses sudo)."`
 	Linger    bool          `help:"Linux: enable lingering, so the timer runs while you are logged out (loginctl enable-linger)."`
-	Log       string        `help:"Log file for sync output (launchd, cron; systemd logs to the journal)." default:"~/.local/share/git-mgr/git-mgr.log" type:"path"`
+	Log       string        `help:"Log file for sync output (launchd, cron; systemd logs to the journal); default $XDG_DATA_HOME/git-mgr/git-mgr.log (~/.local/share/git-mgr/git-mgr.log)." type:"path"`
 	List      bool          `help:"List installed schedules."`
 	Uninstall bool          `help:"Remove the named schedule instead of installing it."`
 	Print     bool          `help:"Print the planned actions and unit files without applying them."`
@@ -170,7 +170,7 @@ func (c *InstallAgentCmd) schedule(ctx *Context) (scheduler.Schedule, []string, 
 	}
 	s := scheduler.Schedule{
 		Name: c.Name, Kind: kind, Interval: c.Interval, Bin: bin,
-		Global: global, Sync: sync, Env: env, LogPath: config.ExpandHome(c.Log), Daemon: c.Daemon,
+		Global: global, Sync: sync, Env: env, LogPath: c.logPath(), Daemon: c.Daemon,
 	}
 	if c.Daemon {
 		u, err := user.Current()
@@ -263,7 +263,7 @@ func newHost(ctx *Context) (scheduler.Host, error) {
 		Home:      home,
 		UID:       os.Getuid(),
 		Run:       runScheduler,
-		BackupDir: filepath.Join(filepath.Dir(config.ExpandHome(ctx.State)), "backups"),
+		BackupDir: filepath.Join(filepath.Dir(ctx.StatePath()), "backups"),
 	}, nil
 }
 
@@ -324,4 +324,13 @@ func printNotes(notes []string) {
 	for _, n := range notes {
 		fmt.Printf("Note: %s\n", n)
 	}
+}
+
+// logPath is where the schedule's output goes: --log, else git-mgr.log in
+// the data directory.
+func (c *InstallAgentCmd) logPath() string {
+	if c.Log == "" {
+		return filepath.Join(config.DataDir(), "git-mgr.log")
+	}
+	return config.ExpandHome(c.Log)
 }

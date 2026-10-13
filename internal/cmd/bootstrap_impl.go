@@ -72,7 +72,7 @@ func (c *BootstrapCmd) Run(ctx *Context) error {
 	if !c.NoAgent {
 		// A profile gets a schedule of its own that syncs just its repos, so
 		// bootstrapping a second profile doesn't replace the first.
-		agent := &InstallAgentCmd{Name: c.Profile, Tag: c.Profile, Interval: c.Interval, Log: "~/.local/share/git-mgr/git-mgr.log"}
+		agent := &InstallAgentCmd{Name: c.Profile, Tag: c.Profile, Interval: c.Interval}
 		if err := step("install-agent", agent.Run); err != nil {
 			fmt.Fprintf(os.Stderr, "install-agent failed (run it later): %v\n", err)
 			unfinished = &exitError{exitPartial, fmt.Errorf("bootstrapped, but installing the background sync failed: %w; run git-mgr install-agent%s", err, c.scheduleFlags())}

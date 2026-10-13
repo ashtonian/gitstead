@@ -270,6 +270,13 @@ expand their subcommands during completion.
 Config lives at `~/.config/git-mgr/config.yaml`. See
 [`config.example.yaml`](config.example.yaml) for a fully annotated reference.
 
+git-mgr follows the XDG base directories: its config in
+`$XDG_CONFIG_HOME/git-mgr`, its state, operation log, backups, archives,
+mirrors and scheduled-sync log in `$XDG_DATA_HOME/git-mgr`, and workspaces'
+shared caches in `$XDG_CACHE_HOME/git-mgr`, each when the variable is set to
+an absolute path, else in `~/.config/git-mgr`, `~/.local/share/git-mgr` and
+`~/.cache/git-mgr` -- the defaults shown throughout this README.
+
 If that default file doesn't exist, git-mgr runs on defaults and `GIT_MGR_*`
 environment variables. Only what's switched on runs: discovery needs providers
 and rules, workspaces exist once declared, background sync once the agent is
@@ -1565,7 +1572,8 @@ All config fields can be overridden via `GIT_MGR_*` env vars (e.g.
 | Variable | Effect |
 |---|---|
 | `GIT_MGR_CONFIG` | Config file path (same as `--config`), which must exist; unset, `~/.config/git-mgr/config.yaml` is read if it exists. |
-| `GIT_MGR_STATE` | State file path (same as `--state`). |
+| `GIT_MGR_STATE` | State file path (same as `--state`); unset, `$XDG_DATA_HOME/git-mgr/state.yaml` (`~/.local/share/git-mgr/state.yaml`). |
+| `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` | Where the default config, data and cache directories are (see [Configuration](#configuration)). |
 | `GIT_MGR_BASE_DIR` | Override `base_dir`. |
 | `GITHUB_TOKEN` / `GITLAB_TOKEN` / `GITEA_TOKEN` / `FORGEJO_TOKEN` | Default provider tokens. |
 

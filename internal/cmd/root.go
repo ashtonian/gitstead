@@ -19,8 +19,8 @@ import (
 // CLI defines the top-level command structure.
 type CLI struct {
 	// Global flags
-	Config  string `help:"Config file path ($GIT_MGR_CONFIG); without it, ~/.config/git-mgr/config.yaml if it exists, else the defaults." env:"GIT_MGR_CONFIG" type:"path"`
-	State   string `help:"State file path." default:"~/.local/share/git-mgr/state.yaml" env:"GIT_MGR_STATE" type:"path"`
+	Config  string `help:"Config file path ($GIT_MGR_CONFIG); without it, $XDG_CONFIG_HOME/git-mgr/config.yaml (~/.config/git-mgr/config.yaml) if it exists, else the defaults." env:"GIT_MGR_CONFIG" type:"path"`
+	State   string `help:"State file path ($GIT_MGR_STATE); without it, $XDG_DATA_HOME/git-mgr/state.yaml (~/.local/share/git-mgr/state.yaml)." env:"GIT_MGR_STATE" type:"path"`
 	Verbose bool   `help:"Verbose output." short:"v"`
 	Quiet   bool   `help:"Suppress non-error output." short:"q"`
 	Jobs    int    `help:"Max concurrent git operations (default 8)." short:"j" name:"concurrency"`
@@ -104,9 +104,17 @@ func (c *Context) GoCtx() context.Context {
 // ConfigPath is the config file's path: the one given, else the default.
 func (c *Context) ConfigPath() string {
 	if c.Config == "" {
-		return config.ExpandHome(config.DefaultPath)
+		return config.DefaultConfigPath()
 	}
 	return config.ExpandHome(c.Config)
+}
+
+// StatePath is the state file's path: the one given, else the default.
+func (c *Context) StatePath() string {
+	if c.State == "" {
+		return config.DefaultStatePath()
+	}
+	return config.ExpandHome(c.State)
 }
 
 // LoadConfig loads and validates the config file. Only the default file may
@@ -179,7 +187,7 @@ func (c *Context) LoadState() (*state.State, error) {
 	if c.st != nil {
 		return c.st, nil
 	}
-	st, err := state.Load(c.State)
+	st, err := state.Load(c.StatePath())
 	if err != nil {
 		return nil, err
 	}
