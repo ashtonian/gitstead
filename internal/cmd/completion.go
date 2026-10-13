@@ -30,7 +30,7 @@ func CompletionPredictors() []kongplete.Option {
 func completionState() *state.State {
 	path := os.Getenv("GIT_MGR_STATE")
 	if path == "" {
-		path = config.ExpandHome("~/.local/share/git-mgr/state.yaml")
+		path = config.DefaultStatePath()
 	}
 	st, err := state.Load(path)
 	if err != nil {
@@ -41,12 +41,9 @@ func completionState() *state.State {
 
 func completionConfig() *config.Config {
 	path := os.Getenv("GIT_MGR_CONFIG")
-	if path == "" {
-		path = config.DefaultPath
-	}
 	var opts []config.Option
-	if config.IsDefaultPath(path) {
-		opts = append(opts, config.WithOptionalFile())
+	if path == "" {
+		path, opts = config.DefaultConfigPath(), append(opts, config.WithOptionalFile())
 	}
 	cfg, err := config.Load(path, opts...)
 	if err != nil {

@@ -45,7 +45,7 @@ func (c *TopCmd) Run(ctx *Context) error {
 	collect := func(goCtx context.Context) (view.Snapshot, error) {
 		// Read afresh each time, without the lock: runs start and stop, and
 		// syncs record, while the view is open.
-		st, err := state.Load(ctx.State)
+		st, err := state.Load(ctx.StatePath())
 		if err != nil {
 			return view.Snapshot{}, err
 		}

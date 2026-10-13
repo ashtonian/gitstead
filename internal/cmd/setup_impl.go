@@ -180,7 +180,7 @@ func afterSetup(ctx *Context, cfg *config.Config, a setup.Answers) (json.RawMess
 	}
 	if a.Schedule {
 		fmt.Println("\nInstalling the background sync agent:")
-		agent := &InstallAgentCmd{Interval: 15 * time.Minute, Log: "~/.local/share/git-mgr/git-mgr.log", Linger: a.Linger}
+		agent := &InstallAgentCmd{Interval: 15 * time.Minute, Linger: a.Linger}
 		doc, err := ctx.captured(agent.Run)
 		if err != nil {
 			return doc, fmt.Errorf("installing the background agent: %w", err)

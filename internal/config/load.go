@@ -12,16 +12,8 @@ import (
 	pkgconfig "github.com/ashtonian/pkg/config"
 )
 
-// DefaultPath is where git-mgr looks for its config when none is given.
-const DefaultPath = "~/.config/git-mgr/config.yaml"
-
 // ErrNotFound reports that a config file the caller required does not exist.
 var ErrNotFound = errors.New("config file not found")
-
-// IsDefaultPath reports whether path names the default config location.
-func IsDefaultPath(path string) bool {
-	return filepath.Clean(ExpandHome(path)) == filepath.Clean(ExpandHome(DefaultPath))
-}
 
 // --- Options pattern ---
 
@@ -173,7 +165,7 @@ func expandPaths(cfg *Config) {
 	cfg.BaseDir = ExpandHome(cfg.BaseDir)
 	cfg.Manifest = ExpandHome(cfg.Manifest)
 	if cfg.Mirror.Dir == "" {
-		cfg.Mirror.Dir = ExpandHome("~/.local/share/git-mgr/mirrors")
+		cfg.Mirror.Dir = filepath.Join(DataDir(), "mirrors")
 	} else {
 		cfg.Mirror.Dir = filepath.Clean(ExpandHome(cfg.Mirror.Dir))
 	}
@@ -188,12 +180,12 @@ func expandPaths(cfg *Config) {
 		cfg.Workspaces[i].Path = ExpandHome(cfg.Workspaces[i].Path)
 	}
 	if cfg.Backup.PatchDir == "" {
-		cfg.Backup.PatchDir = ExpandHome("~/.local/share/git-mgr/patches")
+		cfg.Backup.PatchDir = filepath.Join(DataDir(), "patches")
 	} else {
 		cfg.Backup.PatchDir = ExpandHome(cfg.Backup.PatchDir)
 	}
 	if cfg.Backup.ArchiveDir == "" {
-		cfg.Backup.ArchiveDir = ExpandHome("~/.local/share/git-mgr/archive")
+		cfg.Backup.ArchiveDir = filepath.Join(DataDir(), "archive")
 	} else {
 		cfg.Backup.ArchiveDir = ExpandHome(cfg.Backup.ArchiveDir)
 	}

@@ -21,7 +21,7 @@ import (
 // eventsPath is the operation-log file, kept next to the state file so it
 // follows GIT_MGR_STATE / --state.
 func eventsPath(ctx *Context) string {
-	return filepath.Join(filepath.Dir(config.ExpandHome(ctx.State)), "events.jsonl")
+	return filepath.Join(filepath.Dir(ctx.StatePath()), "events.jsonl")
 }
 
 // logEvent appends a best-effort entry to the operation log (never fails the
