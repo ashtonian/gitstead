@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
@@ -42,7 +43,7 @@ func ExitCode(err error) int {
 	if errors.As(err, &coded) {
 		return coded.ExitCode()
 	}
-	if errors.Is(err, state.ErrLocked) {
+	if errors.Is(err, state.ErrLocked) || errors.Is(err, gitops.ErrRepoInUse) {
 		return exitBusy
 	}
 	return exitFailed

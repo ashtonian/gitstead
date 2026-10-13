@@ -119,6 +119,9 @@ func (r *runner) run(ctx context.Context, s *slot, a Action) (string, error) {
 		return "", err
 	}
 	out, err := a.Run(ctx, r.env)
+	if out.Release != nil {
+		defer out.Release()
+	}
 	if out.Record != nil {
 		s.give()
 		if rerr := r.commit.Update(out.Record); rerr != nil {

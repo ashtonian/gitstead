@@ -1111,8 +1111,19 @@ workspace actions. `apply` applies everything.
 ```
 State lock:    <state_file>.lock       (e.g. ~/.local/share/git-mgr/state.yaml.lock)
 Sync run lock: <state_file>.sync.lock
-Mechanism:     flock(fd, LOCK_EX | LOCK_NB), retried every 100ms
+Repo lock:     <repo's git common dir>/git-mgr.lock, shared or exclusive
+Mechanism:     flock(fd, LOCK_EX | LOCK_NB), retried every 100ms (repo lock: 50ms)
 ```
+
+The repo lock keeps a tracked repo from being deleted, archived or moved while
+a workspace copy is made from it. Making a copy holds it shared until the copy
+is recorded in state; `remove --delete`/`--archive`, stale cleanup and `apply`'s
+moves hold it exclusive, and after taking it re-read state: a repo a copy was
+made from meanwhile, or that moved, is kept. A command waits up to
+`lock_timeout` for it, then exits 75. It is a file in the repo's git dir, so it
+moves with the repo and is deleted with it; a command that waited on a repo
+deleted meanwhile fails rather than copy it. The repo lock is always taken
+before the state lock, never while holding it.
 
 The state lock guards one write. Every command that changes state does its slow
 work -- clones, fetches, backups, archives, prompts -- without it, then records

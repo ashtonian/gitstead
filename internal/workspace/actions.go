@@ -99,6 +99,16 @@ func createCopy(spec *Spec, r Replica, c Copy, replaces string) reconcile.RunFun
 			return reconcile.Outcome{}, err
 		}
 		c.Source = currentSource(env.State, c)
+		// Held until the copy is recorded: the repo is neither deleted nor
+		// moved while a copy of it is made, and whatever does either then
+		// finds the copy in state.
+		release := func() {}
+		if gitops.HasGitDir(c.Source) {
+			var err error
+			if release, err = gitops.LockRepo(ctx, c.Source, false, env.LockWait); err != nil {
+				return reconcile.Outcome{}, err
+			}
+		}
 		cctx, cancel := ctxutil.WithTimeout(ctx, env.CloneTimeout)
 		err := CreateCopy(cctx, spec.Isolation, spec.BaseRef, c)
 		err = ctxutil.TimedOut(cctx, err, "making the copy", env.CloneTimeout, "sync.clone_timeout")
@@ -110,10 +120,10 @@ func createCopy(spec *Spec, r Replica, c Copy, replaces string) reconcile.RunFun
 			partly, err = err, nil
 		}
 		if err != nil {
-			return reconcile.Outcome{}, err
+			return reconcile.Outcome{Release: release}, err
 		}
 		cs, err := copyState(ctx, spec.Isolation, c)
-		out := reconcile.Outcome{Record: recordCopyState(spec.Name, r, cs, replaces)}
+		out := reconcile.Outcome{Record: recordCopyState(spec.Name, r, cs, replaces), Release: release}
 		if err != nil || len(c.PostCreate) == 0 {
 			return out, errors.Join(partly, err)
 		}

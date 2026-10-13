@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/ctxutil"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/hook"
+	"github.com/ashtonian/git-mgr/internal/pathutil"
 	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
@@ -493,23 +495,30 @@ func RecordConfig(managed *map[string]string, name, value string, unset bool) {
 // moveRepo renames the repo's directory to its desired path, then reconnects
 // the copies made from it: its linked worktrees, and the clones fetching from
 // or borrowing objects from it. It refuses a move across filesystems, which
-// would be a copy. The rename is made as the move is recorded, under the
-// state lock, so no other run sees the repo missing from the path state
-// records; so is the tidying of the parent directories it emptied, so no
-// other move or clone of this run has a directory removed from under it.
+// would be a copy. It holds the repo's lock throughout, so no copy is begun
+// from the old path meanwhile and every copy made is in state. The rename is
+// made as the move is recorded, under the state lock, so no other run sees
+// the repo missing from the path state records; so is the tidying of the
+// parent directories it emptied, so no other move or clone of this run has a
+// directory removed from under it.
 func moveRepo(key, from, to string) RunFunc {
-	return func(_ context.Context, env *Env) (Outcome, error) {
+	return func(ctx context.Context, env *Env) (Outcome, error) {
+		release, err := gitops.LockRepo(ctx, from, true, env.LockWait)
+		if err != nil {
+			return Outcome{}, err
+		}
 		var copies []string
 		return Outcome{
+			Release: release,
 			Record: func(st *state.State) error {
-				if _, err := os.Lstat(to); err == nil {
-					return fmt.Errorf("cannot move to %s: it already exists", to)
-				}
 				if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
 					return err
 				}
-				if err := os.Rename(from, to); err != nil {
-					if errors.Is(err, syscall.EXDEV) {
+				if err := pathutil.RenameNoReplace(from, to); err != nil {
+					switch {
+					case errors.Is(err, fs.ErrExist):
+						return fmt.Errorf("cannot move to %s: it already exists", to)
+					case errors.Is(err, syscall.EXDEV):
 						return fmt.Errorf("%s and %s are on different filesystems; move it yourself and run git-mgr apply to record it", from, to)
 					}
 					return err

@@ -123,6 +123,7 @@ func reconcileEnv(cfg *config.Config, st *state.State) *reconcile.Env {
 		StateDir:     st.Dir(),
 		KeepDirs:     keep,
 		CloneTimeout: cfg.Sync.CloneTimeout,
+		LockWait:     cfg.LockTimeout,
 		Hooks:        hookRunner(cfg, st, nil),
 	}
 }

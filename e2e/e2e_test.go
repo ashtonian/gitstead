@@ -1536,3 +1536,166 @@ func TestE2E_RemoteSync(t *testing.T) {
 		t.Errorf("remote-sync --list exit %d:\n%s", code, out)
 	}
 }
+
+// gatedGit puts a git in front of the real one, on a PATH it returns: once
+// one of its arguments is gateOn, it runs the real command, then holds until
+// gate/go exists, having made gate/reached; every command is logged to
+// gate/log. gateOn "" only logs.
+func gatedGit(t *testing.T, gateOn string) (path, gate string) {
+	t.Helper()
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate = t.TempDir()
+	bin := filepath.Join(gate, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$*" >> %[2]q/log
+%[1]q "$@"
+rc=$?
+if [ -n %[3]q ]; then
+  for a in "$@"; do
+    if [ "$a" = %[3]q ] && mkdir %[2]q/reached 2>/dev/null; then
+      while [ ! -e %[2]q/go ]; do sleep 0.05; done
+      break
+    fi
+  done
+fi
+exit $rc
+`, real, gate, gateOn)
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin + string(os.PathListSeparator) + os.Getenv("PATH"), gate
+}
+
+// start runs git-mgr in the background with PATH set to path.
+func (e *testEnv) start(t *testing.T, path string, args ...string) func() (string, int) {
+	t.Helper()
+	cmd := exec.Command(e.bin, args...)
+	cmd.Env = append(os.Environ(), "GIT_MGR_CONFIG="+e.configFile, "GIT_MGR_STATE="+e.stateFile, "PATH="+path)
+	var buf bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &buf, &buf
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	return func() (string, int) {
+		err := cmd.Wait()
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return buf.String(), ee.ExitCode()
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return buf.String(), 0
+	}
+}
+
+// waitFor polls until exists(path) or the deadline, reporting which.
+func waitFor(path string, within time.Duration) bool {
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
+}
+
+// TestE2E_RemoveAndCopyDontRace: a repo is never deleted out from under a
+// workspace copy being made from it, whichever command starts first. The
+// copy borrows the repo's objects (reference-clone), so losing the repo
+// would leave it unreadable.
+func TestE2E_RemoveAndCopyDontRace(t *testing.T) {
+	setup := func(t *testing.T) (env *testEnv, src, root string) {
+		env = newLocalEnv(t)
+		tmp := t.TempDir()
+		remote := filepath.Join(tmp, "remotes", "app.git")
+		gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+		src = filepath.Join(env.baseDir, "app")
+		gitCmd(t, tmp, "clone", "-q", remote, src)
+		gitCmd(t, src, "-c", "user.email=e@e", "-c", "user.name=e", "commit", "-q", "--allow-empty", "-m", "init")
+		gitCmd(t, src, "push", "-q", "origin", "HEAD:main")
+		root = filepath.Join(tmp, "workspaces")
+		cfg := fmt.Sprintf("base_dir: %s\nlock_timeout: 60s\nbackup:\n  archive_dir: %s\nworkspace_defaults:\n  root: %s\n", env.baseDir, filepath.Join(tmp, "archive"), root)
+		if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if out, code := env.run(t, "adopt", src); code != 0 {
+			t.Fatalf("adopt exit %d:\n%s", code, out)
+		}
+		return env, src, root
+	}
+	const key = "local/remotes/app"
+	create := []string{"ws", "create", "app", "--repo", key, "--agents", "1", "--isolation", "reference-clone"}
+
+	t.Run("copy first", func(t *testing.T) {
+		env, src, root := setup(t)
+		createPath, createGate := gatedGit(t, "clone")
+		creating := env.start(t, createPath, create...)
+		if !waitFor(filepath.Join(createGate, "reached"), 30*time.Second) {
+			t.Fatal("ws create never reached its clone")
+		}
+		// Remove must wait for the copy to be recorded; meanwhile it runs no
+		// git in the repo.
+		removePath, removeGate := gatedGit(t, "")
+		removing := env.start(t, removePath, "remove", key, "--delete", "--yes")
+		if waitFor(filepath.Join(removeGate, "log"), 2*time.Second) {
+			log, _ := os.ReadFile(filepath.Join(removeGate, "log"))
+			t.Errorf("remove ran git while the copy was being made:\n%s", log)
+		}
+		if err := os.WriteFile(filepath.Join(createGate, "go"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out, code := creating(); code != 0 {
+			t.Fatalf("ws create exit %d:\n%s", code, out)
+		}
+		out, code := removing()
+		if code == 0 || !strings.Contains(out, "workspace copies") {
+			t.Errorf("remove exit %d, want it to keep a repo a copy was made from:\n%s", code, out)
+		}
+		if !gitOK(filepath.Join(src, ".git")) {
+			t.Error("the repo was deleted")
+		}
+		if out, err := exec.Command("git", "-C", filepath.Join(root, "app", "agent-1"), "fsck", "--full").CombinedOutput(); err != nil {
+			t.Errorf("the copy is broken: %v\n%s", err, out)
+		}
+	})
+
+	t.Run("remove first", func(t *testing.T) {
+		env, src, root := setup(t)
+		removePath, removeGate := gatedGit(t, "status")
+		removing := env.start(t, removePath, "remove", key, "--delete", "--yes")
+		if !waitFor(filepath.Join(removeGate, "reached"), 30*time.Second) {
+			t.Fatal("remove never inspected the repo")
+		}
+		creating := env.start(t, os.Getenv("PATH"), create...)
+		if err := os.WriteFile(filepath.Join(removeGate, "go"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out, code := removing(); code != 0 {
+			t.Fatalf("remove exit %d:\n%s", code, out)
+		}
+		out, code := creating()
+		if code == 0 {
+			t.Errorf("ws create made a copy of a repo being deleted:\n%s", out)
+		}
+		if gitOK(filepath.Join(src, ".git")) {
+			t.Error("the repo should be deleted")
+		}
+		if copyPath := filepath.Join(root, "app", "agent-1"); gitOK(filepath.Join(copyPath, ".git")) {
+			out, err := exec.Command("git", "-C", copyPath, "fsck", "--full").CombinedOutput()
+			t.Errorf("a copy of the deleted repo was left (fsck: %v):\n%s", err, out)
+		}
+	})
+}
+
+func gitOK(gitDir string) bool {
+	_, err := os.Stat(gitDir)
+	return err == nil
+}

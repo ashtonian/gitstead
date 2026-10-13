@@ -80,6 +80,9 @@ type Outcome struct {
 	// After, if set, runs once the record is saved; its info is added to the
 	// action's.
 	After func(ctx context.Context) (string, error)
+	// Release, if set, runs last, whatever happened: it lets go of what Run
+	// took for the action's whole course, such as a repo's lock.
+	Release func()
 }
 
 // Drift is a value git-mgr set that was changed by hand.
@@ -184,6 +187,9 @@ type Env struct {
 	Concurrency int
 	// CloneTimeout bounds each clone; 0 means none.
 	CloneTimeout time.Duration
+	// LockWait is how long an action waits for a repo another git-mgr
+	// command is using (see gitops.LockRepo).
+	LockWait time.Duration
 	// Hooks runs the hooks of checkouts the plan makes.
 	Hooks hook.Runner
 	// ArchiveDir receives the unique work of anything removed.

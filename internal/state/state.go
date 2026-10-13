@@ -264,6 +264,9 @@ func (s *State) Save() error {
 // Dir is the directory the state file is in, where runs keep their leases.
 func (s *State) Dir() string { return filepath.Dir(s.path) }
 
+// Path is the state file's path.
+func (s *State) Path() string { return s.path }
+
 // Reload re-reads the state file from disk into s, preserving the file path and
 // any held lock. Update calls it under the lock, so a change works from the
 // latest on-disk data and cannot clobber a concurrent writer's.
