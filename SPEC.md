@@ -422,6 +422,21 @@ config).
 | `install-agent` | Install a named background sync (`--name`, default `default`) running `sync --quiet` plus its selection (`--repos`/`--tag`/`--set`) every `--interval` (must divide an hour or a day). Records a stable binary path (refuses `/nix/store`, Cellar and temporary paths), the current `PATH` and a long-lived `SSH_AUTH_SOCK`; runs at nice 10 with idle I/O. launchd: LaunchAgent, or `--daemon` LaunchDaemon with `UserName` via sudo. systemd: `OnCalendar=` + `Persistent=true`; `--linger` enables lingering. cron: refuses to rewrite an unreadable crontab, backs it up first, touches only lines with its marker. Recorded in state under `schedules`; `--list`, `--uninstall`, `--print`. |
 | `run [--set/--tag/--repos] -- <cmd>` | Run a command in each matching repo (parallel, bounded by concurrency). `--fail-fast`; non-zero exit if any failed. |
 | `manifest export [--out]` / `import <file>` | Portable `{url,tags,path}` manifest of the tracked set, to rehydrate a new machine (captures manual adoptions). import is idempotent and clones over the url's transport. |
+| `manifest save [--dry-run]` | Add each repo tracked by hand that neither `repos:` nor the shared manifest lists to the manifest; with no `manifest:`, print them as `repos:` entries. |
+
+The shared manifest (`manifest: <path>`) has the export format (`repos:` of
+`url`, `tags`, `path`, and `ssh_key`/`account` as in `repos:`). Config loading
+reads it after normalizing and appends its entries to `repos:` -- a missing
+file is empty, a malformed one or an entry with a credential is a load error
+-- so discovery's `_manual` rule finds them on every machine. An entry's
+`path` (also allowed in `repos:`) is absolute, `~`-relative, or relative to
+the repo's `base_dir`, and replaces `path_template` for it. After a hand
+addition is applied (`addByHand`: clone, adopt, manifest import), the repo's
+entry is upserted -- URL, user tags, `config.PortablePath` of its path
+(`""` when templated) -- and `remove` drops the entries of what it untracked.
+Writes hold an flock on `<manifest>.lock` (30s wait) and replace the file
+through a synced temp file and rename. Entries match by repo key, so a URL's
+transport may differ. Config itself is never written.
 | `restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` (clone+apply to a scratch dir), or `--apply` onto the tree (refuses dirty without `--force`). id defaults to `latest`. |
 | `report [--since]` / `log [-n]` | Summarize / list recent activity from the operation log (clone/sync/backup/remove/workspace events and applied changes). |
 | `config --redact` | Print the resolved config with inline provider tokens blanked (token_env/token_command kept), safe to share. |

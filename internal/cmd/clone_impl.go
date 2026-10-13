@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -44,7 +45,9 @@ func (c *CloneCmd) Run(ctx *Context) error {
 }
 
 // addByHand plans tracking one repo added by hand -- cloning it, or adopting
-// the clone already at its path -- and applies the plan unless dryRun.
+// the clone already at its path -- and applies the plan unless dryRun. A repo
+// it tracks goes in the shared manifest, if config names one, so every
+// machine reading it has the repo too.
 func addByHand(ctx *Context, cfg *config.Config, st *state.State, d reconcile.Repo, dryRun bool) error {
 	desired := map[string]reconcile.Repo{d.Key: d}
 	seen := reconcile.Observe(ctx.GoCtx(), reconcile.RepoPaths(desired, st), 1)
@@ -57,7 +60,7 @@ func addByHand(ctx *Context, cfg *config.Config, st *state.State, d reconcile.Re
 	results := plan.Apply(ctx.GoCtx(), reconcileEnv(cfg, st), reconcile.All)
 	logResults(ctx, results)
 	printResults(results, resultsEach)
-	return changesOutcome(results, plan)
+	return errors.Join(changesOutcome(results, plan), recordInManifest(cfg, st, d.Key))
 }
 
 func splitTags(s string) []string {

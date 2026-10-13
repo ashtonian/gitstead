@@ -151,10 +151,13 @@ func Repos(cfg *config.Config, st *state.State, discovered map[string]discovery.
 		if applied != nil && applied.ManuallyAdded {
 			r.Pinned, r.Path, r.URL = true, applied.LocalPath, applied.CloneURL
 		} else {
-			path, err := TemplatePath(cfg, key, found.Host, found.Owner, found.Name, found.FullName)
-			if err != nil {
-				blocked = append(blocked, Blocked{Target: key, Reason: err.Error()})
-				continue
+			path := cfg.ManualPath(key, found.Path)
+			if found.Path == "" {
+				var err error
+				if path, err = TemplatePath(cfg, key, found.Host, found.Owner, found.Name, found.FullName); err != nil {
+					blocked = append(blocked, Blocked{Target: key, Reason: err.Error()})
+					continue
+				}
 			}
 			r.Path = path
 			r.URL = cloneURL(found, cfg.CloneProtocolFor(key, found.DiscoveredBy))

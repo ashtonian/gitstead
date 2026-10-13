@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -152,12 +153,45 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 	}
 	checkWorkspaces(ctx, st, d)
 	checkLaunchers(cfg, d)
+	checkManifest(cfg, st, d)
 
 	fmt.Printf("\n%d problem(s), %d warning(s)\n", d.fails, d.warns)
 	if d.fails > 0 {
 		return fmt.Errorf("doctor found %d problem(s)", d.fails)
 	}
 	return nil
+}
+
+// checkManifest checks the shared manifest can be read and written, and
+// names the repos tracked by hand on this machine alone, which other
+// machines won't have.
+func checkManifest(cfg *config.Config, st *state.State, d *doctorReport) {
+	listed := config.Manifest{Repos: cfg.Repos} // repos: entries, and the manifest's once loaded
+	var local []string
+	for key, r := range st.Repos {
+		if r.ManuallyAdded && !listed.Has(key) {
+			local = append(local, key)
+		}
+	}
+	slices.Sort(local)
+	if cfg.Manifest == "" {
+		if len(local) > 0 {
+			d.info(fmt.Sprintf("%d repos are tracked by hand on this machine only (%s); set manifest: in config to share them, or add them to repos:", len(local), strings.Join(local, ", ")))
+		}
+		return
+	}
+	dir := filepath.Dir(cfg.Manifest)
+	switch fi, err := os.Stat(dir); {
+	case err != nil || !fi.IsDir():
+		d.warn("manifest: " + dir + " doesn't exist; the first repo added by hand creates it")
+	case !dirWritable(dir):
+		d.fail("manifest: " + dir + " isn't writable, so repos added by hand won't reach other machines")
+	default:
+		d.ok("manifest: " + cfg.Manifest)
+	}
+	if len(local) > 0 {
+		d.warn(fmt.Sprintf("%d repos tracked by hand aren't in the manifest (%s); `git-mgr manifest save` adds them", len(local), strings.Join(local, ", ")))
+	}
 }
 
 // dirWritable reports whether a directory accepts new files.

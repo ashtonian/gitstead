@@ -15,22 +15,27 @@ type Config struct {
 	Concurrency   int    `koanf:"concurrency"   yaml:"concurrency"   default:"8"                                    validate:"min=1,max=128"`
 	// LockTimeout is how long a command waits for another git-mgr run to
 	// finish changing state before giving up.
-	LockTimeout time.Duration    `koanf:"lock_timeout" yaml:"lock_timeout" default:"2m" validate:"min=0"`
-	Accounts    []Account        `koanf:"accounts"      yaml:"accounts,omitempty" validate:"dive"`
-	Providers   []Provider       `koanf:"providers"     yaml:"providers"      validate:"dive"`
-	Discovery   []DiscoveryRule  `koanf:"discovery"     yaml:"discovery"      validate:"dive"`
-	Repos       []ManualRepo     `koanf:"repos"         yaml:"repos,omitempty" validate:"dive"`
-	Exclude     []ExcludeRule    `koanf:"exclude"       yaml:"exclude"        validate:"dive"`
-	Sets        []RepoSet        `koanf:"sets"          yaml:"sets,omitempty" validate:"dive"`
-	Overrides   []Override       `koanf:"overrides"     yaml:"overrides"      validate:"dive"`
-	Clone       CloneConfig      `koanf:"clone"         yaml:"clone,omitempty"`
-	Sync        SyncConfig       `koanf:"sync"          yaml:"sync"`
-	Cleanup     CleanupConfig    `koanf:"cleanup"       yaml:"cleanup"`
-	Backup      BackupCfg        `koanf:"backup"        yaml:"backup"`
-	RemoteSync  RemoteSyncConfig `koanf:"remote_sync"   yaml:"remote_sync"`
-	Reconcile   ReconcileConfig  `koanf:"reconcile"     yaml:"reconcile"`
-	Notify      NotifyConfig     `koanf:"notify"        yaml:"notify"`
-	Hooks       HooksConfig      `koanf:"hooks"         yaml:"hooks"`
+	LockTimeout time.Duration   `koanf:"lock_timeout" yaml:"lock_timeout" default:"2m" validate:"min=0"`
+	Accounts    []Account       `koanf:"accounts"      yaml:"accounts,omitempty" validate:"dive"`
+	Providers   []Provider      `koanf:"providers"     yaml:"providers"      validate:"dive"`
+	Discovery   []DiscoveryRule `koanf:"discovery"     yaml:"discovery"      validate:"dive"`
+	Repos       []ManualRepo    `koanf:"repos"         yaml:"repos,omitempty" validate:"dive"`
+	// Manifest is a shared file of repos tracked by hand -- in a dotfiles
+	// repo or a synced folder -- that every machine reads as more repos:
+	// entries and that clone, adopt, manifest import and remove keep up to
+	// date. Empty for none.
+	Manifest   string           `koanf:"manifest" yaml:"manifest,omitempty"`
+	Exclude    []ExcludeRule    `koanf:"exclude"       yaml:"exclude"        validate:"dive"`
+	Sets       []RepoSet        `koanf:"sets"          yaml:"sets,omitempty" validate:"dive"`
+	Overrides  []Override       `koanf:"overrides"     yaml:"overrides"      validate:"dive"`
+	Clone      CloneConfig      `koanf:"clone"         yaml:"clone,omitempty"`
+	Sync       SyncConfig       `koanf:"sync"          yaml:"sync"`
+	Cleanup    CleanupConfig    `koanf:"cleanup"       yaml:"cleanup"`
+	Backup     BackupCfg        `koanf:"backup"        yaml:"backup"`
+	RemoteSync RemoteSyncConfig `koanf:"remote_sync"   yaml:"remote_sync"`
+	Reconcile  ReconcileConfig  `koanf:"reconcile"     yaml:"reconcile"`
+	Notify     NotifyConfig     `koanf:"notify"        yaml:"notify"`
+	Hooks      HooksConfig      `koanf:"hooks"         yaml:"hooks"`
 	// Editor is the command `git-mgr open` opens a path with; empty for
 	// $VISUAL, then $EDITOR.
 	Editor string    `koanf:"editor" yaml:"editor,omitempty"`
@@ -121,6 +126,9 @@ type ManualRepo struct {
 	Tags    []string `koanf:"tags"    yaml:"tags,omitempty"`
 	SSHKey  string   `koanf:"ssh_key" yaml:"ssh_key,omitempty"`
 	Account string   `koanf:"account" yaml:"account,omitempty"`
+	// Path puts the repo somewhere other than where path_template does:
+	// absolute or ~-relative, or relative to its base_dir.
+	Path string `koanf:"path" yaml:"path,omitempty"`
 }
 
 // Provider represents a GitHub, GitLab, or Gitea/Forgejo instance.

@@ -177,9 +177,17 @@ repos: []
   # - url: "git@github.com:someone/useful-fork.git"
   #   tags: ["libs"]
   #   ssh_key: "~/.ssh/id_personal"
+  #   path: "~/forks/useful"          # instead of where path_template puts it:
+  #                                    # absolute, ~-relative or relative to base_dir
   #
   # - url: "git@gitlab.com:other-org/special-project.git"
   #   tags: ["work"]
+
+# A shared file of repos tracked by hand -- cloned, adopted, imported -- that
+# every machine reads as more repos: entries and git-mgr keeps up to date:
+# clone, adopt and manifest import add to it, remove takes from it. Keep it in
+# your dotfiles or a synced folder. "" = none; git-mgr never writes this config.
+manifest: ""
 
 # =============================================================================
 # Exclude Rules

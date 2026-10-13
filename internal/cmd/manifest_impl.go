@@ -2,27 +2,16 @@ package cmd
 
 import (
 	"fmt"
+	"maps"
 	"os"
-	"path/filepath"
-	"strings"
+	"slices"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
 	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/git-mgr/internal/state"
 	"gopkg.in/yaml.v3"
 )
-
-// manifest is the portable description of a tracked repo set: enough to rehydrate
-// it on a new machine, with no machine-local fields (timestamps, head commits).
-type manifest struct {
-	Repos []manifestRepo `yaml:"repos"`
-}
-
-type manifestRepo struct {
-	URL  string   `yaml:"url"`
-	Tags []string `yaml:"tags,omitempty"`
-	Path string   `yaml:"path,omitempty"` // relative to base_dir, or absolute if outside it
-}
 
 func (c *ManifestExportCmd) Run(ctx *Context) error {
 	cfg, err := ctx.LoadConfig()
@@ -38,14 +27,11 @@ func (c *ManifestExportCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	base := config.ExpandHome(cfg.BaseDir)
-	var m manifest
+	var m config.Manifest
 	for _, key := range keys {
-		r := st.Repos[key]
-		if r.CloneURL == "" {
-			continue
+		if e, ok := manifestEntry(cfg, key, st.Repos[key], st.Repos[key].Tags); ok {
+			m.Repos = append(m.Repos, e)
 		}
-		m.Repos = append(m.Repos, manifestRepo{URL: r.CloneURL, Tags: r.Tags, Path: relToBase(r.LocalPath, base)})
 	}
 
 	out, err := yaml.Marshal(m)
@@ -74,7 +60,7 @@ func (c *ManifestImportCmd) Run(ctx *Context) error {
 	if err != nil {
 		return fmt.Errorf("reading manifest: %w", err)
 	}
-	var m manifest
+	var m config.Manifest
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return fmt.Errorf("parsing manifest: %w", err)
 	}
@@ -101,10 +87,13 @@ func (c *ManifestImportCmd) Run(ctx *Context) error {
 			skipped++
 			continue
 		}
-		dest, derr := manifestDest(cfg, mr, id)
-		if derr != nil {
-			errs = append(errs, derr)
-			continue
+		dest := cfg.ManualPath(id.Key(), mr.Path)
+		if mr.Path == "" {
+			var derr error
+			if dest, derr = reconcile.TemplatePath(cfg, id.Key(), id.Host, id.Owner, id.Name, id.FullName); derr != nil {
+				errs = append(errs, derr)
+				continue
+			}
 		}
 		d := reconcile.HandAdded(cfg, id, dest, mr.Tags)
 		if err := addByHand(ctx, cfg, st, d, c.DryRun); err != nil {
@@ -122,24 +111,108 @@ func (c *ManifestImportCmd) Run(ctx *Context) error {
 	return outcome(len(errs), added+len(errs), "manifest entries could not be imported")
 }
 
-// relToBase returns localPath relative to base when it lives under base, else
-// the absolute path (so repos outside base_dir round-trip too).
-func relToBase(localPath, base string) string {
-	if rel, err := filepath.Rel(base, localPath); err == nil && !strings.HasPrefix(rel, "..") {
-		return rel
+// manifestEntry is repo key's manifest entry: its URL, tags, and its path
+// when config wouldn't put it there. A repo with no URL on record has none.
+func manifestEntry(cfg *config.Config, key string, r *state.RepoState, tags []string) (config.ManualRepo, bool) {
+	if r == nil || r.CloneURL == "" {
+		return config.ManualRepo{}, false
 	}
-	return localPath
+	templated, _ := reconcile.TemplatePath(cfg, key, r.Host, r.Owner, r.Name, r.FullName)
+	base := config.ExpandHome(cfg.ResolveForRepo(key).BaseDir)
+	return config.ManualRepo{URL: r.CloneURL, Tags: tags, Path: config.PortablePath(r.LocalPath, templated, base)}, true
 }
 
-// manifestDest resolves the clone destination for a manifest entry: an explicit
-// path (relative to the repo's base_dir, or absolute), otherwise where config
-// puts the repo.
-func manifestDest(cfg *config.Config, mr manifestRepo, id *repourl.Identity) (string, error) {
-	if mr.Path == "" {
-		return reconcile.TemplatePath(cfg, id.Key(), id.Host, id.Owner, id.Name, id.FullName)
+// recordInManifest adds the repos with keys, tracked by hand, to the shared
+// manifest when config names one.
+func recordInManifest(cfg *config.Config, st *state.State, keys ...string) error {
+	if cfg.Manifest == "" {
+		return nil
 	}
-	if filepath.IsAbs(mr.Path) {
-		return mr.Path, nil
+	var entries []config.ManualRepo
+	for _, key := range keys {
+		r := st.Repos[key]
+		if r == nil || !r.ManuallyAdded {
+			continue
+		}
+		if e, ok := manifestEntry(cfg, key, r, r.UserTags); ok {
+			entries = append(entries, e)
+		}
 	}
-	return filepath.Join(config.ExpandHome(cfg.ResolveForRepo(id.Key()).BaseDir), mr.Path), nil
+	if len(entries) == 0 {
+		return nil
+	}
+	err := config.UpdateManifest(cfg.Manifest, func(m *config.Manifest) error {
+		for _, e := range entries {
+			m.Upsert(e)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("tracked, but not saved in the manifest %s: %w", cfg.Manifest, err)
+	}
+	return nil
+}
+
+// dropFromManifest removes the repos with keys from the shared manifest when
+// config names one.
+func dropFromManifest(cfg *config.Config, keys ...string) error {
+	if cfg.Manifest == "" || len(keys) == 0 {
+		return nil
+	}
+	err := config.UpdateManifest(cfg.Manifest, func(m *config.Manifest) error {
+		for _, key := range keys {
+			m.Remove(key)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("removed, but still in the manifest %s: %w", cfg.Manifest, err)
+	}
+	return nil
+}
+
+// Run saves each repo tracked by hand that neither config's repos: nor the
+// manifest lists. With no manifest configured it prints them as repos:
+// entries to add to config instead.
+func (c *ManifestSaveCmd) Run(ctx *Context) error {
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return err
+	}
+	st, err := ctx.LoadState()
+	if err != nil {
+		return err
+	}
+	listed := config.Manifest{Repos: cfg.Repos} // repos: entries and the manifest's
+	var keys []string
+	var entries []config.ManualRepo
+	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
+		r := st.Repos[key]
+		if !r.ManuallyAdded || listed.Has(key) {
+			continue
+		}
+		if e, ok := manifestEntry(cfg, key, r, r.UserTags); ok {
+			keys, entries = append(keys, key), append(entries, e)
+		}
+	}
+	if len(entries) == 0 {
+		fmt.Println("Every repo tracked by hand is already in config or the manifest.")
+		return nil
+	}
+	if cfg.Manifest == "" || c.DryRun {
+		if cfg.Manifest == "" {
+			fmt.Fprintln(os.Stderr, "No manifest: in config; these repos: entries make other machines track them too:")
+		}
+		out, err := yaml.Marshal(config.Manifest{Repos: entries})
+		if err != nil {
+			return err
+		}
+		_, err = os.Stdout.Write(out)
+		return err
+	}
+	if err := recordInManifest(cfg, st, keys...); err != nil {
+		return err
+	}
+	fmt.Printf("Saved %d repos in %s\n", len(entries), tildify(cfg.Manifest))
+	return nil
 }
