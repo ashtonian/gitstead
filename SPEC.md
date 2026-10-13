@@ -2000,10 +2000,11 @@ and agent from `--workspace`/`--agent` or `GIT_MGR_WORKSPACE`/`GIT_MGR_AGENT`
 (none: exit 0, silently), the message from `--message`, a JSON argument
 (Codex: `type: agent-turn-complete`, `last-assistant-message`) or JSON on
 stdin, read for at most 2s (Claude Code: `message`, or `hook_event_name:
-Stop`), records it on the running run under a lock wait of at most 5s, and
+Stop` with `last_assistant_message`), records it on the running run under a lock wait of at most 5s, and
 notifies under `notify.enabled` and `notify.on_waiting` unless the same run
-reported a wait within 10s. `--clear` zeroes it. It always exits 0: a hook
-must never fail its agent. Waiting is an attribute of a running agent, not a
+reported a wait within 10s. `--clear` zeroes it. It always exits 0 and
+prints nothing on stdout: a hook must never fail its agent, and Claude Code
+reads a hook's stdout (a UserPromptSubmit hook's into the prompt). Waiting is an attribute of a running agent, not a
 state of its own, so launchers and plugins that look for `running` see it.
 
 ### Agent environment
