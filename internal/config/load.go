@@ -76,8 +76,18 @@ func (configValidator) Struct(v any) error {
 	if !ok {
 		return nil
 	}
-	return Validate(cfg)
+	if err := Validate(cfg); err != nil {
+		return &invalidError{err}
+	}
+	return nil
 }
+
+// invalidError carries git-mgr's validation error through the loader's
+// wrapping, so Load can report it on its own.
+type invalidError struct{ err error }
+
+func (e *invalidError) Error() string { return e.err.Error() }
+func (e *invalidError) Unwrap() error { return e.err }
 
 // --- Loading ---
 
@@ -132,6 +142,17 @@ func Load(path string, opts ...Option) (*Config, error) {
 	}
 
 	cfg, err := pkgconfig.GetConfig[Config](context.Background(), kopts...)
+	if invalid := (*invalidError)(nil); errors.As(err, &invalid) {
+		where := "config"
+		if o.configPath != "" {
+			where = "config " + o.configPath
+		}
+		sep := " " // a list of problems starts on a line of its own
+		if strings.HasPrefix(invalid.err.Error(), "\n") {
+			sep = ""
+		}
+		return nil, fmt.Errorf("%s is invalid:%s%w", where, sep, invalid.err)
+	}
 	if err != nil {
 		return nil, err
 	}
