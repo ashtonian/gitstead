@@ -403,6 +403,16 @@ func TestRemoveWorktree_KeepsBranchAndArchivesWorkingTree(t *testing.T) {
 	if got := mustGit(t, source, "show", worktreeRef+":agent.txt"); got != "uncommitted" {
 		t.Errorf("restored worktree file = %q", got)
 	}
+
+	// Its branch commit is in no remote, only in the repository it was a
+	// worktree of, which the archive records as its base.
+	restored := filepath.Join(t.TempDir(), "restored")
+	if err := gitops.RestoreArchive(ctx, bundle, restored, ""); err != nil {
+		t.Fatalf("restoring the worktree's archive: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(restored, "agent.txt")); string(got) != "uncommitted\n" {
+		t.Errorf("restored agent.txt = %q", got)
+	}
 }
 
 // A submodule's own unpushed commits and changes are unique work of the copy
@@ -515,5 +525,123 @@ func TestRemoveClone_ArchiveKeepsNoCredentials(t *testing.T) {
 	}
 	if strings.Contains(string(data), "not-a-real-token") || !strings.Contains(string(data), "https://example.invalid/o/r.git") {
 		t.Errorf("archive description:\n%s", data)
+	}
+}
+
+// A restore that fails leaves nothing at its destination, nor beside it.
+func TestRestoreArchive_FailureLeavesNothing(t *testing.T) {
+	ctx := context.Background()
+	remote, base := remoteAndClone(t)
+	copyPath := filepath.Join(t.TempDir(), "copy")
+	mustGit(t, base, "clone", "-q", remote, copyPath)
+	mustGit(t, copyPath, "config", "user.email", "t@t")
+	mustGit(t, copyPath, "config", "user.name", "t")
+	commitFile(t, copyPath, "agent.txt", "work\n")
+	mustGit(t, copyPath, "remote", "remove", "origin")
+	mustGit(t, copyPath, "remote", "add", "origin", filepath.Join(t.TempDir(), "gone.git"))
+	bundle, err := gitops.RemoveClone(ctx, copyPath, t.TempDir(), "copy", gitops.RemoveOptions{Base: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(base); err != nil { // the base it leans on, gone; origin never existed
+		t.Fatal(err)
+	}
+	parent := t.TempDir()
+	dest := filepath.Join(parent, "restored")
+	if err := gitops.RestoreArchive(ctx, bundle, dest, ""); err == nil {
+		t.Fatal("restoring without the history it leans on succeeded")
+	}
+	if entries, _ := os.ReadDir(parent); len(entries) != 0 {
+		t.Errorf("left behind: %v", entries)
+	}
+
+	// Something already at the destination is never touched.
+	write := filepath.Join(dest, "valuable")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, write, []byte("mine\n"))
+	if err := gitops.RestoreArchive(ctx, bundle, dest, ""); err == nil {
+		t.Fatal("restored over an occupied destination")
+	}
+	if got, _ := os.ReadFile(write); string(got) != "mine\n" {
+		t.Errorf("the occupant now holds %q", got)
+	}
+}
+
+// A clone on an unborn branch -- staged and untracked files, no commit --
+// comes back from its archive as it was.
+func TestRestoreArchive_UnbornBranch(t *testing.T) {
+	ctx := context.Background()
+	_, clone := remoteAndClone(t)
+	mustGit(t, clone, "checkout", "-q", "--orphan", "newborn")
+	mustGit(t, clone, "rm", "-q", "-rf", ".")
+	writeFile(t, filepath.Join(clone, "staged.txt"), []byte("staged\n"))
+	mustGit(t, clone, "add", "staged.txt")
+	writeFile(t, filepath.Join(clone, "untracked.txt"), []byte("untracked\n"))
+	bundle, err := gitops.RemoveClone(ctx, clone, t.TempDir(), "app", gitops.RemoveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := filepath.Join(t.TempDir(), "restored")
+	if err := gitops.RestoreArchive(ctx, bundle, restored, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGit(t, restored, "symbolic-ref", "--short", "HEAD"); got != "newborn" {
+		t.Errorf("HEAD = %s", got)
+	}
+	if got := mustGit(t, restored, "diff", "--cached", "--name-only"); got != "staged.txt" {
+		t.Errorf("staged = %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(restored, "untracked.txt")); string(got) != "untracked\n" {
+		t.Errorf("untracked.txt = %q", got)
+	}
+}
+
+// Work in a nested submodule is archived once, within its parent
+// submodule's archive, and restored once.
+func TestRestoreArchive_NestedSubmodules(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	bare := func(name string) string {
+		remote := filepath.Join(root, name+".git")
+		mustGit(t, root, "init", "-q", "--bare", "-b", "main", remote)
+		seed := filepath.Join(root, "seed-"+name)
+		mustGit(t, root, "clone", "-q", remote, seed)
+		writeFile(t, filepath.Join(seed, name+".txt"), []byte(name+"\n"))
+		mustGit(t, seed, "add", ".")
+		mustGit(t, seed, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", name)
+		return seed
+	}
+	leaf := bare("leaf")
+	mustGit(t, leaf, "push", "-q", "origin", "HEAD:main")
+	mid := bare("mid")
+	mustGit(t, mid, "-c", "protocol.file.allow=always", "submodule", "add", "-q", filepath.Join(root, "leaf.git"), "leaf")
+	mustGit(t, mid, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "leaf")
+	mustGit(t, mid, "push", "-q", "origin", "HEAD:main")
+	top := bare("top")
+	mustGit(t, top, "-c", "protocol.file.allow=always", "submodule", "add", "-q", filepath.Join(root, "mid.git"), "mid")
+	mustGit(t, top, "-c", "protocol.file.allow=always", "submodule", "update", "-q", "--init", "--recursive")
+	mustGit(t, top, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "mid")
+	mustGit(t, top, "push", "-q", "origin", "HEAD:main")
+	writeFile(t, filepath.Join(top, "mid", "leaf", "leaf.txt"), []byte("edited deep down\n"))
+
+	path, err := gitops.RemoveClone(ctx, top, filepath.Join(root, "archive"), "top", gitops.RemoveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, _, err := gitops.ReadArchive(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := meta.Submodules["mid/leaf"]; ok || meta.Submodules["mid"] == "" {
+		t.Fatalf("the top archive should name mid only: %v", meta.Submodules)
+	}
+	restored := filepath.Join(root, "restored")
+	if err := gitops.RestoreArchive(ctx, path, restored, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(restored, "mid", "leaf", "leaf.txt")); string(got) != "edited deep down\n" {
+		t.Errorf("mid/leaf/leaf.txt = %q", got)
 	}
 }

@@ -104,21 +104,30 @@ func InspectUniqueWork(ctx context.Context, repoPath string) (UniqueWork, error)
 // Submodules lists the paths of the repository's checked-out submodules,
 // nested ones included, relative to it.
 func Submodules(ctx context.Context, repoPath string) ([]string, error) {
+	return submodulePaths(ctx, repoPath, true)
+}
+
+// submodulePaths lists the repository's checked-out submodules, relative to
+// it: with recursive, nested ones too.
+func submodulePaths(ctx context.Context, repoPath string, recursive bool) ([]string, error) {
 	if !fileExists(filepath.Join(repoPath, ".gitmodules")) {
 		return nil, nil
 	}
-	out, err := Git(ctx, repoPath, "submodule", "status", "--recursive")
+	args := []string{"submodule", "foreach", "--quiet"}
+	if recursive {
+		args = append(args, "--recursive")
+	}
+	// foreach visits only checked-out submodules; NUL-separated paths survive
+	// spaces and newlines.
+	out, err := GitOutput(ctx, repoPath, append(args, `printf '%s\0' "$displaypath"`)...)
 	if err != nil {
 		return nil, fmt.Errorf("listing submodules of %s: %w", repoPath, err)
 	}
 	var paths []string
-	for _, line := range strings.Split(out, "\n") {
-		f := strings.Fields(line)
-		// "-<sha> path" is a submodule that isn't checked out.
-		if len(f) < 2 || strings.HasPrefix(line, "-") {
-			continue
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			paths = append(paths, p)
 		}
-		paths = append(paths, f[1])
 	}
 	return paths, nil
 }

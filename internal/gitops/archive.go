@@ -105,7 +105,18 @@ func archive(ctx context.Context, repoPath, dir, name string, opts archiveOption
 		meta.Work = "its whole history, which other archives lean on"
 	}
 
-	for _, sub := range slices.Sorted(maps.Keys(work.Submodules)) {
+	// Each immediate submodule with work, its own or a nested one's, gets an
+	// archive of its own, which takes care of the submodules within it.
+	immediate, err := submodulePaths(ctx, repoPath, false)
+	if err != nil {
+		return "", err
+	}
+	for _, sub := range immediate {
+		if !slices.ContainsFunc(slices.Collect(maps.Keys(work.Submodules)), func(p string) bool {
+			return p == sub || strings.HasPrefix(p, sub+"/")
+		}) {
+			continue
+		}
 		subOpts := archiveOptions{scope: scopeClone}
 		if opts.base != "" {
 			subOpts.base = filepath.Join(opts.base, sub)
@@ -183,8 +194,10 @@ func archive(ctx context.Context, repoPath, dir, name string, opts archiveOption
 
 	switch {
 	case opts.scope == scopeWorktree:
-		// Branch commits survive in the shared repository.
+		// Branch commits survive in the shared repository, the base it is
+		// restored into.
 		err = writeArchiveBundle(ctx, repoPath, opts.base, bundle, "--glob="+refs+"*", "--not", "--remotes", "--branches")
+		meta.Base = opts.base
 	case opts.base != "":
 		err = writeArchiveBundle(ctx, repoPath, opts.base, bundle, thinBundleRevs...)
 		if err != nil && ctx.Err() == nil {
