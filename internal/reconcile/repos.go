@@ -499,6 +499,7 @@ func RecordConfig(managed *map[string]string, name, value string, unset bool) {
 // other move or clone of this run has a directory removed from under it.
 func moveRepo(key, from, to string) RunFunc {
 	return func(_ context.Context, env *Env) (Outcome, error) {
+		var copies []string
 		return Outcome{
 			Record: func(st *state.State) error {
 				if _, err := os.Lstat(to); err == nil {
@@ -514,34 +515,45 @@ func moveRepo(key, from, to string) RunFunc {
 					return err
 				}
 				recordMoved(st, key, to)
+				copies = copiesOf(st, key, to)
 				RemoveEmptyParents(env, from)
 				return nil
 			},
 			After: func(ctx context.Context) (string, error) {
-				return "", reconnectCopies(ctx, env.State, key, from, to)
+				return "", reconnectCopies(ctx, copies, from, to)
 			},
 		}, nil
 	}
 }
 
+// copiesOf lists the workspace copies made from repo key, which is now at
+// to. It reads st under the state lock, as a record does: repo actions run
+// at once, so one mustn't read the shared state while another saves it.
+func copiesOf(st *state.State, key, to string) []string {
+	var out []string
+	for _, ws := range st.Workspaces {
+		for _, r := range ws.Replicas {
+			for _, c := range r.Copies {
+				if c.Repo == key && c.Path != to {
+					out = append(out, c.Path)
+				}
+			}
+		}
+	}
+	return out
+}
+
 // reconnectCopies points what was made from the repo at from to its new path
-// to: its linked worktrees, and the workspace clones that fetch from it or
-// borrow its objects.
-func reconnectCopies(ctx context.Context, st *state.State, key, from, to string) error {
+// to: its linked worktrees, and the workspace clones at copies that fetch
+// from it or borrow its objects.
+func reconnectCopies(ctx context.Context, copies []string, from, to string) error {
 	var errs []error
 	if err := gitops.WorktreeRepair(ctx, to); err != nil {
 		errs = append(errs, fmt.Errorf("reconnecting its worktrees failed (run `git worktree repair` in %s): %w", to, err))
 	}
-	for _, ws := range st.Workspaces {
-		for _, r := range ws.Replicas {
-			for _, c := range r.Copies {
-				if c.Repo != key || c.Path == to {
-					continue
-				}
-				if err := gitops.RepointSource(ctx, c.Path, from, to); err != nil {
-					errs = append(errs, fmt.Errorf("reconnecting %s: %w", c.Path, err))
-				}
-			}
+	for _, path := range copies {
+		if err := gitops.RepointSource(ctx, path, from, to); err != nil {
+			errs = append(errs, fmt.Errorf("reconnecting %s: %w", path, err))
 		}
 	}
 	if len(errs) > 0 {
@@ -551,14 +563,16 @@ func reconnectCopies(ctx context.Context, st *state.State, key, from, to string)
 }
 
 func recordMove(key, from, to string) RunFunc {
-	return func(_ context.Context, env *Env) (Outcome, error) {
+	return func(context.Context, *Env) (Outcome, error) {
+		var copies []string
 		return Outcome{
 			Record: func(st *state.State) error {
 				recordMoved(st, key, to)
+				copies = copiesOf(st, key, to)
 				return nil
 			},
 			After: func(ctx context.Context) (string, error) {
-				return "", reconnectCopies(ctx, env.State, key, from, to)
+				return "", reconnectCopies(ctx, copies, from, to)
 			},
 		}, nil
 	}
