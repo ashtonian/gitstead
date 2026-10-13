@@ -320,6 +320,13 @@ sync:
   # Retry backoff base. Actual delay: base * 2^attempt.
   retry_backoff: "2s"
 
+  # After fetching a tracked clone: "off" leaves its branch where it is;
+  # "ff-only-clean" fast-forwards it to its upstream when it is behind and
+  # not ahead, has no uncommitted changes to tracked files and no git command
+  # runs in it. Anything else is left as it is, with the reason logged.
+  # Workspace copies are never updated. Per repo through overrides[].sync.
+  update: "off"
+
 # =============================================================================
 # Config Changes
 # =============================================================================

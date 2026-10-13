@@ -88,6 +88,11 @@ type copyJSON struct {
 	LeftOut    []string          `json:"left_out,omitempty"` // untracked files too big to back up
 	Fetched    bool              `json:"fetched,omitempty"`
 	FetchError string            `json:"fetch_error,omitempty"`
+	// Updated: sync.update fast-forwarded it; UpdateSkipped says why it
+	// didn't, for one that was behind.
+	Updated       bool   `json:"updated,omitempty"`
+	UpdateSkipped string `json:"update_skipped,omitempty"`
+	UpdateError   string `json:"update_error,omitempty"`
 	// Offsite is what the push did: refs written or deleted; nil when it
 	// didn't run.
 	Offsite      []string `json:"offsite,omitempty"`
@@ -101,6 +106,7 @@ func copiesJSON(outcomes []copyOutcome) []copyJSON {
 			Repo: o.job.repoKey, Workspace: o.job.workspace, Agent: o.job.agent, Path: o.job.path,
 			OK: len(o.failed()) == 0, BackupError: errString(o.backupErr),
 			Fetched: o.fetched, FetchError: errString(o.fetchErr), OffsiteError: errString(o.offsiteErr),
+			Updated: o.updated, UpdateSkipped: o.updateSkipped, UpdateError: errString(o.updateErr),
 		}
 		if o.backup != nil {
 			c.Backup, c.BackupID = o.backup.Outcome.String(), o.backup.ID

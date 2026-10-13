@@ -144,7 +144,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		}
 	}
 
-	fetched, skippedLocked, backedUp := 0, 0, 0
+	fetched, skippedLocked, backedUp, updated := 0, 0, 0, 0
 	for _, o := range outcomes {
 		if o.job.backup != nil {
 			tried++
@@ -161,6 +161,12 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		if o.backup != nil && o.backup.Outcome == gitops.BackupSaved {
 			backedUp++
 		}
+		if o.updated {
+			updated++
+		}
+		if o.updateSkipped != "" {
+			log.Info("not fast-forwarded", "repo", o.job.label, "reason", o.updateSkipped)
+		}
 		for _, err := range o.failed() {
 			failures = append(failures, syncError{o.job.label, err})
 		}
@@ -174,6 +180,9 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	if !ctx.Quiet {
 		fmt.Printf("Synced: %d fetched, %d skipped (recent), %d skipped (locked), %d failed, %d backed up",
 			fetched, skippedRecent, skippedLocked, len(failures), backedUp)
+		if updated > 0 {
+			fmt.Printf(", %d fast-forwarded", updated)
+		}
 		if mirrored > 0 {
 			fmt.Printf(", %d mirrored", mirrored)
 		}
@@ -184,6 +193,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	}
 	doc.Changes, doc.Copies = ctx.changes, copiesJSON(outcomes)
 	doc.Fetched, doc.SkippedRecent, doc.SkippedLocked, doc.BackedUp, doc.Mirrored = fetched, skippedRecent, skippedLocked, backedUp, mirrored
+	doc.Updated = updated
 	for _, e := range failures {
 		doc.Failures = append(doc.Failures, targetError{e.repo, e.err.Error()})
 	}
@@ -197,6 +207,7 @@ type syncJSON struct {
 	Copies        []copyJSON    `json:"copies"`
 	Mirrors       []mirrorJSON  `json:"mirrors,omitempty"`
 	Fetched       int           `json:"fetched"`
+	Updated       int           `json:"updated"`
 	SkippedRecent int           `json:"skipped_recent"`
 	SkippedLocked int           `json:"skipped_locked"`
 	BackedUp      int           `json:"backed_up"`
@@ -236,7 +247,7 @@ func (c *SyncCmd) jobs(cfg *config.Config, st *state.State, pass func(string, *s
 			if !c.Force && !repo.LastFetch.IsZero() && time.Since(repo.LastFetch) < repoCfg.Sync.MinFetchInterval {
 				skippedRecent++
 			} else {
-				job.fetch = true
+				job.fetch, job.update = true, repoCfg.Sync.Update == "ff-only-clean"
 			}
 		}
 		if policy := cfg.RemoteSyncFor(key, repo.DiscoveredBy); policy.Enabled && machine != "" && !stale {

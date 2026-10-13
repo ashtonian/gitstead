@@ -25,8 +25,11 @@ type Answers struct {
 	Schedule bool `yaml:"schedule"` // install the background sync agent
 	// Linger keeps a Linux schedule running while you are logged out
 	// (loginctl enable-linger).
-	Linger        bool   `yaml:"linger,omitempty"`
-	RemoteSync    bool   `yaml:"remote_sync"`
+	Linger     bool `yaml:"linger,omitempty"`
+	RemoteSync bool `yaml:"remote_sync"`
+	// Update fast-forwards clean clones that are behind during sync
+	// (sync.update: ff-only-clean).
+	Update        bool   `yaml:"update"`
 	ReconcileAuto string `yaml:"reconcile_auto"`
 	Cleanup       string `yaml:"cleanup"`
 	// Workspaces sets up agents' workspaces; nil leaves them as they are.
@@ -166,6 +169,7 @@ func Defaults(det Detected, existing *config.Config, home string) Answers {
 		a.BaseDir = tildePath(existing.BaseDir, home)
 		a.Layout = layoutOf(existing)
 		a.Backups, a.RemoteSync = existing.Backup.Enabled, existing.RemoteSync.Enabled
+		a.Update = existing.Sync.Update == "ff-only-clean"
 		a.ReconcileAuto, a.Cleanup = existing.Reconcile.Auto, existing.Cleanup.Policy
 		a.Schedule = false // re-running setup doesn't reinstall the agent unless asked
 		a.Accounts = existingAccounts(existing)

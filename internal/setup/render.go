@@ -38,6 +38,7 @@ func Render(doc *config.Document, a Answers) error {
 	}{
 		{"backup.enabled", a.Backups},
 		{"remote_sync.enabled", a.RemoteSync},
+		{"sync.update", map[bool]string{true: "ff-only-clean", false: "off"}[a.Update]},
 		{"reconcile.auto", a.ReconcileAuto},
 		{"cleanup.policy", a.Cleanup},
 	} {

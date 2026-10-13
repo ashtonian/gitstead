@@ -1375,9 +1375,18 @@ second one exits 0 at once. Clones, fetches and backups run without the state
 lock, which a run takes only for the milliseconds it needs to record a result,
 so `git-mgr ws create` or `git-mgr clone` work normally while a long sync is
 running. `min_fetch_interval` skips recently-fetched repos, and `auto_discover`
-picks up new repos. It never pulls or merges, and it moves or deletes a repo
-only if you configure it to (`reconcile.auto: all`,
-`cleanup.policy: remove_and_delete` or `archive`).
+picks up new repos. It never merges, it updates a branch only if you ask
+(`sync.update`, below), and it moves or deletes a repo only if you configure
+it to (`reconcile.auto: all`, `cleanup.policy: remove_and_delete` or
+`archive`).
+
+With `sync.update: ff-only-clean` (off by default; `setup` offers it), sync
+fast-forwards each tracked clone it fetched to its upstream, when that loses
+nothing: the branch is behind and not ahead, no tracked file has changes, and
+no git command, rebase or merge is under way in it. Untracked files stay, and
+git refuses rather than overwrite one. A clone left behind is reported with
+why (`update_skipped` under `--json`); workspace copies, on agents' own
+branches, are never updated. `overrides[].sync.update` sets it per repo.
 
 Nothing waits on a person or hangs forever:
 
@@ -1392,7 +1401,7 @@ Nothing waits on a person or hangs forever:
 | Setting | Default | Bounds |
 | --- | --- | --- |
 | `sync.backup_timeout` | `2m` | One working copy's backup (taken before its fetch, on its own budget) and status read. |
-| `sync.timeout_per_repo` | `5m` | One repo's fetch, retries included. |
+| `sync.timeout_per_repo` | `5m` | One repo's fetch, retries included, and its fast-forward under `sync.update`. |
 | `sync.clone_timeout` | `30m` | One clone; one archive of a clone or copy, and its deletion, before it is removed (stale cleanup, `remove --delete`/`--archive`, `ws retire`, `ws prune`). |
 | `sync.inspect_timeout` | `1m` | One look at a working copy -- its git config and identity -- while planning (`plan`, `apply`, `sync`, `ws ensure`). |
 | `sync.api_timeout` | `60s` | One provider API request attempt. |

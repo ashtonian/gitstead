@@ -65,6 +65,9 @@ func (c *Config) ResolveForRepo(repoKey string) *Config {
 			if o.Sync.RetryBackoff != nil {
 				resolved.Sync.RetryBackoff = *o.Sync.RetryBackoff
 			}
+			if o.Sync.Update != nil {
+				resolved.Sync.Update = *o.Sync.Update
+			}
 		}
 		if o.Backup != nil {
 			if o.Backup.Enabled != nil {
