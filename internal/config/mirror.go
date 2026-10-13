@@ -19,6 +19,9 @@ type MirrorConfig struct {
 	Interval time.Duration `koanf:"interval" yaml:"interval" default:"24h" validate:"min=0"`
 	// LFS also mirrors the repos' Git LFS content.
 	LFS bool `koanf:"lfs" yaml:"lfs,omitempty"`
+	// KeepRewritten is how long a mirror keeps the old tip of a ref its
+	// upstream rewrote, such as a force-pushed branch; 0 keeps none.
+	KeepRewritten time.Duration `koanf:"keep_rewritten" yaml:"keep_rewritten" default:"2160h" validate:"min=0"`
 }
 
 // MirrorOverride turns mirroring on or off for an account's repos or some

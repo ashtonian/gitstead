@@ -102,7 +102,7 @@ func mirrorJobs(cfg *config.Config, st *state.State, pass func(string, *state.Re
 		}
 		job := mirrorJob{
 			key: key, url: repo.CloneURL, path: cfg.MirrorPath(key), from: repo.MirrorPath,
-			opts: gitops.MirrorOptions{LFS: m.LFS}, timeout: cfg.Sync.CloneTimeout,
+			opts: gitops.MirrorOptions{LFS: m.LFS, KeepRewritten: cfg.Mirror.KeepRewritten}, timeout: cfg.Sync.CloneTimeout,
 		}
 		if !repourl.IsHTTP(repo.CloneURL) {
 			job.opts.SSHKey = cfg.ResolveSSHKey(key, repo.DiscoveredBy)

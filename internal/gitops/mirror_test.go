@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/gitops"
 )
@@ -86,5 +87,76 @@ func TestMirror_LFS(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(objects[0]); string(got) != string(f.content) {
 		t.Error("the LFS object isn't the content")
+	}
+}
+
+// git's own prune settings never make a mirror drop a branch deleted
+// upstream.
+func TestMirror_NeverPrunes(t *testing.T) {
+	for _, setting := range []string{"fetch.prune", "remote.origin.prune", "fetch.pruneTags"} {
+		t.Run(setting, func(t *testing.T) {
+			ctx := context.Background()
+			remote, clone := remoteAndClone(t)
+			mustGit(t, clone, "push", "-q", "origin", "HEAD:refs/heads/precious", "HEAD:refs/tags/v1")
+			path := filepath.Join(t.TempDir(), "app.git")
+			if _, err := gitops.Mirror(ctx, remote, path, gitops.MirrorOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			mustGit(t, path, "config", setting, "true")
+			mustGit(t, clone, "push", "-q", "origin", ":refs/heads/precious", ":refs/tags/v1")
+			if _, err := gitops.Mirror(ctx, remote, path, gitops.MirrorOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			for _, ref := range []string{"refs/heads/precious", "refs/tags/v1"} {
+				if _, err := gitops.Git(ctx, path, "rev-parse", "--verify", "-q", ref); err != nil {
+					t.Errorf("%s was pruned", ref)
+				}
+			}
+		})
+	}
+}
+
+// A force-push upstream moves the mirror's branch, and its old tip is kept
+// for KeepRewritten; a fast-forward keeps nothing.
+func TestMirror_KeepsRewrittenHistory(t *testing.T) {
+	ctx := context.Background()
+	remote, clone := remoteAndClone(t)
+	path := filepath.Join(t.TempDir(), "app.git")
+	now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	opts := gitops.MirrorOptions{KeepRewritten: 48 * time.Hour, Now: func() time.Time { return now }}
+	if _, err := gitops.Mirror(ctx, remote, path, opts); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, clone, "b.txt", "b\n")
+	mustGit(t, clone, "push", "-q", "origin", "HEAD:main")
+	if _, err := gitops.Mirror(ctx, remote, path, opts); err != nil {
+		t.Fatal(err)
+	}
+	if kept := mustGit(t, path, "for-each-ref", gitops.RewrittenPrefix); kept != "" {
+		t.Fatalf("a fast-forward kept:\n%s", kept)
+	}
+
+	lost := mustGit(t, clone, "rev-parse", "HEAD")
+	mustGit(t, clone, "reset", "-q", "--hard", "HEAD~1")
+	commitFile(t, clone, "c.txt", "c\n")
+	mustGit(t, clone, "push", "-q", "--force", "origin", "HEAD:main")
+	now = now.Add(time.Hour)
+	if _, err := gitops.Mirror(ctx, remote, path, opts); err != nil {
+		t.Fatal(err)
+	}
+	ref := gitops.RewrittenPrefix + "20261013T130000Z/heads/main"
+	if got := mustGit(t, path, "rev-parse", ref); got != lost {
+		t.Errorf("%s = %s, want the old tip %s", ref, got, lost)
+	}
+	if got, want := mustGit(t, path, "rev-parse", "refs/heads/main"), mustGit(t, clone, "rev-parse", "HEAD"); got != want {
+		t.Errorf("main = %s, want the remote's %s", got, want)
+	}
+
+	now = now.Add(49 * time.Hour)
+	if _, err := gitops.Mirror(ctx, remote, path, opts); err != nil {
+		t.Fatal(err)
+	}
+	if kept := mustGit(t, path, "for-each-ref", gitops.RewrittenPrefix); kept != "" {
+		t.Errorf("kept past KeepRewritten:\n%s", kept)
 	}
 }
