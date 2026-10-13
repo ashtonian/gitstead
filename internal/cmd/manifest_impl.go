@@ -104,6 +104,18 @@ func (c *ManifestImportCmd) Run(ctx *Context) error {
 				continue
 			}
 		}
+		// An entry's account or key is kept in config before its clone is
+		// made, so the clone gets that account's identity and key, and
+		// keeps them on every later run.
+		if (mr.Account != "" || mr.SSHKey != "") && !c.DryRun {
+			if err := keepBinding(ctx, cfg, id.Key(), mr); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", mr.URL, err))
+				continue
+			}
+			if cfg, err = ctx.ReloadConfig(); err != nil {
+				return err
+			}
+		}
 		d := reconcile.HandAdded(cfg, id, dest, mr.Tags)
 		if err := addByHand(ctx, cfg, st, d, c.DryRun); err != nil {
 			errs = append(errs, err)
@@ -121,15 +133,48 @@ func (c *ManifestImportCmd) Run(ctx *Context) error {
 	return ctx.finishChanges(outcome(len(errs), added+len(errs), "manifest entries could not be imported"))
 }
 
-// manifestEntry is repo key's manifest entry: its URL, tags, and its path
-// when config wouldn't put it there. A repo with no URL on record has none.
+// manifestEntry is repo key's manifest entry: its URL, tags, its path when
+// config wouldn't put it there, and the account or key its own repos: or
+// manifest entry binds it to. A repo with no URL on record has none.
 func manifestEntry(cfg *config.Config, key string, r *state.RepoState, tags []string) (config.ManualRepo, bool) {
 	if r == nil || r.CloneURL == "" {
 		return config.ManualRepo{}, false
 	}
 	templated, _ := reconcile.TemplatePath(cfg, key, r.Host, r.Owner, r.Name, r.FullName)
 	base := config.ExpandHome(cfg.ResolveForRepo(key).BaseDir)
-	return config.ManualRepo{URL: r.CloneURL, Tags: tags, Path: config.PortablePath(r.LocalPath, templated, base)}, true
+	e := config.ManualRepo{URL: r.CloneURL, Tags: tags, Path: config.PortablePath(r.LocalPath, templated, base)}
+	if listed, ok := cfg.RepoEntry(key); ok {
+		e.Account, e.SSHKey = listed.Account, listed.SSHKey
+	}
+	return e, true
+}
+
+// keepBinding saves the account or SSH key a manifest entry binds repo key
+// to, where config reads it from: the shared manifest when config names one,
+// else config's repos:.
+func keepBinding(ctx *Context, cfg *config.Config, key string, mr config.ManualRepo) error {
+	if mr.Account != "" && cfg.FindAccount(mr.Account) == nil {
+		return fmt.Errorf("names unknown account %q", mr.Account)
+	}
+	entry := config.ManualRepo{URL: mr.URL, Tags: mr.Tags, Path: mr.Path, Account: mr.Account, SSHKey: mr.SSHKey}
+	if cfg.Manifest != "" {
+		return config.UpdateManifest(cfg.Manifest, func(m *config.Manifest) error {
+			m.Upsert(entry)
+			return nil
+		})
+	}
+	doc, err := config.OpenDocument(ctx.Config)
+	if err != nil {
+		return err
+	}
+	if err := doc.Upsert("repos", config.MatchesRepo(key), entry); err != nil {
+		return err
+	}
+	if err := doc.Save(); err != nil {
+		return fmt.Errorf("its account or key must be kept in config, but adding it to %s's repos: failed (%w); add the entry there yourself, or point manifest: at a file to keep it in", ctx.Config, err)
+	}
+	fmt.Printf("  Added %s to %s's repos:, for its account or key\n", key, ctx.Config)
+	return nil
 }
 
 // recordInManifest adds the repos with keys, tracked by hand, to the shared

@@ -180,7 +180,8 @@ func (c *Config) ManualPath(key, path string) string {
 	return filepath.Join(ExpandHome(c.ResolveForRepo(key).BaseDir), path)
 }
 
-// loadManifest adds the shared manifest's repos to cfg.Repos.
+// loadManifest adds the shared manifest's repos to cfg.Repos, checked as
+// repos: entries are: an account an entry names must be one of config's.
 func loadManifest(cfg *Config) error {
 	if cfg.Manifest == "" {
 		return nil
@@ -189,8 +190,32 @@ func loadManifest(cfg *Config) error {
 	if err != nil {
 		return err
 	}
+	for _, r := range m.Repos {
+		if r.Account != "" && cfg.FindAccount(r.Account) == nil {
+			return fmt.Errorf("manifest %s: repos entry %s names unknown account %q", cfg.Manifest, r.URL, r.Account)
+		}
+	}
 	cfg.Repos = append(cfg.Repos, m.Repos...)
 	return nil
+}
+
+// RepoEntry returns the repos: or shared-manifest entry for repo key.
+func (c *Config) RepoEntry(key string) (ManualRepo, bool) {
+	for _, r := range c.Repos {
+		if manualKey(r) == key {
+			return r, true
+		}
+	}
+	return ManualRepo{}, false
+}
+
+// MatchesRepo reports whether a repos: entry, as a config file's YAML node,
+// is repo key's.
+func MatchesRepo(key string) func(*yaml.Node) bool {
+	return func(n *yaml.Node) bool {
+		var r ManualRepo
+		return n.Decode(&r) == nil && manualKey(r) == key
+	}
 }
 
 // manifestLock is the lock file for the manifest at path: in this user's

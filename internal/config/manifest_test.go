@@ -103,3 +103,20 @@ func TestLoad_Manifest(t *testing.T) {
 		t.Errorf("repos = %+v", cfg.Repos)
 	}
 }
+
+// A shared manifest's entry is checked as a repos: entry is: an account it
+// names must be one config has.
+func TestLoad_ManifestUnknownAccount(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "repos.yaml")
+	if err := os.WriteFile(manifest, []byte("repos:\n  - url: git@github.com:acme/app.git\n    account: wrok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("manifest: "+manifest+"\naccounts:\n  - name: work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), `unknown account "wrok"`) {
+		t.Fatalf("Load = %v, want an unknown account error", err)
+	}
+}
