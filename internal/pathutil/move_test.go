@@ -1,6 +1,8 @@
 package pathutil
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -125,5 +127,41 @@ func TestMove_FailedCopyKeepsTheSource(t *testing.T) {
 	}
 	if n := entries(t, parent); n != 0 {
 		t.Errorf("a failed copy left %d entries behind", n)
+	}
+}
+
+// RenameNoReplace never replaces anything, not even an empty directory.
+func TestRenameNoReplace(t *testing.T) {
+	for _, existing := range []string{"", "file", "empty dir"} {
+		t.Run("over "+existing, func(t *testing.T) {
+			root := t.TempDir()
+			src, dst := filepath.Join(root, "src"), filepath.Join(root, "dst")
+			if err := os.Mkdir(src, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			switch existing {
+			case "file":
+				if err := os.WriteFile(dst, []byte("x"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			case "empty dir":
+				if err := os.Mkdir(dst, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := RenameNoReplace(src, dst)
+			if existing == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if !errors.Is(err, fs.ErrExist) {
+				t.Fatalf("RenameNoReplace = %v, want fs.ErrExist", err)
+			}
+			if _, err := os.Stat(src); err != nil {
+				t.Errorf("source gone: %v", err)
+			}
+		})
 	}
 }

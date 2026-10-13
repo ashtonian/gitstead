@@ -30,7 +30,7 @@ func (e *LeftoverError) Unwrap() error { return e.Err }
 // so a failed move leaves src whole and nothing at dst -- except that a
 // *LeftoverError means dst is whole and only deleting src failed.
 func Move(src, dst string) error {
-	return move(src, dst, os.Rename)
+	return move(src, dst, RenameNoReplace)
 }
 
 func move(src, dst string, rename func(string, string) error) error {
@@ -55,7 +55,7 @@ func move(src, dst string, rename func(string, string) error) error {
 		_ = SafeRemoveAll(staging) // the copy's error is the one to report
 		return fmt.Errorf("copying %s to %s: %w", src, dst, err)
 	}
-	if err := os.Rename(staging, dst); err != nil {
+	if err := RenameNoReplace(staging, dst); err != nil {
 		_ = SafeRemoveAll(staging)
 		return err
 	}
