@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"time"
+
 	"fmt"
 
 	agents "github.com/ashtonian/git-mgr/internal/agent"
@@ -17,6 +19,16 @@ const (
 	AgentMissing  = "missing"  // a copy of its is gone from disk
 	AgentRetiring = "retiring" // retiring it began and didn't finish
 )
+
+// WaitingFor reports whether r's agent, running, is waiting for you: since
+// when, and for what if it said.
+func WaitingFor(r *state.ReplicaState) (since time.Time, what string, ok bool) {
+	run := r.Run
+	if run == nil || !run.Ended.IsZero() || run.Waiting.IsZero() || run.Waiting.Before(run.Started) {
+		return time.Time{}, "", false
+	}
+	return run.Waiting, run.WaitingFor, true
+}
 
 // AgentState is where an agent is in its lifecycle, from its lease and its
 // replica's record. stateDir is the state file's directory.

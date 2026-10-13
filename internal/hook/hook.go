@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -46,6 +47,8 @@ type Hook struct {
 	// workspace/agent label.
 	Name string
 	Env  Env
+	// Vars are more of the environment, NAME=value, such as an agent's.
+	Vars []string
 }
 
 // Env is what a hook is told of its checkout, as GIT_MGR_* variables; empty
@@ -149,7 +152,7 @@ func (r Runner) run(ctx context.Context, h Hook, command string, out io.Writer) 
 }
 
 func (h Hook) environ() []string {
-	env := []string{"GIT_MGR_EVENT=" + h.Event, "GIT_MGR_PATH=" + h.Dir}
+	env := append(slices.Clone(h.Vars), "GIT_MGR_EVENT="+h.Event, "GIT_MGR_PATH="+h.Dir)
 	for k, v := range map[string]string{
 		"GIT_MGR_REPO":      h.Env.Repo,
 		"GIT_MGR_SOURCE":    h.Env.Source,

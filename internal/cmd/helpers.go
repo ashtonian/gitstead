@@ -14,6 +14,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/hook"
 	"github.com/ashtonian/git-mgr/internal/oplog"
 	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/git-mgr/internal/workspace"
 )
 
 func fileExists(p string) bool {
@@ -51,6 +52,12 @@ func stateUpdater(cfg *config.Config, st *state.State) func(change func(*state.S
 // run of each event under <state dir>/hooks; echo also gets the output.
 func hookRunner(cfg *config.Config, st *state.State, echo io.Writer) hook.Runner {
 	return hook.Runner{LogDir: filepath.Join(st.Dir(), "hooks"), Timeout: cfg.Hooks.Timeout, Echo: echo}
+}
+
+// agentEnv is the environment of agent's commands in workspace ws, giving
+// the agent its ports first if it has none (see workspace.AgentEnv).
+func agentEnv(cfg *config.Config, st *state.State, ws, agent string) ([]string, error) {
+	return workspace.AgentEnv(st, stateUpdater(cfg, st), workspace.SettingsFor(cfg, ws), ws, agent)
 }
 
 // staleCleanup judges tracked repos against a discovery pass under the

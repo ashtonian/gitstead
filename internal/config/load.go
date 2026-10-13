@@ -169,6 +169,11 @@ func normalize(cfg *Config) {
 func expandPaths(cfg *Config) {
 	cfg.BaseDir = ExpandHome(cfg.BaseDir)
 	cfg.WorkspaceDefaults.Root = ExpandHome(cfg.WorkspaceDefaults.Root)
+	if cfg.WorkspaceDefaults.CacheRoot == "" {
+		cfg.WorkspaceDefaults.CacheRoot = defaultCacheRoot()
+	} else {
+		cfg.WorkspaceDefaults.CacheRoot = ExpandHome(cfg.WorkspaceDefaults.CacheRoot)
+	}
 	for i := range cfg.Workspaces {
 		cfg.Workspaces[i].Root = ExpandHome(cfg.Workspaces[i].Root)
 		cfg.Workspaces[i].Path = ExpandHome(cfg.Workspaces[i].Path)

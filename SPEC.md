@@ -511,6 +511,9 @@ workspace_defaults:
   branch: "agents/{{.Workspace}}/{{.Agent}}"
   hooks:
     post_create: []          # after the repo's post_create; a workspace's own replaces it
+  ports: {base: 41000, count: 10}   # each agent's block; base 0 = none; workspaces[].ports overrides
+  env: {}                    # templates of AgentVars; a workspace's env adds to it, name by name
+  cache_root: ""             # "" = $XDG_CACHE_HOME/git-mgr/workspaces; <cache_root>/<workspace> is shared
 
 workspaces:
   - name: app
@@ -818,6 +821,8 @@ notify:
   on_error: true                  # Notify when repos fail to fetch/backup
   on_completion: false            # Notify on every sync completion (noisy for cron)
   on_stale: true                  # Notify when new stale repos detected
+  on_waiting: true                # Notify when an agent is waiting for you
+  waiting_after: "30s"            # a tmux pane quiet this long after working is waiting; 0 = off
 
 # ============================================================================
 # Logging
@@ -926,6 +931,8 @@ workspaces:
             pr: https://github.com/ashtonian/git-mgr/pull/42
             last_backup: 2026-10-12T14:00:00Z   # backup and offsite status, as for repos
         retiring: ""             # when a retire began; set until it finishes
+        port: 41000              # the agent's block of ports, given on first need, kept for the replica's life
+        ports: 10
         run:                     # the agent's latest run; whether it runs now is its lease's to say
           profile: claude
           command: "claude --continue"
@@ -934,6 +941,8 @@ workspaces:
           session: "%3"
           started: 2026-10-12T15:00:00Z
           stop_requested: ""     # when `ws stop` asked it to end
+          waiting: ""            # when it was last seen waiting for you; zero once it works again
+          waiting_for: ""        # what it said it waits for
           ended: 2026-10-12T17:30:00Z
           exit_code: 0
 
@@ -1914,7 +1923,7 @@ from:
    `MUXY_SESSION_ID`, `ITERM_SESSION_ID` or `TERM_SESSION_ID`; for tmux the
    server's socket, from `$TMUX`), so `git-mgr top` can read its activity.
 4. Run `$SHELL -i -c <command>` in the replica, with the profile's `env` and
-   `GIT_MGR_WORKSPACE`, `GIT_MGR_AGENT`, `GIT_MGR_REPLICA`. The command is the
+   then the agent's environment (below). The command is the
    profile's `resume` when the replica has a run on record (unless `--fresh`).
    The interactive shell takes the terminal's foreground process group, so
    Ctrl-C and Ctrl-\ reach the agent; the run catches (never ignores, which
@@ -1922,7 +1931,44 @@ from:
    on SIGTERM or SIGHUP hangs up: SIGHUP to the terminal's foreground group
    (the agent's job) and to the shell, which doesn't pass it on itself.
 5. Record the end and exit status (128+n for signal n), release the lease, and
-   exec an interactive shell in the replica (`--no-shell` exits instead).
+   exec an interactive shell in the replica, with the same environment
+   (`--no-shell` exits instead).
+
+While the agent runs in a tmux pane, a watcher looks at the pane every 2s
+(`activity.Watch` over the tracker `top` uses, with its own state handle): 5s
+or more of output, then none for `notify.waiting_after`, records `waiting`
+("its pane has been quiet for 30s") unless a wait is already recorded; output
+again clears it. `ws waiting` -- for agents' own hooks -- takes the workspace
+and agent from `--workspace`/`--agent` or `GIT_MGR_WORKSPACE`/`GIT_MGR_AGENT`
+(none: exit 0, silently), the message from `--message`, a JSON argument
+(Codex: `type: agent-turn-complete`, `last-assistant-message`) or JSON on
+stdin, read for at most 2s (Claude Code: `message`, or `hook_event_name:
+Stop`), records it on the running run under a lock wait of at most 5s, and
+notifies under `notify.enabled` and `notify.on_waiting` unless the same run
+reported a wait within 10s. `--clear` zeroes it. It always exits 0: a hook
+must never fail its agent. Waiting is an attribute of a running agent, not a
+state of its own, so launchers and plugins that look for `running` see it.
+
+### Agent environment
+
+Every command run as an agent -- its run and the shell left after it, `ws
+exec`, `post_create` hooks, `ws env` -- gets `workspace.AgentEnv`:
+`GIT_MGR_WORKSPACE`, `GIT_MGR_AGENT`, `GIT_MGR_AGENT_N` (its place among the
+names `agent_name` gives the workspace, else among its agents by name),
+`GIT_MGR_REPLICA`, `GIT_MGR_PORT` and `GIT_MGR_PORTS` when it has ports,
+`GIT_MGR_CACHE`; then the workspace's `env` (workspace_defaults' with the
+workspace's own added name by name) rendered as Go templates of the same
+(`{{add .Port 1}}`), sorted by name. Config validation renders every template
+for a sample agent and rejects names that aren't variable names or start with
+`GIT_MGR_`.
+
+Ports: an agent without a block gets one under the state lock -- the lowest
+`count` ports from `base` that overlap no recorded agent's block and that
+nothing is listening on (a bind to each) -- recorded on its replica and kept
+for the replica's life; a replica removed frees its block. `ws exec` gives its
+agents their environment before running anything, since giving ports writes
+the state. The shared cache is `<cache_root>/<workspace>`, made on first use
+and deleted by `ws rm --delete` and by `remove-workspace` on apply.
 
 `ws stop` reads the holder's pid from the lease, sends SIGTERM, and waits up to
 `--timeout` for the lease to be released; with `--kill`, it then SIGKILLs the

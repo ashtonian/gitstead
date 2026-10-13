@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
 
+	"github.com/ashtonian/git-mgr/internal/activity"
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/state"
 	"github.com/ashtonian/git-mgr/internal/view"
@@ -42,7 +43,7 @@ func (c *TopCmd) Run(ctx *Context) error {
 		return fmt.Errorf("--every %s is too often; give at least 1s", c.Every)
 	}
 	// The tracker remembers each agent pane's screen between looks.
-	tracker := view.NewTracker()
+	tracker := activity.NewTracker()
 	collect := func(goCtx context.Context) (view.Snapshot, error) {
 		// Read afresh each time, without the lock: runs start and stop, and
 		// syncs record, while the view is open.

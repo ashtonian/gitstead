@@ -7,6 +7,8 @@ import (
 	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/ashtonian/git-mgr/internal/activity"
 )
 
 // RenderOptions shape a rendering.
@@ -31,10 +33,13 @@ var (
 // then the repos.
 func Render(s Snapshot, o RenderOptions) string {
 	var b strings.Builder
-	running, attention := 0, 0
+	running, waiting, attention := 0, 0, 0
 	for _, c := range s.Copies {
 		if c.AgentState == "running" || c.AgentState == "stopping" {
 			running++
+		}
+		if !c.Waiting.IsZero() {
+			waiting++
 		}
 	}
 	var repos []RepoRow
@@ -46,8 +51,12 @@ func Render(s Snapshot, o RenderOptions) string {
 			repos = append(repos, r)
 		}
 	}
-	line := fmt.Sprintf("git-mgr top  %s  ·  %s, %s running  ·  %s, %d need attention",
-		s.Taken.Local().Format("15:04:05"), count(len(s.Copies), "copy", "copies"), count(running, "agent", "agents"),
+	agentsLine := count(running, "agent", "agents") + " running"
+	if waiting > 0 {
+		agentsLine += fmt.Sprintf(", %d waiting for you", waiting)
+	}
+	line := fmt.Sprintf("git-mgr top  %s  ·  %s, %s  ·  %s, %d need attention",
+		s.Taken.Local().Format("15:04:05"), count(len(s.Copies), "copy", "copies"), agentsLine,
 		count(len(s.Repos), "repo", "repos"), attention)
 	if o.Width > 0 {
 		line = cut(line, o.Width)
@@ -57,19 +66,27 @@ func Render(s Snapshot, o RenderOptions) string {
 	if len(s.Copies) > 0 {
 		t := table{header: []string{"COPY", "AGENT", "ACTIVITY", "BRANCH", "STATE", "AHEAD/BEHIND", "BACKUP", "NOTES"}}
 		for _, c := range s.Copies {
-			notes := strings.Join(c.Issues, "; ")
+			var notes []string
+			if !c.Waiting.IsZero() && c.WaitingFor != "" {
+				notes = append(notes, c.WaitingFor)
+			}
+			notes = append(notes, c.Issues...)
 			if c.PR != "" {
-				notes = strings.TrimPrefix(notes+"; "+c.PR, "; ")
+				notes = append(notes, c.PR)
+			}
+			agent := c.AgentState
+			if !c.Waiting.IsZero() {
+				agent = "waiting"
 			}
 			t.rows = append(t.rows, []cell{
 				{text: c.Label},
-				{text: dash(c.AgentState), style: agentStyle(c.AgentState)},
+				{text: dash(agent), style: agentStyle(agent)},
 				{text: dash(c.Activity), style: idleStyle(c)},
 				{text: dash(c.Branch)},
 				{text: c.State, style: stateStyle(c.State)},
 				{text: fmt.Sprintf("%d/%d", c.Ahead, c.Behind), style: aheadStyle(c.Ahead, c.Behind)},
 				{text: age(s.Taken, c.LastBackup)},
-				{text: notes},
+				{text: strings.Join(notes, "; ")},
 			})
 		}
 		b.WriteString(t.render(o))
@@ -189,7 +206,7 @@ func age(now, t time.Time) string {
 	if t.IsZero() {
 		return "-"
 	}
-	return Ago(now.Sub(t))
+	return activity.Ago(now.Sub(t))
 }
 
 func stateStyle(state string) *lipgloss.Style {
@@ -207,7 +224,7 @@ func agentStyle(state string) *lipgloss.Style {
 	switch state {
 	case "running":
 		return &good
-	case "stopping", "retiring":
+	case "stopping", "retiring", "waiting":
 		return &warn
 	case "missing":
 		return &bad

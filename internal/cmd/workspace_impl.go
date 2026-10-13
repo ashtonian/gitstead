@@ -34,6 +34,8 @@ type WorkspaceCmd struct {
 	Exec     WSExecCmd     `cmd:"" help:"Run a command in each copy (after --)."`
 	Open     WSOpenCmd     `cmd:"" help:"Open the workspace's agents with a launcher: tmux, iTerm, Muxy or a plugin."`
 	Run      WSRunCmd      `cmd:"" help:"Run an agent in its replica, in this terminal: what each pane of 'ws open' runs."`
+	Env      WSEnvCmd      `cmd:"" help:"Print an agent's environment -- its ports, cache and workspace env -- as shell exports."`
+	Waiting  WSWaitingCmd  `cmd:"" help:"Tell git-mgr an agent is waiting for you: for agents' own notification hooks."`
 	Stop     WSStopCmd     `cmd:"" help:"End agents' runs, as closing their terminals would."`
 	Publish  WSPublishCmd  `cmd:"" help:"Push agents' branches, and with --pr open a pull request per repo."`
 	Retire   WSRetireCmd   `cmd:"" help:"Retire agents: archive their copies' unique work, remove the copies, keep tombstones."`
@@ -407,6 +409,9 @@ func (c *WSRemoveCmd) Run(ctx *Context) error {
 	}
 	if kept > 0 {
 		return outcome(kept, len(copies), "copies of %q could not be removed and are still recorded", c.Name)
+	}
+	if err := workspace.RemoveCache(spec.Settings.CacheDir); err != nil {
+		ctx.Logger().Warn("workspace removed, but not its agents' cache", "workspace", c.Name, "error", err)
 	}
 	logEvent(ctx, "ws_remove", c.Name, "")
 	return nil
