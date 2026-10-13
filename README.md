@@ -625,7 +625,8 @@ manifest: ~/dotfiles/git-mgr/repos.yaml
   the repo's URL, the tags you gave it, and its path when it isn't where
   `path_template` puts it -- relative to its `base_dir` when under it,
   `~/...` under your home, else absolute -- so it lands in the same place on
-  every machine.
+  every machine -- and the `account` or `ssh_key` an imported entry binds it
+  to.
 - Every machine reads the manifest as more `repos:` entries, so its next
   `sync` clones what another machine added.
 - `git-mgr remove` takes the entry out, so no other machine clones it again;
@@ -637,7 +638,11 @@ manifest: ~/dotfiles/git-mgr/repos.yaml
   here that neither lists.
 
 The config file itself is never written, so this works when it is
-generated -- by the home-manager module, say -- and read-only. Writes take a lock in your cache directory, never beside the manifest, and replace the file atomically, so a sync tool
+generated -- by the home-manager module, say -- and read-only. Without
+`manifest:`, `manifest import` keeps an entry's `account` or `ssh_key` in
+config's `repos:`, edited in place, since state can't hold it: a read-only
+config fails that entry, naming what to add. `manifest export` writes each
+repo's binding back out. Writes take a lock in your cache directory, never beside the manifest, and replace the file atomically, so a sync tool
 copying it never sees half a file; two machines writing at the same moment
 through a sync tool can still conflict, as any synced file can, and the
 next `manifest save` puts back an entry a conflict lost.

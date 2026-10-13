@@ -1699,3 +1699,62 @@ func gitOK(gitDir string) bool {
 	_, err := os.Stat(gitDir)
 	return err == nil
 }
+
+// TestE2E_ManifestKeepsAccounts: a manifest entry's account and SSH key are
+// kept where config reads them -- config's repos:, or the shared manifest --
+// so the clone gets that account's identity and key and keeps them; export
+// writes them back out.
+func TestE2E_ManifestKeepsAccounts(t *testing.T) {
+	tmp := t.TempDir()
+	remote := filepath.Join(tmp, "remotes", "app.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	seed := filepath.Join(tmp, "seed")
+	gitCmd(t, tmp, "clone", "-q", remote, seed)
+	gitCmd(t, seed, "-c", "user.name=e2e", "-c", "user.email=e2e@test.local", "commit", "-q", "--allow-empty", "-m", "init")
+	gitCmd(t, seed, "push", "-q", "origin", "HEAD:main")
+	key := filepath.Join(tmp, "keys", "id_work")
+
+	for _, shared := range []bool{false, true} {
+		t.Run(fmt.Sprintf("shared manifest=%v", shared), func(t *testing.T) {
+			env := newLocalEnv(t)
+			manifest := filepath.Join(t.TempDir(), "repos.yaml")
+			cfg := fmt.Sprintf("base_dir: %s\naccounts:\n  - name: work\n    git:\n      name: Work Me\n      email: me@work.example\n", env.baseDir)
+			if shared {
+				cfg += "manifest: " + manifest + "\n"
+			}
+			if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			in := filepath.Join(t.TempDir(), "import.yaml")
+			entry := fmt.Sprintf("repos:\n  - url: %s\n    account: work\n    ssh_key: %s\n", remote, key)
+			if err := os.WriteFile(in, []byte(entry), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if out, code := env.run(t, "manifest", "import", in); code != 0 {
+				t.Fatalf("manifest import exit %d:\n%s", code, out)
+			}
+			clone := filepath.Join(env.baseDir, "local", "remotes", "app")
+			if got := gitCmd(t, clone, "config", "--local", "user.email"); got != "me@work.example" {
+				t.Errorf("user.email = %q, want the work account's", got)
+			}
+			if got := gitCmd(t, clone, "config", "--local", "core.sshCommand"); !strings.Contains(got, key) {
+				t.Errorf("core.sshCommand = %q, want it to use %s", got, key)
+			}
+			keptIn := env.configFile
+			if shared {
+				keptIn = manifest
+			}
+			if b, _ := os.ReadFile(keptIn); !strings.Contains(string(b), "account: work") || !strings.Contains(string(b), key) {
+				t.Errorf("the binding wasn't kept in %s:\n%s", keptIn, b)
+			}
+			// A later run keeps them: nothing to change.
+			if out, code := env.run(t, "plan"); code != 0 || strings.Contains(out, "user.email") {
+				t.Errorf("plan exit %d, wants a change:\n%s", code, out)
+			}
+			out, code := env.run(t, "manifest", "export")
+			if code != 0 || !strings.Contains(out, "account: work") || !strings.Contains(out, "ssh_key: "+key) {
+				t.Errorf("export exit %d, without the binding:\n%s", code, out)
+			}
+		})
+	}
+}
