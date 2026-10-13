@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -226,6 +227,85 @@ func (c *Config) ResolveSSHKey(repoKey, ruleName string) string {
 		return ExpandHome(a.SSHKey)
 	}
 	return ""
+}
+
+// Host is the host a provider's repos are on: its URL's, without an "api."
+// prefix, else github.com or gitlab.com for those types; "" when unknown.
+func (p Provider) Host() string {
+	if p.URL == "" {
+		switch NormalizeProviderType(p.Type) {
+		case "github":
+			return "github.com"
+		case "gitlab":
+			return "gitlab.com"
+		}
+		return ""
+	}
+	u := strings.TrimPrefix(strings.TrimPrefix(p.URL, "https://"), "http://")
+	host, _, _ := strings.Cut(u, "/")
+	return strings.TrimPrefix(host, "api.")
+}
+
+// ProviderFor returns the provider whose token acts for repoKey on its host:
+// the one its discovering rule names, else the one bound to its account on
+// that host, else the only one on that host when it isn't bound to another
+// account. nil when no provider serves the host. An error when several might
+// and nothing says which, so a request is never made as the wrong account.
+func (c *Config) ProviderFor(repoKey, ruleName string) (*Provider, error) {
+	for _, r := range c.Discovery {
+		if r.Name == ruleName {
+			for i := range c.Providers {
+				if c.Providers[i].Name == r.Provider {
+					return &c.Providers[i], nil
+				}
+			}
+		}
+	}
+	host, _ := splitKey(repoKey)
+	var onHost []*Provider
+	for i := range c.Providers {
+		if c.Providers[i].Host() == host {
+			onHost = append(onHost, &c.Providers[i])
+		}
+	}
+	if len(onHost) == 0 {
+		return nil, nil
+	}
+	account := c.AccountFor(repoKey, ruleName)
+	if account != nil {
+		var bound []*Provider
+		for _, p := range onHost {
+			if p.Account == account.Name {
+				bound = append(bound, p)
+			}
+		}
+		switch len(bound) {
+		case 1:
+			return bound[0], nil
+		case 0:
+		default:
+			return nil, fmt.Errorf("%s: providers %s and %s both act for account %s on %s; keep one", repoKey, bound[0].Name, bound[1].Name, account.Name, host)
+		}
+	}
+	if len(onHost) == 1 && (onHost[0].Account == "" || account == nil || onHost[0].Account == account.Name) {
+		return onHost[0], nil
+	}
+	who := "it"
+	if account != nil {
+		who = "account " + account.Name
+	}
+	return nil, fmt.Errorf("%s: no provider on %s acts for %s; bind one to its account (providers[].account) or the repo to an account (repos[].account, overrides[].account)", repoKey, host, who)
+}
+
+// AccountsOn counts the accounts that cover repos on host.
+func (c *Config) AccountsOn(host string) int {
+	n := 0
+	for _, a := range c.Accounts {
+		if slices.Contains(a.Hosts, host) {
+			n++
+		}
+	}
+	return n
 }
 
 // FindAccount returns the named account, or nil.

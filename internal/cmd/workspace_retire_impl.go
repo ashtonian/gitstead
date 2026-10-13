@@ -295,7 +295,10 @@ func (c *WSPublishCmd) openPR(ctx context.Context, cfg *config.Config, st *state
 		body, _ = gitops.Git(ctx, l.Path, "log", "--format=- %s", "origin/"+base+".."+branch)
 	}
 
-	kind, env := forge(cfg, st, l.Repo, id)
+	kind, env, err := forge(cfg, st, l.Repo, id)
+	if err != nil {
+		return "", err
+	}
 	repo := id.FullName
 	ctx, cancel := context.WithTimeout(ctx, prTimeout)
 	defer cancel()
@@ -305,7 +308,7 @@ func (c *WSPublishCmd) openPR(ctx context.Context, cfg *config.Config, st *state
 			return "", fmt.Errorf("%s isn't installed", name)
 		}
 		cmd := exec.CommandContext(ctx, path, args...)
-		cmd.Dir, cmd.Env = l.Path, append(os.Environ(), env...)
+		cmd.Dir, cmd.Env = l.Path, env
 		out, err := cmd.CombinedOutput()
 		return strings.TrimSpace(string(out)), err
 	}
@@ -350,28 +353,27 @@ func (c *WSPublishCmd) openPR(ctx context.Context, cfg *config.Config, st *state
 	}
 }
 
+// forgeTokenVars are the variables gh and glab take a token from. When
+// publishing gives them the repo's provider's token, the caller's are left
+// out, so none of them can stand in for it.
+var forgeTokenVars = []string{
+	"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+	"GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN",
+}
+
 // forge names the kind of host a repo is on -- github, gitlab, or "" -- and
-// the environment that gives gh or glab the token of the provider it comes
-// from, so the request is opened by the right account.
-func forge(cfg *config.Config, st *state.State, key string, id repourl.Identity) (string, []string) {
-	var provider *config.Provider
+// the environment that gives gh or glab the token of the provider that acts
+// for it (see config.ProviderFor), so the request is opened by the right
+// account. Without a provider for the host, gh's or glab's own login is used,
+// unless several accounts cover the host: it may not be the repo's.
+func forge(cfg *config.Config, st *state.State, key string, id repourl.Identity) (string, []string, error) {
+	rule := ""
 	if repo := st.Repos[key]; repo != nil {
-		for _, r := range cfg.Discovery {
-			if r.Name == repo.DiscoveredBy {
-				for i := range cfg.Providers {
-					if cfg.Providers[i].Name == r.Provider {
-						provider = &cfg.Providers[i]
-					}
-				}
-			}
-		}
+		rule = repo.DiscoveredBy
 	}
-	if provider == nil {
-		for i := range cfg.Providers {
-			if providerHost(cfg.Providers[i]) == id.Host {
-				provider = &cfg.Providers[i]
-			}
-		}
+	provider, err := cfg.ProviderFor(key, rule)
+	if err != nil {
+		return "", nil, err
 	}
 	kind := ""
 	switch {
@@ -382,15 +384,32 @@ func forge(cfg *config.Config, st *state.State, key string, id repourl.Identity)
 	case id.Host == "gitlab.com":
 		kind = "gitlab"
 	}
-	var env []string
+	if provider == nil && kind != "" && cfg.AccountsOn(id.Host) > 1 {
+		return "", nil, fmt.Errorf("%s: %d accounts cover %s and no provider acts for this repo's, so %s's own login may be another account's; add a provider for it", key, cfg.AccountsOn(id.Host), id.Host, map[string]string{"github": "gh", "gitlab": "glab"}[kind])
+	}
 	token := ""
 	if provider != nil {
-		token, _ = discovery.ResolveToken(*provider)
+		if token, err = discovery.ResolveToken(*provider); err != nil {
+			return "", nil, fmt.Errorf("%s: the token of provider %s, which acts for it: %w", key, provider.Name, err)
+		}
+	}
+	env := config.Environ()
+	if token != "" {
+		env = slices.DeleteFunc(env, func(kv string) bool {
+			name, _, _ := strings.Cut(kv, "=")
+			return slices.Contains(forgeTokenVars, name)
+		})
 	}
 	switch kind {
 	case "github":
+		// gh reads GH_TOKEN for github.com and GHE.com, GH_ENTERPRISE_TOKEN
+		// for GitHub Enterprise Server.
 		if token != "" {
-			env = append(env, "GH_TOKEN="+token)
+			name := "GH_ENTERPRISE_TOKEN"
+			if id.Host == "github.com" || strings.HasSuffix(id.Host, ".ghe.com") {
+				name = "GH_TOKEN"
+			}
+			env = append(env, name+"="+token)
 		}
 		if id.Host != "github.com" {
 			env = append(env, "GH_HOST="+id.Host)
@@ -401,23 +420,7 @@ func forge(cfg *config.Config, st *state.State, key string, id repourl.Identity)
 		}
 		env = append(env, "GITLAB_HOST="+id.Host)
 	}
-	return kind, env
-}
-
-// providerHost is the host a provider's repos are on.
-func providerHost(p config.Provider) string {
-	if p.URL == "" {
-		switch config.NormalizeProviderType(p.Type) {
-		case "github":
-			return "github.com"
-		case "gitlab":
-			return "gitlab.com"
-		}
-		return ""
-	}
-	u := strings.TrimPrefix(strings.TrimPrefix(p.URL, "https://"), "http://")
-	host, _, _ := strings.Cut(u, "/")
-	return strings.TrimPrefix(host, "api.")
+	return kind, env, nil
 }
 
 // lastURL is the last http(s) URL in text.

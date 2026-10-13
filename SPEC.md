@@ -2117,8 +2117,14 @@ opens a request per copy: `gh pr create --repo [host/]owner/name --head
 <branch> --base <base> --title --body [--draft]` for a GitHub host,
 `glab mr create --repo owner/name --source-branch --target-branch --title
 --description --yes [--draft]` for a GitLab host, the host's kind and token
-coming from the provider whose rule discovered the repo (else the provider on
-its host): `GH_TOKEN`/`GH_HOST` or `GITLAB_TOKEN`/`GITLAB_HOST`. An open
+coming from `config.ProviderFor`: the provider whose rule discovered the repo,
+else the one bound to the repo's account on its host, else the only one on its
+host not bound to another account; several candidates and nothing to choose is
+an error. The token goes in `GH_TOKEN` (github.com, `*.ghe.com`),
+`GH_ENTERPRISE_TOKEN` (GitHub Enterprise Server) or `GITLAB_TOKEN`, with
+`GH_HOST`/`GITLAB_HOST`, and the caller's forge token variables are dropped. A
+token that doesn't resolve is an error, as is no provider for the host when
+several accounts cover it; otherwise gh's or glab's own login is used. An open
 request is found (the URL in gh's error, or `gh pr view`/`glab mr view`)
 rather than duplicated. The base defaults to origin's default branch, the
 title to the branch's last commit subject, the body to `git log --format='- %s'

@@ -1137,11 +1137,27 @@ pushes each of its copies' branches to origin, tracking them, and with `--pr`
 opens a pull request per repo -- one per copy, against the repo's default
 branch (`--base`), titled after the branch's last commit and listing its
 commits (`--title`, `--body`, `--draft`). It runs `gh` for GitHub and `glab`
-for GitLab with the token of the provider the repo was discovered through
-(`GH_TOKEN`/`GH_HOST`, `GITLAB_TOKEN`/`GITLAB_HOST`), so the request is opened
-by the right account; a request that is already open is found instead. For
-other hosts it prints the compare URL. The request's URL is recorded and shown
-by `ws status`.
+for GitLab with the token of the provider that acts for the repo, so the
+request is opened by the right account: the provider whose rule discovered
+the repo, else the one bound to the repo's account on its host
+(`providers[].account`), else the only one on its host.
+
+| Host | gh/glab gets |
+| --- | --- |
+| github.com, `*.ghe.com` | `GH_TOKEN` (and `GH_HOST` for `*.ghe.com`) |
+| GitHub Enterprise Server | `GH_ENTERPRISE_TOKEN`, `GH_HOST` |
+| GitLab | `GITLAB_TOKEN`, `GITLAB_HOST` |
+
+The token is the only one gh or glab sees: `GH_TOKEN`, `GITHUB_TOKEN`,
+`GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, `GITLAB_TOKEN`,
+`GITLAB_ACCESS_TOKEN` and `OAUTH_TOKEN` from your shell are left out. Nothing
+is opened -- the copy reports why -- when that provider's token doesn't
+resolve, when several providers serve the host and nothing says which acts
+for the repo, or when no provider serves the host but several accounts cover
+it, since gh's or glab's own login may be another account's. With one
+account, or none, and no provider, their own login is used. A request that is
+already open is found instead. For other hosts it prints the compare URL. The
+request's URL is recorded and shown by `ws status`.
 
 When an agent is done, `git-mgr ws retire <workspace> <agent...>` (or
 `--all`) removes its copies without losing anything:
