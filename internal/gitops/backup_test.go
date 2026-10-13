@@ -622,6 +622,64 @@ func TestBackup_RestoresSubmoduleWork(t *testing.T) {
 	}
 }
 
+// A submodule with work inside one whose status ignores it, so with no backup
+// of its own, is restored --into a clone of that one, at the commit its
+// parent records.
+func TestRestoreBackupInto_NestedInASubmoduleWithoutABackup(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	seed := func(name string) string {
+		remote := filepath.Join(root, name+".git")
+		mustGit(t, root, "init", "-q", "--bare", "-b", "main", remote)
+		dir := filepath.Join(root, "seed-"+name)
+		mustGit(t, root, "clone", "-q", remote, dir)
+		writeFile(t, filepath.Join(dir, name+".txt"), []byte(name+"\n"))
+		mustGit(t, dir, "add", ".")
+		mustGit(t, dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", name)
+		return dir
+	}
+	leaf := seed("leaf")
+	mustGit(t, leaf, "push", "-q", "origin", "HEAD:main")
+	mid := seed("mid")
+	mustGit(t, mid, "-c", "protocol.file.allow=always", "submodule", "add", "-q", filepath.Join(root, "leaf.git"), "leaf")
+	mustGit(t, mid, "config", "-f", ".gitmodules", "submodule.leaf.ignore", "all")
+	mustGit(t, mid, "add", ".gitmodules")
+	mustGit(t, mid, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "leaf")
+	mustGit(t, mid, "push", "-q", "origin", "HEAD:main")
+	top := seed("top")
+	mustGit(t, top, "-c", "protocol.file.allow=always", "submodule", "add", "-q", filepath.Join(root, "mid.git"), "mid")
+	mustGit(t, top, "-c", "protocol.file.allow=always", "submodule", "update", "-q", "--init", "--recursive")
+	mustGit(t, top, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "mid")
+	writeFile(t, filepath.Join(top, "mid", "leaf", "leaf.txt"), []byte("edited deep down\n"))
+	midCommit := mustGit(t, filepath.Join(top, "mid"), "rev-parse", "HEAD")
+
+	patchRoot := t.TempDir()
+	res, err := gitops.Backup(ctx, top, gitops.NewBackupConfig(gitops.WithPatchDir(patchRoot)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Submodules["mid/leaf"] == nil || res.Submodules["mid"] != nil {
+		t.Fatalf("want a backup of mid/leaf and none of mid: %+v", res.Submodules)
+	}
+	b, err := gitops.FindBackup(ctx, top, patchRoot, "latest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scratch := filepath.Join(t.TempDir(), "scratch")
+	if err := gitops.RestoreBackupInto(ctx, top, b, scratch); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGit(t, filepath.Join(scratch, "mid"), "rev-parse", "HEAD"); got != midCommit {
+		t.Errorf("mid is at %s, want %s", got, midCommit)
+	}
+	if got, _ := os.ReadFile(filepath.Join(scratch, "mid", "mid.txt")); string(got) != "mid\n" {
+		t.Errorf("mid/mid.txt = %q; mid should be checked out", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(scratch, "mid", "leaf", "leaf.txt")); string(got) != "edited deep down\n" {
+		t.Errorf("mid/leaf/leaf.txt = %q", got)
+	}
+}
+
 // A submodule's new work makes a new backup of its parent, even when the
 // parent's own work is unchanged.
 func TestBackup_SubmoduleChangeIsANewBackup(t *testing.T) {

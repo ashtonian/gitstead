@@ -1231,8 +1231,10 @@ the submodule's latest), and they are pruned only after a parent backup
 succeeds, so a run that fails after saving a submodule's backup leaves every
 earlier parent backup restorable. Restoring the parent applies each recorded
 submodule backup in the submodule (`--into`: clones the submodule into its
-place in the scratch clone and restores there), found by its recorded copy
-ID. Untracked paths a submodule's backup left out are reported as
+place in the scratch clone and restores there, shallowest first; a submodule
+it sits in that has no backup -- `ignore = all`/`dirty` hiding its work, or
+its backup failed -- is cloned from the original at the gitlink its restored
+parent records first), found by its recorded copy ID. Untracked paths a submodule's backup left out are reported as
 `<path>/<file>`.
 
 ### Snapshot layout
