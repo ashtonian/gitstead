@@ -40,15 +40,25 @@ agents at once, each in a copy of its own — keeping their WIP safe.
 
 ## Install
 
+There is no release yet. git-mgr's config loader is
+[pkg](https://github.com/ashtonian/pkg)'s, which `go.mod` takes from a
+checkout beside this one (`replace => ../pkg/config`) until it is published as a
+module of its own; `go install`, the release archives, the Homebrew cask and
+the Docker image all start with the first release after that. Until then,
+build it from source:
+
 ```bash
-# From source (requires Go; see go.mod for the version)
+git clone https://github.com/ashtonian/pkg
+git clone https://github.com/ashtonian/git-mgr
+cd git-mgr && go install .        # Go version: see go.mod
+```
+
+Once released:
+
+```bash
+brew install --cask ashtonian/tap/git-mgr
 go install github.com/ashtonian/git-mgr@latest
-
-# Docker (multi-arch: linux/amd64, linux/arm64)
-docker pull ashtonian/git-mgr
-
-# Homebrew
-brew install ashtonian/tap/git-mgr
+docker pull ashtonian/git-mgr     # linux/amd64, linux/arm64
 ```
 
 git-mgr shells out to `git`, so git must be on `PATH`.
@@ -1622,6 +1632,9 @@ All config fields can be overridden via `GIT_MGR_*` env vars (e.g.
 | `GITHUB_TOKEN` / `GITLAB_TOKEN` / `GITEA_TOKEN` / `FORGEJO_TOKEN` | Default provider tokens. |
 
 ## Docker
+
+From the first release, `ashtonian/git-mgr` runs git-mgr with git in a
+container:
 
 ```bash
 docker run -v ~/.config/git-mgr:/root/.config/git-mgr \
