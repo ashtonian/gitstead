@@ -1302,7 +1302,7 @@ own `remote_sync`, after its repos are fetched.
 | `agents[].name`, `.command` | `claude`, `codex` when on PATH | An agent profile. The command is typed into an interactive shell in the replica, so shell functions and aliases work. Declaring any replaces the detected ones. |
 | `agents[].resume` | none | Typed instead of `command` when the agent ran in the replica before. |
 | `agents[].env` | none | Extra environment for the agent. |
-| `agents[].status` | none | A status probe: a shell command run in a running agent's replica, with its environment, within `sync.inspect_timeout`, whose first line of output `ws status` and `fleet status` show as the agent's status (`agent_status` under `--json`) -- what it is working on, say. A failing probe shows why. |
+| `agents[].status` | none | A status probe: a shell command run in a running agent's replica, with its environment, within `sync.inspect_timeout`, whose first line of output `ws status` and `fleet status` show as the agent's status (`agent_status` under `--json`) -- what it is working on, say. A probe that prints nothing and fails, or runs out of time, shows why; one that prints shows its first line whatever its exit status. |
 | `workspace_defaults.root` | `~/workspaces` | Holds a directory per workspace. |
 | `workspace_defaults.isolation` | `worktree` | `worktree`, `clone`, `reference-clone` or `shared`. |
 | `workspace_defaults.agents` | `1` | Agents per workspace (1–64). |

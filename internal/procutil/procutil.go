@@ -12,9 +12,10 @@ import (
 
 // Detach makes cmd, made with exec.CommandContext, run in a session of its
 // own, with no controlling terminal to prompt on -- so ssh fails instead of
-// asking for a passphrase -- and makes its context ending kill the whole
-// session, whatever it started included. Wait then gives their output at
-// most grace to close.
+// asking for a passphrase -- and makes its context ending kill its process
+// group, whatever it started included unless that left the group (with a
+// session or group of its own). Wait then gives their output at most grace
+// to close.
 func Detach(cmd *exec.Cmd, grace time.Duration) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Cancel = func() error {
