@@ -515,7 +515,8 @@ concurrency: 8
 lock_timeout: "2m"
 
 # Named, reusable repo selections for `--set <name>` on status/sync/backup/run/
-# remove/remote-sync. In a set: repos globs OR tags (both empty = all), then
+# remove/remote-sync. In a set: repos globs OR tags OR accounts (the covering
+# account) OR rules (the discovering rule) -- all empty = all -- then
 # exclude_archived. --set composes (AND) with inline --repos/--tag.
 sets:
   - name: core

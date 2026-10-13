@@ -331,25 +331,37 @@ func validateWorkspace(cfg *Config, decl Workspace) error {
 	return err
 }
 
-// Matches reports whether a repo belongs to the set: it must survive
-// ExcludeArchived, then match any Repos glob or carry any of Tags (both
-// empty means every repo).
-func (s *RepoSet) Matches(key string, hasTag func(string) bool, archived bool) bool {
-	if s.ExcludeArchived && archived {
+// SetMember is what a set selects a tracked repo by.
+type SetMember struct {
+	Key string
+	// Rule is the discovery rule that found it, Account the account that
+	// covers it; "" for none.
+	Rule, Account string
+	HasTag        func(string) bool
+	Archived      bool
+}
+
+// MemberOf describes tracked repo key, found by rule, for matching sets.
+func (c *Config) MemberOf(key, rule string, hasTag func(string) bool, archived bool) SetMember {
+	m := SetMember{Key: key, Rule: rule, HasTag: hasTag, Archived: archived}
+	if a := c.AccountFor(key, rule); a != nil {
+		m.Account = a.Name
+	}
+	return m
+}
+
+// Matches reports whether repo m is in the set: never an archived one under
+// ExcludeArchived; then one any Repos glob, Tags tag, Accounts account or
+// Rules rule selects, or every repo when the set names none.
+func (s *RepoSet) Matches(m SetMember) bool {
+	if s.ExcludeArchived && m.Archived {
 		return false
 	}
-	if len(s.Repos) == 0 && len(s.Tags) == 0 {
+	if len(s.Repos) == 0 && len(s.Tags) == 0 && len(s.Accounts) == 0 && len(s.Rules) == 0 {
 		return true
 	}
-	for _, g := range s.Repos {
-		if repourl.MatchKey(g, key) {
-			return true
-		}
-	}
-	for _, t := range s.Tags {
-		if hasTag(t) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(s.Repos, func(g string) bool { return repourl.MatchKey(g, m.Key) }) ||
+		slices.ContainsFunc(s.Tags, m.HasTag) ||
+		(m.Account != "" && slices.Contains(s.Accounts, m.Account)) ||
+		(m.Rule != "" && slices.Contains(s.Rules, m.Rule))
 }

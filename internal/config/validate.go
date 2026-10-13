@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -295,6 +296,18 @@ func validateAccounts(cfg *Config) error {
 	for _, o := range cfg.Overrides {
 		if err := check(fmt.Sprintf("override %v", o.Repos), o.Account); err != nil {
 			return err
+		}
+	}
+	for _, s := range cfg.Sets {
+		for _, name := range s.Accounts {
+			if err := check("set "+s.Name, name); err != nil {
+				return err
+			}
+		}
+		for _, rule := range s.Rules {
+			if !slices.ContainsFunc(cfg.Discovery, func(r DiscoveryRule) bool { return r.Name == rule }) {
+				return fmt.Errorf("set %s names unknown discovery rule %q", s.Name, rule)
+			}
 		}
 	}
 	return nil

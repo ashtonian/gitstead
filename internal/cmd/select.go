@@ -34,7 +34,7 @@ func (sel selection) predicate(cfg *config.Config) (func(key string, repo *state
 		set = s
 	}
 	return func(key string, repo *state.RepoState) bool {
-		if set != nil && !set.Matches(key, repo.HasTag, repo.IsArchived) {
+		if set != nil && !set.Matches(cfg.MemberOf(key, repo.DiscoveredBy, repo.HasTag, repo.IsArchived)) {
 			return false
 		}
 		if sel.repos != "" {

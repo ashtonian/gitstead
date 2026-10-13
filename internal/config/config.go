@@ -184,9 +184,13 @@ type ExcludeRule struct {
 // glob OR it carries any of Tags (both empty = all repos); ExcludeArchived then
 // drops archived repos.
 type RepoSet struct {
-	Name            string   `koanf:"name"             yaml:"name"                      validate:"required"`
-	Repos           []string `koanf:"repos"            yaml:"repos,omitempty"`
-	Tags            []string `koanf:"tags"             yaml:"tags,omitempty"`
+	Name  string   `koanf:"name"  yaml:"name"            validate:"required"`
+	Repos []string `koanf:"repos" yaml:"repos,omitempty"`
+	Tags  []string `koanf:"tags"  yaml:"tags,omitempty"`
+	// Accounts selects the repos these accounts cover; Rules the repos these
+	// discovery rules found.
+	Accounts        []string `koanf:"accounts"         yaml:"accounts,omitempty"`
+	Rules           []string `koanf:"rules"            yaml:"rules,omitempty"`
 	ExcludeArchived bool     `koanf:"exclude_archived" yaml:"exclude_archived,omitempty"`
 }
 
