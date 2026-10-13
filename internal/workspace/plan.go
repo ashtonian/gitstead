@@ -356,6 +356,8 @@ func (pl *planner) copy(spec *Spec, r Replica, c Copy, rec *state.CopyState) {
 			pl.add(reconcile.Action{Kind: KindMoveCopy, Target: target, From: rec.Path, To: c.Path, Disruptive: true,
 				Run: moveCopy(spec, r, *rec, c)})
 		}
+	case !here.Exists && rec.Pending:
+		create("not made yet", "")
 	case !here.Exists:
 		create("gone from disk; creating it again", "")
 	case !here.IsRepo || here.Err != nil:

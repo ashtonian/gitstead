@@ -771,7 +771,9 @@ and `ws ensure`.
 Repos added by hand (`clone`, `adopt`, `manifest import`) keep the path and URL
 they were given; only their tags and managed git config follow config. A
 workspace created from flags or adopted is kept as recorded: `ws ensure <name>`
-makes its missing copies again, and nothing removes it but `ws rm`.
+makes its missing copies again -- including any `ws create` couldn't make, as
+its copies are recorded before they are made -- and nothing removes it but
+`ws rm`.
 
 Changes to different repos run at once, up to `concurrency` doing disk work; a
 repo's own changes run in order, and stop at the first that fails. Each change
@@ -1264,7 +1266,9 @@ repos `remove --delete`, `remove --archive` or stale cleanup took away;
 `git-mgr archives show <id>` prints the restore steps.
 
 A workspace created from flags or adopted is kept as recorded: `ws ensure`
-makes its missing copies again, and only `ws rm` removes it. Declared
+makes its missing copies again, including those `ws create` couldn't make
+(recorded first, as not made yet; such a copy doesn't keep its repo from being
+removed), and only `ws rm` removes it. Declared
 workspaces follow config: agents or repos removed from a declaration, a new
 `root`, or a removed declaration are moves and removals that wait for
 `git-mgr apply`; each removed copy's unique work is archived first. Commands
@@ -1602,7 +1606,7 @@ broken setup. With `--quiet`, only failures are printed, to stderr.
 | 1 | The command failed: bad config, unreadable state, every target failed, or it has no `--json` output or needs `--yes`. |
 | 2 | A check ran and found problems: `doctor`, `ws check`. |
 | 3 | Partial failure: some repos, copies or changes failed and the rest succeeded, or `bootstrap` finished but couldn't install its schedule. Each failure is printed to stderr. |
-| 75 | Another git-mgr run held the state lock, or a repo's lock (`.git/git-mgr.lock`, held while a repo is deleted, moved or copied into a workspace), for longer than `lock_timeout`; try again (EX_TEMPFAIL). `git-mgr doctor` reports a stuck state-lock holder; `lsof <repo>/.git/git-mgr.lock` shows a repo lock's. |
+| 75 | Another git-mgr run held the state lock, or a repo's lock (`.git/git-mgr.lock`, held while a repo is deleted, moved or copied into a workspace), for longer than `lock_timeout`, and nothing else was done; try again (EX_TEMPFAIL). When other targets succeeded meanwhile it is a partial failure (3), and when others failed for another reason, a failure (1). `git-mgr doctor` reports a stuck state-lock holder; `lsof <repo>/.git/git-mgr.lock` shows a repo lock's. |
 | 80 | Usage error: unknown command or flag. |
 
 ## Resilience

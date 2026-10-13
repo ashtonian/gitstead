@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/state"
@@ -43,10 +44,16 @@ func ExitCode(err error) int {
 	if errors.As(err, &coded) {
 		return coded.ExitCode()
 	}
-	if errors.Is(err, state.ErrLocked) || errors.Is(err, gitops.ErrRepoInUse) {
+	if busy(err) {
 		return exitBusy
 	}
 	return exitFailed
+}
+
+// busy reports whether err is another git-mgr command holding a lock that
+// was needed: the same command later can succeed.
+func busy(err error) bool {
+	return errors.Is(err, state.ErrLocked) || errors.Is(err, gitops.ErrRepoInUse)
 }
 
 // outcome reports a command over total targets of which failed failed: nil
@@ -61,4 +68,17 @@ func outcome(failed, total int, format string, args ...any) error {
 		return &exitError{exitPartial, err}
 	}
 	return &exitError{exitFailed, err}
+}
+
+// outcomeOf is outcome for total targets, of which those that failed failed
+// with errs. When every target failed only because another git-mgr command
+// held a lock, the command is busy rather than failed: it can be run again
+// later.
+func outcomeOf(errs []error, total int, format string, args ...any) error {
+	err := outcome(len(errs), total, format, args...)
+	var coded *exitError
+	if errors.As(err, &coded) && coded.code == exitFailed && !slices.ContainsFunc(errs, func(e error) bool { return !busy(e) }) {
+		coded.code = exitBusy
+	}
+	return err
 }

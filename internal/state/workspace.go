@@ -82,6 +82,11 @@ type CopyState struct {
 	// repo's.
 	URL    string `yaml:"url,omitempty" json:"url,omitempty"`
 	CopyID string `yaml:"copy_id,omitempty" json:"copy_id,omitempty"`
+	// Pending marks a copy recorded before it is made -- a workspace made
+	// from flags records the copies it wants first -- and not made yet. It
+	// holds nothing of its repo's, so it doesn't keep the repo from being
+	// removed.
+	Pending bool `yaml:"pending,omitempty" json:"pending,omitempty"`
 	// Published is when `ws publish` last pushed the branch; PR is the pull
 	// or merge request it opened or found.
 	Published time.Time `yaml:"published,omitempty" json:"published,omitzero"`
@@ -176,7 +181,7 @@ func (s *State) CopiesOf(key string) []string {
 	for name, ws := range s.Workspaces {
 		for _, r := range ws.Replicas {
 			for _, c := range r.Copies {
-				if c.Repo == key {
+				if c.Repo == key && !c.Pending {
 					out = append(out, name+"/"+r.Agent)
 				}
 			}

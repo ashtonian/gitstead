@@ -49,9 +49,21 @@ func createWorkspace(spec *Spec) reconcile.RunFunc {
 				return reconcile.Outcome{}, err
 			}
 		}
-		if spec.Shared() {
+		switch {
+		case spec.Shared():
 			for _, r := range spec.Replicas {
 				ws.Replicas = append(ws.Replicas, state.ReplicaState{Agent: r.Agent, Path: r.Path})
+			}
+		case !spec.Declared:
+			// A workspace made from flags is wanted as it is recorded, so its
+			// copies are recorded before they are made: one that fails, or a
+			// run cut short, is left for a later run (ws ensure) to make.
+			for _, r := range spec.Replicas {
+				rs := state.ReplicaState{Agent: r.Agent, Path: r.Path}
+				for _, c := range r.Copies {
+					rs.Copies = append(rs.Copies, state.CopyState{Repo: c.Repo, Path: c.Path, Branch: c.Branch, Pending: true})
+				}
+				ws.Replicas = append(ws.Replicas, rs)
 			}
 		}
 		return reconcile.Outcome{Record: func(st *state.State) error {

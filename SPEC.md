@@ -1000,6 +1000,7 @@ workspaces:
             path: "/Users/me/workspaces/app/agent-1"
             branch: agents/app/agent-1
             copy_id: "1f2e3d4c5b6a7980"
+            pending: false       # recorded before it was made and not made yet (a workspace made from flags records its copies first); doesn't keep its repo from being removed
             url: ""              # a clone's origin, as git-mgr set it
             managed_config: {}   # a clone's managed git config
             published: 2026-10-12T17:00:00Z    # when ws publish last pushed the branch
@@ -1896,7 +1897,7 @@ The tool is cron-safe because:
 | 1 | The command failed: bad config, unreadable state, every target failed, or it has no `--json` output or needs `--yes`. |
 | 2 | A check ran and found problems: `doctor`, `ws check`. |
 | 3 | Partial failure: some repos, copies or changes failed and the rest succeeded. Each failure is printed to stderr. |
-| 75 | Another git-mgr run holds the lock; try again (EX_TEMPFAIL). |
+| 75 | Another git-mgr run holds the state lock or a repo's lock, and every target failed for that reason alone; try again (EX_TEMPFAIL). Commands aggregating targets keep each failure's error (`outcomeOf`): some busy and the rest done is 3, some busy and the rest failed otherwise is 1. |
 | 80 | Usage error: unknown command or flag. |
 
    `--json` (global) prints one document on stdout: `main` keeps the real

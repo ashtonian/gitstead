@@ -557,7 +557,7 @@ func copiesOf(st *state.State, key, to string) []string {
 	for _, ws := range st.Workspaces {
 		for _, r := range ws.Replicas {
 			for _, c := range r.Copies {
-				if c.Repo == key && c.Path != to {
+				if c.Repo == key && c.Path != to && !c.Pending {
 					out = append(out, c.Path)
 				}
 			}

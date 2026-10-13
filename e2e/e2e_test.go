@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1666,25 +1667,7 @@ func waitFor(path string, within time.Duration) bool {
 // copy borrows the repo's objects (reference-clone), so losing the repo
 // would leave it unreadable.
 func TestE2E_RemoveAndCopyDontRace(t *testing.T) {
-	setup := func(t *testing.T) (env *testEnv, src, root string) {
-		env = newLocalEnv(t)
-		tmp := t.TempDir()
-		remote := filepath.Join(tmp, "remotes", "app.git")
-		gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
-		src = filepath.Join(env.baseDir, "app")
-		gitCmd(t, tmp, "clone", "-q", remote, src)
-		gitCmd(t, src, "-c", "user.email=e@e", "-c", "user.name=e", "commit", "-q", "--allow-empty", "-m", "init")
-		gitCmd(t, src, "push", "-q", "origin", "HEAD:main")
-		root = filepath.Join(tmp, "workspaces")
-		cfg := fmt.Sprintf("base_dir: %s\nlock_timeout: 60s\nbackup:\n  archive_dir: %s\nworkspace_defaults:\n  root: %s\n", env.baseDir, filepath.Join(tmp, "archive"), root)
-		if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if out, code := env.run(t, "adopt", src); code != 0 {
-			t.Fatalf("adopt exit %d:\n%s", code, out)
-		}
-		return env, src, root
-	}
+	setup := func(t *testing.T) (*testEnv, string, string) { return adoptedApp(t, "60s") }
 	const key = "local/remotes/app"
 	create := []string{"ws", "create", "app", "--repo", key, "--agents", "1", "--isolation", "reference-clone"}
 
@@ -1747,6 +1730,65 @@ func TestE2E_RemoveAndCopyDontRace(t *testing.T) {
 			t.Errorf("a copy of the deleted repo was left (fsck: %v):\n%s", err, out)
 		}
 	})
+}
+
+// adoptedApp tracks a clone of a fresh remote, local/remotes/app, with
+// lockTimeout as lock_timeout, and returns its env, its clone and its
+// workspace root.
+func adoptedApp(t *testing.T, lockTimeout string) (env *testEnv, src, root string) {
+	t.Helper()
+	env = newLocalEnv(t)
+	tmp := t.TempDir()
+	remote := filepath.Join(tmp, "remotes", "app.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	src = filepath.Join(env.baseDir, "app")
+	gitCmd(t, tmp, "clone", "-q", remote, src)
+	gitCmd(t, src, "-c", "user.email=e@e", "-c", "user.name=e", "commit", "-q", "--allow-empty", "-m", "init")
+	gitCmd(t, src, "push", "-q", "origin", "HEAD:main")
+	root = filepath.Join(tmp, "workspaces")
+	cfg := fmt.Sprintf("base_dir: %s\nlock_timeout: %s\nbackup:\n  archive_dir: %s\nworkspace_defaults:\n  root: %s\n", env.baseDir, lockTimeout, filepath.Join(tmp, "archive"), root)
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := env.run(t, "adopt", src); code != 0 {
+		t.Fatalf("adopt exit %d:\n%s", code, out)
+	}
+	return env, src, root
+}
+
+// TestE2E_HeldRepoLockIsBusy: a command that gives up waiting for a repo
+// another git-mgr command holds, and so changes nothing, exits 75 (try again
+// later), not 1; one that makes other changes meanwhile exits 3.
+func TestE2E_HeldRepoLockIsBusy(t *testing.T) {
+	env, src, root := adoptedApp(t, "200ms")
+	lock, err := os.OpenFile(filepath.Join(src, ".git", "git-mgr.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+
+	var removed struct {
+		Kept []struct{ Target, Error string } `json:"kept"`
+	}
+	if stderr, code := env.runJSON(t, &removed, "remove", "local/remotes/app", "--delete", "--yes"); code != 75 || len(removed.Kept) != 1 {
+		t.Errorf("remove under a held lock: exit %d, %+v, want 75 and the repo kept:\n%s", code, removed, stderr)
+	}
+	if !gitOK(filepath.Join(src, ".git")) {
+		t.Error("the repo was deleted")
+	}
+	// The workspace is made; its copy isn't.
+	if out, code := env.run(t, "ws", "create", "app", "--repo", "local/remotes/app", "--agents", "1", "--isolation", "reference-clone"); code != 3 {
+		t.Errorf("ws create under a held lock: exit %d, want 3:\n%s", code, out)
+	}
+	if out, code := env.run(t, "ws", "ensure", "app"); code != 75 {
+		t.Errorf("ws ensure under a held lock: exit %d, want 75:\n%s", code, out)
+	}
+	if gitOK(filepath.Join(root, "app", "agent-1", ".git")) {
+		t.Error("a copy was made while the repo was locked")
+	}
 }
 
 func gitOK(gitDir string) bool {

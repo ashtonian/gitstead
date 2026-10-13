@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
@@ -23,6 +24,10 @@ func TestExitCodes(t *testing.T) {
 		{"a wrapped outcome keeps its code", fmt.Errorf("sync: %w", outcome(1, 3, "x")), exitPartial},
 		{"a check that found nothing", problems(0, "x"), 0},
 		{"a check that found problems", problems(2, "2 problems"), exitProblems},
+		{"every target busy", outcomeOf([]error{gitops.ErrRepoInUse, fmt.Errorf("x: %w", state.ErrLocked)}, 2, "x"), exitBusy},
+		{"some busy, the rest done", outcomeOf([]error{gitops.ErrRepoInUse}, 2, "x"), exitPartial},
+		{"every target failed, not all busy", outcomeOf([]error{gitops.ErrRepoInUse, errors.New("no")}, 2, "x"), exitFailed},
+		{"a busy repo", fmt.Errorf("removing: %w", gitops.ErrRepoInUse), exitBusy},
 	}
 	for _, tt := range tests {
 		if got := ExitCode(tt.err); got != tt.want {
