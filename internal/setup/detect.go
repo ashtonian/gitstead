@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ashtonian/git-mgr/internal/agent"
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/pathtemplate"
 	"github.com/ashtonian/git-mgr/internal/repourl"
@@ -72,6 +73,10 @@ type Detected struct {
 	Identities []Identity
 	Clones     []Clone
 	Layout     LayoutGuess
+	// Agents are the known coding agents found on PATH.
+	Agents []config.AgentProfile
+	// Launchers are the launchers installed: tmux, iterm, muxy.
+	Launchers []string
 }
 
 // Runner runs a command and returns its standard output.
@@ -110,6 +115,10 @@ type Detector struct {
 	Roots []string
 	// Probe allows network checks: `ssh -T` to learn which account each key is.
 	Probe bool
+	// LookPath finds a program on PATH; exec.LookPath when nil.
+	LookPath func(string) (string, error)
+	// Exists reports whether a path exists, for apps; os.Stat when nil.
+	Exists func(string) bool
 }
 
 // DefaultRoots are the usual places people keep clones.
@@ -141,6 +150,7 @@ func (d *Detector) Detect(ctx context.Context) Detected {
 		logins = append(logins, a.Login)
 	}
 	det.Layout = guessLayout(det.Clones, logins)
+	det.Agents, det.Launchers = d.agentTools()
 	if d.Probe {
 		d.probeKeys(ctx, det.SSHKeys, det.GH)
 	}
@@ -435,4 +445,33 @@ func (det Detected) KeyFor(host, login string) string {
 		}
 	}
 	return ""
+}
+
+// agentTools finds the known coding agents on PATH and the launchers
+// installed.
+func (d *Detector) agentTools() ([]config.AgentProfile, []string) {
+	lookPath, exists := d.LookPath, d.Exists
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	if exists == nil {
+		exists = func(p string) bool { _, err := os.Stat(p); return err == nil }
+	}
+	var profiles []config.AgentProfile
+	for _, p := range agent.Known {
+		if _, err := lookPath(p.Command); err == nil {
+			profiles = append(profiles, p)
+		}
+	}
+	var launchers []string
+	if _, err := lookPath("tmux"); err == nil {
+		launchers = append(launchers, "tmux")
+	}
+	if exists("/Applications/iTerm.app") {
+		launchers = append(launchers, "iterm")
+	}
+	if _, err := lookPath("muxy"); err == nil || exists("/Applications/Muxy.app") {
+		launchers = append(launchers, "muxy")
+	}
+	return profiles, launchers
 }

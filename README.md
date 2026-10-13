@@ -73,9 +73,16 @@ machine you mostly press Enter:
 3. **Features** — backups (on), background sync every 15 minutes (on), offsite
    backup refs (off), what `sync` may change by itself, what happens when a repo
    disappears upstream.
-4. **Existing clones** — those discovery won't find where they are can be
+4. **Agents** — whether to run coding agents in [workspaces](#workspaces) (on
+   when `claude` or `codex` is on your `PATH`): which agents, plus a command of
+   your own such as a shell-function wrapper, how many per workspace, where
+   workspaces live, and the [launcher](#fleets-and-launchers) that opens them
+   (`auto`, or tmux, iTerm or Muxy when installed). It writes `agents:`,
+   `workspace_defaults:` and `launchers.default`; workspaces themselves are made
+   afterwards with `git-mgr ws create … --save`, once their repos are tracked.
+5. **Existing clones** — those discovery won't find where they are can be
    tracked in place.
-5. **Review** — the diff of your config file and checks: each token works, each
+6. **Review** — the diff of your config file and checks: each token works, each
    key signs in as the right account, signing works without a terminal. Nothing
    is written until you confirm.
 

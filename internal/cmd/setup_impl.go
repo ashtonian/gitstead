@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -136,6 +137,9 @@ func (c *SetupCmd) Run(ctx *Context) error {
 		return err
 	}
 	fmt.Println("\nNext: `git-mgr plan` shows what will be cloned and changed; `git-mgr apply` does it.")
+	if answers.Workspaces != nil {
+		fmt.Println("Then give a repo its agents: `git-mgr ws create <name> --repo <repo> --save`, and open them with `git-mgr ws open <name>`.")
+	}
 	return outcome(failed, len(checks), "setup checks failed")
 }
 
@@ -278,6 +282,9 @@ func askSetup(ctx *Context, det setup.Detected, a setup.Answers, tracked map[str
 		return a, err
 	}
 	if err := askFeatures(&a); err != nil {
+		return a, err
+	}
+	if err := askWorkspaces(det, &a); err != nil {
 		return a, err
 	}
 	if a.Schedule && scheduler.DefaultKind() == scheduler.Systemd {
@@ -560,6 +567,103 @@ func askFeatures(a *setup.Answers) error {
 			huh.NewOption("after 30 days, archive its unique work and delete it", "remove_and_delete"),
 			huh.NewOption("ignore it", "ignore")).Value(&a.Cleanup),
 	)).Run()
+}
+
+// askWorkspaces asks whether to run coding agents in workspaces and, if so,
+// with which agents, how many per workspace, where, and opened by what.
+func askWorkspaces(det setup.Detected, a *setup.Answers) error {
+	on := a.Workspaces != nil
+	desc := "Each agent works in a copy of its own -- a worktree of the repo on a branch of its own -- and git-mgr opens them side by side in tmux, iTerm or Muxy."
+	if len(det.Agents) > 0 {
+		var names []string
+		for _, p := range det.Agents {
+			names = append(names, p.Name)
+		}
+		desc += " Found " + strings.Join(names, " and ") + " on your PATH."
+	}
+	if err := huh.NewConfirm().Title("Run coding agents in workspaces?").Description(desc).Value(&on).Run(); err != nil {
+		return err
+	}
+	if !on {
+		a.Workspaces = nil
+		return nil
+	}
+	w := a.Workspaces
+	if w == nil {
+		w = &setup.Workspaces{Root: "~/workspaces", Agents: 2, Launcher: "auto"}
+	}
+	known := slices.Clone(w.Profiles)
+	for _, p := range det.Agents {
+		if !slices.ContainsFunc(known, func(k config.AgentProfile) bool { return k.Name == p.Name }) {
+			known = append(known, p)
+		}
+	}
+	var chosen []string
+	var profileOpts []huh.Option[string]
+	for _, p := range known {
+		selected := len(w.Profiles) == 0 || slices.ContainsFunc(w.Profiles, func(k config.AgentProfile) bool { return k.Name == p.Name })
+		profileOpts = append(profileOpts, huh.NewOption(fmt.Sprintf("%s  (%s)", p.Name, p.Command), p.Name).Selected(selected))
+		if selected {
+			chosen = append(chosen, p.Name)
+		}
+	}
+	agents := strconv.Itoa(w.Agents)
+	launcherOpts := []huh.Option[string]{huh.NewOption("auto: tmux inside tmux, iTerm inside iTerm, else tmux (recommended)", "auto")}
+	for _, l := range det.Launchers {
+		launcherOpts = append(launcherOpts, huh.NewOption(l, l))
+	}
+	if w.Launcher != "auto" && !slices.Contains(det.Launchers, w.Launcher) {
+		launcherOpts = append(launcherOpts, huh.NewOption(w.Launcher, w.Launcher))
+	}
+	var customName, customCommand string
+	fields := []huh.Field{
+		huh.NewInput().Title("Where should workspaces live?").Value(&w.Root).Validate(nonEmpty),
+		huh.NewSelect[string]().Title("How many agents per workspace?").Options(huh.NewOptions("1", "2", "3", "4", "6", "8")...).Value(&agents),
+	}
+	if len(profileOpts) > 0 {
+		fields = append(fields, huh.NewMultiSelect[string]().Title("Which agents?").Options(profileOpts...).Value(&chosen))
+	}
+	fields = append(fields,
+		huh.NewInput().Title("Another agent command?").
+			Description("Typed into an interactive shell, so a shell function or alias such as a claude wrapper works. Blank for none.").
+			Value(&customCommand),
+		huh.NewInput().Title("Its name").Description("How fleets and `ws open --agent` refer to it.").Value(&customName),
+		huh.NewSelect[string]().Title("What opens the agents' terminals?").Options(launcherOpts...).Value(&w.Launcher),
+	)
+	if err := huh.NewForm(huh.NewGroup(fields...)).Run(); err != nil {
+		return err
+	}
+
+	w.Profiles = slices.DeleteFunc(known, func(p config.AgentProfile) bool { return !slices.Contains(chosen, p.Name) })
+	if cmd := strings.TrimSpace(customCommand); cmd != "" {
+		name := strings.TrimSpace(customName)
+		if name == "" {
+			name = strings.Fields(cmd)[0]
+		}
+		w.Profiles = append(slices.DeleteFunc(w.Profiles, func(p config.AgentProfile) bool { return p.Name == name }),
+			config.AgentProfile{Name: name, Command: cmd})
+	}
+	if len(w.Profiles) == 0 {
+		return errors.New("workspaces need an agent: pick one, or give a command")
+	}
+	w.Agents, _ = strconv.Atoi(agents)
+	if !slices.ContainsFunc(w.Profiles, func(p config.AgentProfile) bool { return p.Name == w.Agent }) {
+		w.Agent = ""
+	}
+	if len(w.Profiles) > 1 {
+		if w.Agent == "" {
+			w.Agent = w.Profiles[0].Name
+		}
+		var opts []huh.Option[string]
+		for _, p := range w.Profiles {
+			opts = append(opts, huh.NewOption(p.Name, p.Name))
+		}
+		if err := huh.NewSelect[string]().Title("Which agent runs unless a workspace says otherwise?").Options(opts...).Value(&w.Agent).Run(); err != nil {
+			return err
+		}
+	}
+	a.Workspaces = w
+	return nil
 }
 
 func askAdopt(det setup.Detected, a *setup.Answers, tracked map[string]bool, home string) error {

@@ -81,7 +81,7 @@ func TestDetect(t *testing.T) {
 	probe := fakeRunner(map[string]string{
 		"ssh -T -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 -i " + filepath.Join(home, ".ssh", "id_work") + " git@github.com": "Hi me-at-acme! You've successfully authenticated, but GitHub does not provide shell access.",
 	})
-	det := (&Detector{Home: home, Run: run, RunCombined: probe, Probe: true}).Detect(context.Background())
+	det := (&Detector{Home: home, Run: run, RunCombined: probe, Probe: true, LookPath: onPath("codex", "tmux"), Exists: exists("/Applications/Muxy.app")}).Detect(context.Background())
 
 	if got := fmt.Sprint(det.GH); got != "[{github.com me true repo https} {github.com me-at-acme false repo, read:org ssh}]" {
 		t.Errorf("gh accounts = %s", got)
@@ -106,13 +106,46 @@ func TestDetect(t *testing.T) {
 	if det.Layout != (LayoutGuess{BaseDir: filepath.Join(home, "projects"), Layout: "owner/name", Matches: 1}) {
 		t.Errorf("layout guess = %+v", det.Layout)
 	}
+	if len(det.Agents) != 1 || det.Agents[0].Name != "codex" || fmt.Sprint(det.Launchers) != "[tmux muxy]" {
+		t.Errorf("agents %+v, launchers %v", det.Agents, det.Launchers)
+	}
+}
+
+// onPath is a LookPath that finds only names.
+func onPath(names ...string) func(string) (string, error) {
+	return func(name string) (string, error) {
+		for _, n := range names {
+			if n == name {
+				return "/usr/bin/" + name, nil
+			}
+		}
+		return "", fmt.Errorf("%s not found", name)
+	}
+}
+
+func exists(paths ...string) func(string) bool {
+	return func(p string) bool {
+		for _, x := range paths {
+			if x == p {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 func TestDefaults_FromDetection(t *testing.T) {
 	home, run := fakeHome(t)
-	det := (&Detector{Home: home, Run: run}).Detect(context.Background())
+	det := (&Detector{Home: home, Run: run, LookPath: onPath(), Exists: exists()}).Detect(context.Background())
 	det.SSHKeys[1].Logins = map[string]string{"github.com": "me-at-acme"}
 	a := Defaults(det, nil, home)
+	if a.Workspaces != nil {
+		t.Errorf("workspaces are on with no agent found: %+v", a.Workspaces)
+	}
+	det.Agents = []config.AgentProfile{{Name: "claude", Command: "claude"}}
+	if w := Defaults(det, nil, home).Workspaces; w == nil || w.Root != "~/workspaces" || w.Agents != 2 || w.Profiles[0].Name != "claude" || w.Launcher != "auto" {
+		t.Errorf("with claude found, workspaces = %+v", w)
+	}
 
 	if a.BaseDir != "~/projects" || a.Layout != "owner/name" {
 		t.Errorf("layout = %s %s", a.BaseDir, a.Layout)
@@ -247,5 +280,44 @@ func TestGuessLayout_DeliberateTreesOutweighFlatClones(t *testing.T) {
 	}
 	if got := guessLayout(clones, []string{"me"}); got.Layout != "owner/name" || got.Matches != 2 {
 		t.Errorf("guess = %+v; two owner/name clones should outweigh three flat ones", got)
+	}
+}
+
+func TestRender_Workspaces(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	write(t, path, "agents:\n  - name: mine\n    command: mine --fast # keep\n")
+	a := sampleAnswers()
+	a.Workspaces = &Workspaces{Root: "~/agents", Agents: 4, Launcher: "tmux", Agent: "claude", Profiles: []config.AgentProfile{
+		{Name: "claude", Command: "claudemore", Resume: "claudemore --continue"}, {Name: "codex", Command: "codex"},
+	}}
+	first := render(t, path, a)
+	if second := render(t, path, a); second != first {
+		t.Fatalf("rendering twice changed the file:\n%s\nthen\n%s", first, second)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, first)
+	}
+	d := cfg.WorkspaceDefaults
+	if d.Root != config.ExpandHome("~/agents") || d.Agents != 4 || d.Agent != "claude" || cfg.Launchers.Default != "tmux" {
+		t.Errorf("workspace_defaults = %+v, launcher %s", d, cfg.Launchers.Default)
+	}
+	if len(cfg.Agents) != 3 || cfg.FindAgent("mine") == nil || cfg.FindAgent("claude").Resume != "claudemore --continue" {
+		t.Errorf("agents = %+v; a profile setup doesn't manage is kept", cfg.Agents)
+	}
+
+	// A re-run starts from what setup wrote.
+	got := Defaults(Detected{}, cfg, "/nonexistent-home").Workspaces
+	if got == nil || got.Agents != 4 || got.Launcher != "tmux" || got.Agent != "claude" || len(got.Profiles) != 3 {
+		t.Errorf("workspaces read back = %+v", got)
+	}
+
+	a.Workspaces.Agent = "nope"
+	if err := a.Validate(); err == nil {
+		t.Error("an agent that isn't a profile validated")
+	}
+	a.Workspaces.Agent, a.Workspaces.Launcher = "", "konsole"
+	if err := a.Validate(); err == nil {
+		t.Error("an unknown launcher validated")
 	}
 }

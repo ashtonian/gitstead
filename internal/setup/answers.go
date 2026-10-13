@@ -29,6 +29,21 @@ type Answers struct {
 	RemoteSync    bool   `yaml:"remote_sync"`
 	ReconcileAuto string `yaml:"reconcile_auto"`
 	Cleanup       string `yaml:"cleanup"`
+	// Workspaces sets up agents' workspaces; nil leaves them as they are.
+	Workspaces *Workspaces `yaml:"workspaces,omitempty"`
+}
+
+// Workspaces are the answers for running coding agents in workspaces: the
+// agent profiles, where workspaces live, how many agents each gets, and the
+// launcher that opens them. Workspaces themselves are created later, for
+// repos that are tracked by then.
+type Workspaces struct {
+	Root     string                `yaml:"root"`
+	Agents   int                   `yaml:"agents"`
+	Profiles []config.AgentProfile `yaml:"profiles"`
+	// Agent is the profile agents run unless a workspace names another.
+	Agent    string `yaml:"agent,omitempty"`
+	Launcher string `yaml:"launcher"`
 }
 
 // Account is one account's answers. Setup writes it as an account, a provider
@@ -79,6 +94,11 @@ func (a Account) Tracks(owner string) bool {
 
 // Validate checks answers before they are rendered.
 func (a Answers) Validate() error {
+	if w := a.Workspaces; w != nil {
+		if err := w.validate(); err != nil {
+			return fmt.Errorf("workspaces: %w", err)
+		}
+	}
 	if a.BaseDir == "" {
 		return fmt.Errorf("base_dir is empty")
 	}
@@ -109,6 +129,32 @@ func (a Answers) Validate() error {
 	return nil
 }
 
+func (w Workspaces) validate() error {
+	if w.Root == "" {
+		return fmt.Errorf("root is empty")
+	}
+	if w.Agents < 1 || w.Agents > 64 {
+		return fmt.Errorf("agents is %d, not 1 to 64", w.Agents)
+	}
+	names := map[string]bool{}
+	for _, p := range w.Profiles {
+		if p.Name == "" || strings.TrimSpace(p.Command) == "" {
+			return fmt.Errorf("an agent profile needs a name and a command")
+		}
+		if names[p.Name] {
+			return fmt.Errorf("two agent profiles are named %q", p.Name)
+		}
+		names[p.Name] = true
+	}
+	if w.Agent != "" && !names[w.Agent] {
+		return fmt.Errorf("agent %q isn't one of the profiles", w.Agent)
+	}
+	if !slices.Contains(config.BuiltinLaunchers, w.Launcher) {
+		return fmt.Errorf("launcher %q is not one of %s", w.Launcher, strings.Join(config.BuiltinLaunchers, ", "))
+	}
+	return nil
+}
+
 // Defaults proposes answers: the existing config's choices where there is
 // one, otherwise what was detected, with the recommended features on.
 func Defaults(det Detected, existing *config.Config, home string) Answers {
@@ -129,7 +175,24 @@ func Defaults(det Detected, existing *config.Config, home string) Answers {
 	if len(a.Accounts) == 0 {
 		a.Accounts = detectedAccounts(det)
 	}
+	a.Workspaces = defaultWorkspaces(det, existing, home)
 	return a
+}
+
+// defaultWorkspaces proposes workspace answers: the existing config's when it
+// sets workspaces up, else on when an agent was found on PATH.
+func defaultWorkspaces(det Detected, existing *config.Config, home string) *Workspaces {
+	if existing != nil && (len(existing.Agents) > 0 || len(existing.Workspaces) > 0) {
+		d := existing.WorkspaceDefaults
+		return &Workspaces{
+			Root: tildePath(d.Root, home), Agents: d.Agents, Profiles: existing.Agents,
+			Agent: d.Agent, Launcher: existing.Launchers.Default,
+		}
+	}
+	if len(det.Agents) == 0 {
+		return nil
+	}
+	return &Workspaces{Root: "~/workspaces", Agents: 2, Profiles: det.Agents, Launcher: "auto"}
 }
 
 func detectedAccounts(det Detected) []Account {
