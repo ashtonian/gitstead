@@ -1,11 +1,13 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -149,5 +151,29 @@ func TestStop_KillsWhatWontEnd(t *testing.T) {
 	}
 	if ended, err := Stop(path, 300*time.Millisecond, true); !ended || err != nil {
 		t.Fatalf("with --kill, Stop = %v, %v", ended, err)
+	}
+}
+
+// A status probe gives its first line, says why it gave none, and is ended
+// with what it started when its context does.
+func TestProbe(t *testing.T) {
+	dir := t.TempDir()
+	if got := Probe(context.Background(), dir, `echo "fixing the parser"; echo second`, []string{"X=1"}); got != "fixing the parser" {
+		t.Errorf("Probe = %q", got)
+	}
+	if got := Probe(context.Background(), dir, `echo "$X in $PWD"`, []string{"X=env"}); !strings.HasPrefix(got, "env in ") {
+		t.Errorf("Probe with env = %q", got)
+	}
+	if got := Probe(context.Background(), dir, "exit 3", nil); !strings.Contains(got, "status probe failed") {
+		t.Errorf("a failing probe = %q", got)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if got := Probe(ctx, dir, "sleep 30 & wait", nil); !strings.Contains(got, "status probe failed") {
+		t.Errorf("a probe past its deadline = %q", got)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Errorf("the probe outlived its deadline by %s", elapsed)
 	}
 }

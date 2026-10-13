@@ -13,7 +13,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	agents "github.com/ashtonian/git-mgr/internal/agent"
 	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/git-mgr/internal/ctxutil"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/state"
 	"github.com/ashtonian/git-mgr/internal/workspace"
@@ -31,6 +33,9 @@ func (c *WSStatusCmd) Run(ctx *Context) error {
 	}
 	hs := workspace.Health(ctx.GoCtx(), spec, spec.Targets())
 	runs := agentRuns(st, c.Name)
+	if cfg, err := ctx.LoadConfig(); err == nil {
+		probeStatuses(ctx.GoCtx(), cfg, st, c.Name, runs)
+	}
 	if ctx.JSON {
 		return ctx.Emit(statusViews(spec, hs, runs))
 	}
@@ -74,6 +79,7 @@ func (c *WSOverviewCmd) Run(ctx *Context) error {
 	for _, n := range slices.Sorted(maps.Keys(st.Workspaces)) {
 		spec := workspace.FromState(cfg, st, st.Workspaces[n])
 		runs := agentRuns(st, n)
+		probeStatuses(ctx.GoCtx(), cfg, st, n, runs)
 		for _, h := range workspace.Health(ctx.GoCtx(), spec, spec.Targets()) {
 			rows = append(rows, row{spec, h, runs})
 		}
@@ -569,25 +575,58 @@ type copyStatusJSON struct {
 	// stopped or missing; Run its latest run.
 	AgentState string          `json:"agent_state,omitempty"`
 	Run        *state.RunState `json:"run,omitempty"`
-	Repo       string          `json:"repo,omitempty"`
-	Path       string          `json:"path"`
-	Branch     string          `json:"branch,omitempty"`
-	State      string          `json:"state"` // missing|clean|dirty|untracked|rebase|merge|cherry-pick
-	Present    bool            `json:"present"`
-	Dirty      bool            `json:"dirty"`
-	Untracked  bool            `json:"untracked"`
-	Locked     bool            `json:"locked"`
-	Stuck      string          `json:"stuck,omitempty"`
-	Upstream   string          `json:"upstream,omitempty"`
-	Ahead      int             `json:"ahead"`
-	Behind     int             `json:"behind"`
-	Issues     []string        `json:"issues,omitempty"`
+	// AgentStatus is what its profile's status probe printed, while it runs.
+	AgentStatus string   `json:"agent_status,omitempty"`
+	Repo        string   `json:"repo,omitempty"`
+	Path        string   `json:"path"`
+	Branch      string   `json:"branch,omitempty"`
+	State       string   `json:"state"` // missing|clean|dirty|untracked|rebase|merge|cherry-pick
+	Present     bool     `json:"present"`
+	Dirty       bool     `json:"dirty"`
+	Untracked   bool     `json:"untracked"`
+	Locked      bool     `json:"locked"`
+	Stuck       string   `json:"stuck,omitempty"`
+	Upstream    string   `json:"upstream,omitempty"`
+	Ahead       int      `json:"ahead"`
+	Behind      int      `json:"behind"`
+	Issues      []string `json:"issues,omitempty"`
 }
 
-// agentRun is an agent's lifecycle state and latest run.
+// agentRun is an agent's lifecycle state and latest run, and what its
+// profile's status probe says while it runs.
 type agentRun struct {
-	state string
-	run   *state.RunState
+	state  string
+	run    *state.RunState
+	status string
+}
+
+// probeStatuses runs, for each running agent of workspace name whose profile
+// has a status probe, the probe in its replica, each within
+// sync.inspect_timeout, and keeps what it says in runs.
+func probeStatuses(ctx context.Context, cfg *config.Config, st *state.State, name string, runs map[string]agentRun) {
+	ws := st.Workspaces[name]
+	if ws == nil || cfg == nil {
+		return
+	}
+	for _, r := range ws.Replicas {
+		ar := runs[r.Agent]
+		if ar.state != workspace.AgentRunning || ar.run == nil {
+			continue
+		}
+		profile := cfg.FindAgent(ar.run.Profile)
+		if profile == nil || profile.Status == "" {
+			continue
+		}
+		env, err := agentEnv(cfg, st, name, r.Agent)
+		if err != nil {
+			ar.status = "status probe not run: " + err.Error()
+		} else {
+			pctx, cancel := ctxutil.WithTimeout(ctx, cfg.Sync.InspectTimeout)
+			ar.status = agents.Probe(pctx, r.Path, profile.Status, append(envList(profile.Env), env...))
+			cancel()
+		}
+		runs[r.Agent] = ar
+	}
 }
 
 // agentRuns returns the state of each agent of a recorded workspace.
@@ -599,14 +638,14 @@ func agentRuns(st *state.State, name string) map[string]agentRun {
 	}
 	for i := range ws.Replicas {
 		r := &ws.Replicas[i]
-		out[r.Agent] = agentRun{workspace.AgentState(st.Dir(), name, r), r.Run}
+		out[r.Agent] = agentRun{state: workspace.AgentState(st.Dir(), name, r), run: r.Run}
 	}
 	return out
 }
 
 func (v *copyStatusJSON) addRun(runs map[string]agentRun) {
 	if ar, ok := runs[v.Agent]; ok {
-		v.AgentState, v.Run = ar.state, ar.run
+		v.AgentState, v.Run, v.AgentStatus = ar.state, ar.run, ar.status
 	}
 }
 
@@ -628,6 +667,9 @@ func printAgents(st *state.State, name string, runs map[string]agentRun) {
 				last = fmt.Sprintf("since %s (pid %d)", run.Started.Local().Format(time.DateTime), run.PID)
 				if since, what, ok := workspace.WaitingFor(&r); ok {
 					last += fmt.Sprintf("; waiting since %s: %s", since.Local().Format(time.TimeOnly), what)
+				}
+				if ar.status != "" {
+					last += "; " + ar.status
 				}
 			default:
 				if !run.Ended.IsZero() {

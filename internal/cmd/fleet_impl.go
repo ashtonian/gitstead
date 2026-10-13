@@ -405,7 +405,9 @@ func (c *FleetStatusCmd) Run(ctx *Context) error {
 				errs = append(errs, err)
 				continue
 			}
-			doc[name] = statusViews(spec, workspace.Health(ctx.GoCtx(), spec, spec.Targets()), agentRuns(st, name))
+			runs := agentRuns(st, name)
+			probeStatuses(ctx.GoCtx(), cfg, st, name, runs)
+			doc[name] = statusViews(spec, workspace.Health(ctx.GoCtx(), spec, spec.Targets()), runs)
 		}
 		return ctx.finish(doc, errors.Join(errs...))
 	}

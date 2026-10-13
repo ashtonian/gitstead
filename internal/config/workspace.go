@@ -31,6 +31,10 @@ type AgentProfile struct {
 	// replica before, such as `claude --continue`.
 	Resume string            `koanf:"resume" yaml:"resume,omitempty"`
 	Env    map[string]string `koanf:"env" yaml:"env,omitempty"`
+	// Status, if set, is a shell command run in a running agent's replica,
+	// with its environment, whose first line of output is the agent's status
+	// in ws status: what it is working on, say.
+	Status string `koanf:"status" yaml:"status,omitempty"`
 }
 
 // WorkspaceDefaults are the settings a workspace doesn't set itself.

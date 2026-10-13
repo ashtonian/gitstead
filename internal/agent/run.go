@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/git-mgr/internal/procutil"
 )
 
 // RunOptions is one agent run.
@@ -160,4 +162,19 @@ func Descendants(pid int) []int {
 		return out
 	}
 	return walk(pid)
+}
+
+// Probe runs command, a profile's status probe, with /bin/sh -c in dir with
+// env and returns the first line it prints, or why it printed none. ctx
+// bounds it, and ending it kills whatever the probe started.
+func Probe(ctx context.Context, dir, command string, env []string) string {
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd.Dir, cmd.Env = dir, append(config.Environ(), env...)
+	procutil.Detach(cmd, time.Second)
+	out, err := cmd.Output()
+	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	if line == "" && err != nil {
+		return "status probe failed: " + err.Error()
+	}
+	return line
 }

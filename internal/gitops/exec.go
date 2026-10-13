@@ -3,15 +3,14 @@ package gitops
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 
+	"github.com/ashtonian/git-mgr/internal/procutil"
 	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/shellutil"
 )
@@ -39,15 +38,7 @@ const killGrace = 5 * time.Second
 func newGit(ctx context.Context, env []string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Env = append(append(os.Environ(), batchEnv...), env...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Cancel = func() error {
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
-		}
-		return err
-	}
-	cmd.WaitDelay = killGrace
+	procutil.Detach(cmd, killGrace)
 	return cmd
 }
 
