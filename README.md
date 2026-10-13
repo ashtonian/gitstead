@@ -1018,7 +1018,10 @@ archived all the same. A clone with linked worktrees, or that workspace
 copies are made from, stays where it is and stays tracked until they are
 gone. Across filesystems the clone is copied in full, each file synced to
 disk, and only then deleted; a failed copy leaves it where it was and
-nothing in the archive. `adopt --scan` skips the archive directory.
+nothing in the archive. Once the clone is in the archive it is recorded
+there, even if what follows fails -- syncing the directories a rename
+changed, or deleting what a copy left behind -- and that failure is logged as
+a warning with the archive's path. `adopt --scan` skips the archive directory.
 
 ```bash
 git-mgr archives ls                    # ID, where it was, what it held

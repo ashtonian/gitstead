@@ -97,7 +97,7 @@ func archive(ctx context.Context, repoPath, dir, name string, opts archiveOption
 		return "", nil
 	}
 
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := pathutil.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("creating archive dir: %w", err)
 	}
 	id := newArchiveID(name)
@@ -496,8 +496,8 @@ func RemoveClone(ctx context.Context, repoPath, archiveDir, name string, opts Re
 // whose work can't be inspected -- or that holds a nested repository a
 // bundle can't -- is moved all the same. A clone with linked worktrees on
 // disk is left in place: moving it would cut them off from their history.
-// With a *pathutil.LeftoverError the clone is archived at the returned path,
-// and only deleting what was left at repoPath failed.
+// With a *pathutil.MovedError the clone is archived at the returned path,
+// and what failed came after it was moved there.
 func ArchiveClone(ctx context.Context, repoPath, dir, name string) (string, error) {
 	if !filepath.IsAbs(repoPath) {
 		return "", fmt.Errorf("refusing to archive clone at non-absolute path %q", repoPath)
@@ -542,7 +542,7 @@ func ArchiveClone(ctx context.Context, repoPath, dir, name string) (string, erro
 		meta.Work += ", with " + work.String()
 	}
 
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := pathutil.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("creating archive dir: %w", err)
 	}
 	metaPath := dest + ".json"
@@ -550,7 +550,7 @@ func ArchiveClone(ctx context.Context, repoPath, dir, name string) (string, erro
 		return "", err
 	}
 	if err := pathutil.Move(repoPath, dest); err != nil {
-		if leftover := (*pathutil.LeftoverError)(nil); errors.As(err, &leftover) {
+		if moved := (*pathutil.MovedError)(nil); errors.As(err, &moved) {
 			return dest, err
 		}
 		os.Remove(metaPath)

@@ -102,7 +102,7 @@ func TestMove_AcrossFilesystemsCopies(t *testing.T) {
 	src := tree(t)
 	parent := filepath.Join(t.TempDir(), "archive")
 	dst := filepath.Join(parent, "repo-1")
-	must(t, move(src, dst, exdev))
+	must(t, move(src, dst, fsOps{rename: exdev, syncDir: SyncDir}))
 	checkTree(t, dst)
 	gone(t, src)
 	if n := entries(t, parent); n != 1 {
@@ -119,7 +119,7 @@ func TestMove_FailedCopyKeepsTheSource(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(src, "secret"), []byte("s"), 0o000))
 	parent := filepath.Join(t.TempDir(), "archive")
 
-	if err := move(src, filepath.Join(parent, "repo-1"), exdev); err == nil {
+	if err := move(src, filepath.Join(parent, "repo-1"), fsOps{rename: exdev, syncDir: SyncDir}); err == nil {
 		t.Fatal("copying an unreadable file must fail")
 	}
 	if _, err := os.Stat(filepath.Join(src, "run.sh")); err != nil {
@@ -127,6 +127,55 @@ func TestMove_FailedCopyKeepsTheSource(t *testing.T) {
 	}
 	if n := entries(t, parent); n != 0 {
 		t.Errorf("a failed copy left %d entries behind", n)
+	}
+}
+
+// A rename made but not synced is a move all the same: the tree is at the
+// destination, and the error says so.
+func TestMove_UnsyncedRenameIsAMove(t *testing.T) {
+	src := tree(t)
+	dst := filepath.Join(t.TempDir(), "archive", "repo-1")
+	eio := &os.PathError{Op: "sync", Path: filepath.Dir(dst), Err: syscall.EIO}
+	err := move(src, dst, fsOps{rename: RenameNoReplace, syncDir: func(string) error { return eio }})
+	var moved *MovedError
+	if !errors.As(err, &moved) || moved.Dst != dst || !errors.Is(err, syscall.EIO) {
+		t.Fatalf("move = %v, want a *MovedError to %s", err, dst)
+	}
+	checkTree(t, dst)
+	gone(t, src)
+}
+
+// Across filesystems, a copy that can't be made durable is undone before the
+// source is touched.
+func TestMove_UnsyncedCopyKeepsTheSource(t *testing.T) {
+	src := tree(t)
+	parent := filepath.Join(t.TempDir(), "archive")
+	eio := &os.PathError{Op: "sync", Path: parent, Err: syscall.EIO}
+	err := move(src, filepath.Join(parent, "repo-1"), fsOps{rename: exdev, syncDir: func(string) error { return eio }})
+	var moved *MovedError
+	if err == nil || errors.As(err, &moved) {
+		t.Fatalf("move = %v, want a plain failure", err)
+	}
+	if _, err := os.Stat(filepath.Join(src, "run.sh")); err != nil {
+		t.Errorf("the source must stay whole: %v", err)
+	}
+	if n := entries(t, parent); n != 0 {
+		t.Errorf("an undone copy left %d entries behind", n)
+	}
+}
+
+// MkdirAll makes every missing directory, and leaves existing ones be.
+func TestMkdirAll(t *testing.T) {
+	root := t.TempDir()
+	deep := filepath.Join(root, "a", "b", "c")
+	must(t, MkdirAll(deep, 0o700))
+	if info, err := os.Stat(deep); err != nil || !info.IsDir() {
+		t.Fatalf("%s not made: %v", deep, err)
+	}
+	must(t, MkdirAll(deep, 0o700))
+	must(t, os.WriteFile(filepath.Join(root, "file"), nil, 0o600))
+	if err := MkdirAll(filepath.Join(root, "file", "x"), 0o700); err == nil {
+		t.Error("MkdirAll under a file must fail")
 	}
 }
 

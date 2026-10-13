@@ -203,15 +203,15 @@ func cloneArchiver(ctx context.Context, log *slog.Logger, archiveDir string, tim
 
 // archiveClone moves repo key's clone at path, whole, into archiveDir and
 // returns its catalog entry, nil when the clone was already gone. A clone
-// archived whole but whose old folder couldn't all be deleted counts as
-// archived; the leftovers are logged.
+// moved into the archive counts as archived even when what came after the
+// move failed (see pathutil.MovedError); that is logged.
 func archiveClone(ctx context.Context, log *slog.Logger, archiveDir, key, path string) (*state.ArchiveEntry, error) {
 	archived, err := gitops.ArchiveClone(ctx, path, archiveDir, key)
 	if archived == "" {
 		return nil, err
 	}
 	if err != nil {
-		log.Warn("repo archived, but some of its old folder is left; delete it by hand", "repo", key, "path", path, "error", err)
+		log.Warn("repo archived, but not cleanly", "repo", key, "path", path, "archive", archived, "error", err)
 	}
 	entry := archiveEntry(archived, key, path)
 	return &entry, nil

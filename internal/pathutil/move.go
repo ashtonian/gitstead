@@ -11,42 +11,55 @@ import (
 	"syscall"
 )
 
-// LeftoverError reports a move that put the whole tree at Dst but couldn't
-// delete all of Src after copying it across filesystems.
-type LeftoverError struct {
+// MovedError reports a move that put the whole tree at Dst, and then failed:
+// syncing the directories the rename changed, so a crash could still undo
+// it, or deleting what was left at Src after copying it across filesystems.
+// The tree is to be found at Dst.
+type MovedError struct {
 	Src, Dst string
 	Err      error
 }
 
-func (e *LeftoverError) Error() string {
-	return fmt.Sprintf("moved %s to %s, but couldn't delete everything left at %s: %v", e.Src, e.Dst, e.Src, e.Err)
+func (e *MovedError) Error() string {
+	return fmt.Sprintf("moved %s to %s, but %v", e.Src, e.Dst, e.Err)
 }
 
-func (e *LeftoverError) Unwrap() error { return e.Err }
+func (e *MovedError) Unwrap() error { return e.Err }
 
 // Move moves the directory tree at src to dst, which must not exist. It
 // renames when it can. Across filesystems it copies the tree into a staging
 // directory beside dst, renames that into place and only then deletes src,
 // so a failed move leaves src whole and nothing at dst -- except that a
-// *LeftoverError means dst is whole and only deleting src failed.
+// *MovedError means the tree is whole at dst and what failed came after.
 func Move(src, dst string) error {
-	return move(src, dst, RenameNoReplace)
+	return move(src, dst, osOps)
 }
 
-func move(src, dst string, rename func(string, string) error) error {
+// fsOps are the filesystem calls a move makes that tests stand in for.
+type fsOps struct {
+	rename  func(oldpath, newpath string) error
+	syncDir func(dir string) error
+}
+
+var osOps = fsOps{rename: RenameNoReplace, syncDir: SyncDir}
+
+func move(src, dst string, ops fsOps) error {
 	if _, err := os.Lstat(dst); err == nil {
 		return fmt.Errorf("moving %s: %s already exists", src, dst)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	err := rename(src, dst)
+	err := ops.rename(src, dst)
 	if err == nil {
 		// Both directories' entries changed; a crash mustn't undo the move
 		// in one and not the other.
-		return errors.Join(SyncDir(filepath.Dir(dst)), SyncDir(filepath.Dir(src)))
+		if err := errors.Join(ops.syncDir(filepath.Dir(dst)), ops.syncDir(filepath.Dir(src))); err != nil {
+			return &MovedError{Src: src, Dst: dst, Err: fmt.Errorf("a crash could still undo it: %w", err)}
+		}
+		return nil
 	}
 	if !errors.Is(err, syscall.EXDEV) {
 		return err
@@ -69,12 +82,16 @@ func move(src, dst string, rename func(string, string) error) error {
 		_ = SafeRemoveAll(staging)
 		return err
 	}
-	if err := SyncDir(filepath.Dir(dst)); err != nil {
-		_ = SafeRemoveAll(dst)
+	// The copy must be durably in place before the source goes; until then
+	// src is whole, so a copy that can't be made durable is undone.
+	if err := ops.syncDir(filepath.Dir(dst)); err != nil {
+		if rerr := SafeRemoveAll(dst); rerr != nil {
+			return fmt.Errorf("%w; and the copy at %s couldn't be deleted: %v", err, dst, rerr)
+		}
 		return err
 	}
 	if err := SafeRemoveAll(src); err != nil {
-		return &LeftoverError{Src: src, Dst: dst, Err: err}
+		return &MovedError{Src: src, Dst: dst, Err: fmt.Errorf("couldn't delete everything left at %s: %w", src, err)}
 	}
 	return nil
 }
