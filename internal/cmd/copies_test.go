@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -207,5 +209,19 @@ func TestSyncJobs(t *testing.T) {
 	cfg.Workspaces = []config.Workspace{{Name: "fleet", Repos: []string{"h/o/lib"}, RemoteSync: &config.RemoteSyncOverride{Enabled: &on}}}
 	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+fetch+offsite h/o/lib+fetch h/o/old clones/a1+refresh fleet/agent+offsite" {
 		t.Errorf("jobs with the workspace's remote_sync = %s", got)
+	}
+}
+
+// A fetch runs at least once, whatever retries says: it is never reported
+// done without having run.
+func TestFetchWithRetry_RunsOnce(t *testing.T) {
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"remote", "add", "origin", filepath.Join(t.TempDir(), "gone.git")}} {
+		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := fetchWithRetry(context.Background(), repo, "", config.SyncConfig{Retries: -1}); err == nil {
+		t.Error("a fetch from a missing remote reported success")
 	}
 }

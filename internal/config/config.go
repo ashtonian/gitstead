@@ -224,10 +224,10 @@ type Override struct {
 type SyncOverride struct {
 	Enabled          *bool          `koanf:"enabled"            yaml:"enabled,omitempty"`
 	AutoDiscover     *bool          `koanf:"auto_discover"      yaml:"auto_discover,omitempty"`
-	MinFetchInterval *time.Duration `koanf:"min_fetch_interval" yaml:"min_fetch_interval,omitempty"`
-	TimeoutPerRepo   *time.Duration `koanf:"timeout_per_repo"   yaml:"timeout_per_repo,omitempty"`
-	Retries          *int           `koanf:"retries"            yaml:"retries,omitempty"`
-	RetryBackoff     *time.Duration `koanf:"retry_backoff"      yaml:"retry_backoff,omitempty"`
+	MinFetchInterval *time.Duration `koanf:"min_fetch_interval" yaml:"min_fetch_interval,omitempty" validate:"omitempty,min=0"`
+	TimeoutPerRepo   *time.Duration `koanf:"timeout_per_repo"   yaml:"timeout_per_repo,omitempty"   validate:"omitempty,min=0"`
+	Retries          *int           `koanf:"retries"            yaml:"retries,omitempty"            validate:"omitempty,min=0,max=10"`
+	RetryBackoff     *time.Duration `koanf:"retry_backoff"      yaml:"retry_backoff,omitempty"      validate:"omitempty,min=0"`
 }
 
 // BackupOverride overrides BackupCfg fields per repo. A nil pointer means "not set".

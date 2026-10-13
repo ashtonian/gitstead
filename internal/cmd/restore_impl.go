@@ -2,12 +2,12 @@ package cmd
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/shellutil"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
@@ -92,7 +92,7 @@ func resolveOneRepo(st *state.State, ref string) (string, *state.RepoState, erro
 	}
 	var matches []string
 	for key := range st.Repos {
-		if m, _ := filepath.Match(ref, key); m {
+		if repourl.MatchKey(ref, key) {
 			matches = append(matches, key)
 		}
 	}

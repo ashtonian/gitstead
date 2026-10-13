@@ -342,7 +342,7 @@ func (s *RepoSet) Matches(key string, hasTag func(string) bool, archived bool) b
 		return true
 	}
 	for _, g := range s.Repos {
-		if m, _ := filepath.Match(g, key); m {
+		if repourl.MatchKey(g, key) {
 			return true
 		}
 	}

@@ -430,7 +430,10 @@ git-mgr v1.42 (abc1234, built 2026-04-17)
 Beyond the discover/sync/backup core, these commands make a fleet of repos and
 agent workspaces easy to set up and operate. All repo-selecting commands share
 one selector: `--repos <glob>` ∩ `--tag <tag>` ∩ `--set <name>` (named sets from
-config).
+config). A glob over repo keys, here and in `overrides`, `sets` and workspaces'
+`repos`, is `repourl.MatchKey`'s: `*` matches any run of characters, `/`
+included, `?` one, `[...]`/`[!...]` one of a class; an exact key matches
+itself. A malformed pattern in config fails validation.
 
 | Command | Description |
 |---|---|
@@ -666,7 +669,8 @@ exclude:
 # ============================================================================
 
 # Override any setting for specific repos. Matched by full name (host/owner/name)
-# or glob pattern. Later entries take precedence over earlier ones.
+# or glob pattern. Later entries take precedence over earlier ones, for every
+# setting; each value is validated as the setting itself is.
 overrides:
   # Override by exact repo
   - repos: ["github.com/company/huge-monorepo"]
