@@ -2,17 +2,13 @@ package gitops
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-
-	"github.com/ashtonian/git-mgr/internal/pathutil"
 )
 
 // RestoreArchive makes dest a clone holding what the archive at path -- its
@@ -21,9 +17,10 @@ import (
 // LFS objects and its submodules' archives in their places. A complete bundle
 // restores on its own. Any other archive is restored into a clone of base --
 // by default the one it records -- or of its origin remote when the base is
-// gone. dest must not exist, or be an empty directory; on failure what was
-// made there is removed.
-func RestoreArchive(ctx context.Context, path, dest, base string) (err error) {
+// gone. dest must not exist, or be an empty directory. The clone is built
+// beside dest and published as clones are, so a failed restore leaves
+// nothing there, and whatever appears at dest meanwhile is kept.
+func RestoreArchive(ctx context.Context, path, dest, base string) error {
 	meta, id, err := ReadArchive(path)
 	if err != nil {
 		return fmt.Errorf("reading archive %s: %w", path, err)
@@ -34,28 +31,24 @@ func RestoreArchive(ctx context.Context, path, dest, base string) (err error) {
 	if !filepath.IsAbs(dest) {
 		return fmt.Errorf("restoring %s: %q is not an absolute path", id, dest)
 	}
-	switch entries, rerr := os.ReadDir(dest); {
-	case errors.Is(rerr, fs.ErrNotExist):
-	case rerr != nil:
-		return fmt.Errorf("restoring %s: %w", id, rerr)
-	case len(entries) > 0:
-		return fmt.Errorf("restoring %s: %s is not empty", id, dest)
-	}
-	defer func() {
-		if err != nil {
-			if rmErr := pathutil.SafeRemoveAll(dest); rmErr != nil {
-				err = errors.Join(err, fmt.Errorf("removing the partial restore at %s: %w", dest, rmErr))
-			}
-		}
-	}()
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
+	if err := staged(dest, func(staging string) error {
+		return restoreArchiveInto(ctx, meta, id, staging, base)
+	}); err != nil {
+		return fmt.Errorf("restoring %s: %w", id, err)
+	}
+	return nil
+}
 
+// restoreArchiveInto restores archive id, described by meta, into the empty
+// directory dest.
+func restoreArchiveInto(ctx context.Context, meta ArchiveMeta, id, dest, base string) error {
 	git := func(args ...string) (string, error) { return Git(ctx, dest, args...) }
 	if meta.Complete {
-		if _, err := Git(ctx, filepath.Dir(dest), "init", "-q", dest); err != nil {
-			return fmt.Errorf("restoring %s: %w", id, err)
+		if _, err := git("init", "-q"); err != nil {
+			return err
 		}
 	} else {
 		source := meta.Base
@@ -66,15 +59,15 @@ func RestoreArchive(ctx context.Context, path, dest, base string) (err error) {
 			source = meta.Remotes["origin"]
 		}
 		if source == "" {
-			return fmt.Errorf("restoring %s: it leans on the history of %s, which is gone, and records no origin to clone instead", id, meta.Base)
+			return fmt.Errorf("it leans on the history of %s, which is gone, and records no origin to clone instead", meta.Base)
 		}
 		if _, err := Git(ctx, filepath.Dir(dest), "clone", "-q", "--no-checkout", source, dest); err != nil {
-			return fmt.Errorf("restoring %s: cloning %s, which holds the history it leans on: %w", id, source, err)
+			return fmt.Errorf("cloning %s, which holds the history it leans on: %w", source, err)
 		}
 	}
 	if meta.Bundle != "" {
 		if _, err := git("fetch", "-q", "--update-head-ok", meta.Bundle, "+refs/*:refs/*"); err != nil {
-			return fmt.Errorf("restoring %s: fetching its bundle: %w", id, err)
+			return fmt.Errorf("fetching its bundle: %w", err)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(meta.Remotes)) {
@@ -83,34 +76,36 @@ func RestoreArchive(ctx context.Context, path, dest, base string) (err error) {
 			verb = "set-url"
 		}
 		if _, err := git("remote", verb, name, meta.Remotes[name]); err != nil {
-			return fmt.Errorf("restoring %s: remote %s: %w", id, name, err)
+			return fmt.Errorf("remote %s: %w", name, err)
 		}
 	}
 	// Before checking anything out: a checkout looks for LFS objects locally
 	// first.
 	if meta.LFS != "" {
 		if err := linkTree(meta.LFS, filepath.Join(dest, ".git", "lfs", "objects")); err != nil {
-			return fmt.Errorf("restoring %s: its LFS objects: %w", id, err)
+			return fmt.Errorf("its LFS objects: %w", err)
 		}
 	}
 
 	refs := archiveRefPrefix + id + "/"
 	if err := restoreHead(ctx, dest, meta); err != nil {
-		return fmt.Errorf("restoring %s: %w", id, err)
+		return err
 	}
-	if GitExitCode(ctx, dest, "rev-parse", "--verify", "-q", refs+"worktree") == 0 {
-		if _, err := git("stash", "apply", "-q", "--index", refs+"worktree"); err != nil {
-			return fmt.Errorf("restoring %s: its working tree: %w", id, err)
+	// The snapshot is applied as a backup's is: with git stash apply, or
+	// tree by tree on an unborn branch, where git stash can't.
+	if snapshot, err := Git(ctx, dest, "rev-parse", "--verify", "-q", refs+"worktree"); err == nil {
+		if err := applySnapshot(ctx, dest, snapshot); err != nil {
+			return fmt.Errorf("its working tree: %w", err)
 		}
 	}
 	if err := restoreStashes(ctx, dest, refs); err != nil {
-		return fmt.Errorf("restoring %s: %w", id, err)
+		return err
 	}
 	deleteRefs(ctx, dest, refs)
 
 	for _, sub := range slices.Sorted(maps.Keys(meta.Submodules)) {
 		if err := RestoreArchive(ctx, meta.Submodules[sub], filepath.Join(dest, sub), ""); err != nil {
-			return fmt.Errorf("restoring %s: submodule %s: %w", id, sub, err)
+			return fmt.Errorf("submodule %s: %w", sub, err)
 		}
 	}
 	return nil
