@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -41,6 +43,8 @@ type BackupMeta struct {
 	Branch        string        `json:"branch"`
 	IndexUnmerged bool          `json:"index_unmerged,omitempty"`
 	Skipped       []SkippedFile `json:"skipped,omitempty"`
+	// Submodules are the submodules' backups that go with this one, by path.
+	Submodules map[string]SubmoduleBackup `json:"submodules,omitempty"`
 }
 
 type copyRecord struct {
@@ -58,6 +62,10 @@ type BackupInfo struct {
 	Commit   string // the snapshot ref's commit
 	PatchDir string // "" if there is no patch backup
 	Meta     *BackupMeta
+	// Submodules are the submodules' backups that go with this one, by path.
+	Submodules map[string]SubmoduleBackup
+
+	patchRoot string // where its submodules' patch backups are
 }
 
 func (b BackupInfo) snapshot() string {
@@ -85,6 +93,9 @@ func (b BackupInfo) RestoreCommands() []string {
 	}
 	if p := filepath.Join(b.PatchDir, untrackedTarball); b.PatchDir != "" && fileExists(p) {
 		cmds = append(cmds, "tar -xzkf "+shellutil.Quote(p)+"   # untracked files; -k keeps existing ones")
+	}
+	for _, path := range slices.Sorted(maps.Keys(b.Submodules)) {
+		cmds = append(cmds, fmt.Sprintf("# submodule %s: its own backup %s (copy %s), which git-mgr restore applies too", path, b.Submodules[path].ID, b.Submodules[path].CopyID))
 	}
 	return cmds
 }
@@ -152,11 +163,17 @@ func listCopyBackups(ctx context.Context, repoPath, patchRoot, copyID string) ([
 		id := strings.TrimPrefix(ref, prefix)
 		byID[id] = &BackupInfo{ID: id, CopyID: copyID, Ref: ref, Commit: oid}
 	}
+	if err := readSubmoduleRefs(ctx, repoPath, copyID, byID); err != nil {
+		return nil, err
+	}
 	if patchRoot != "" {
 		for _, id := range patchBackupIDs(filepath.Join(patchRoot, copyID)) {
 			p := patchBackup(patchRoot, copyID, id)
 			if b, ok := byID[id]; ok {
 				b.PatchDir, b.Meta = p.PatchDir, p.Meta
+				if b.Submodules == nil {
+					b.Submodules = p.Submodules
+				}
 			} else {
 				byID[id] = &p
 			}
@@ -164,22 +181,64 @@ func listCopyBackups(ctx context.Context, repoPath, patchRoot, copyID string) ([
 	}
 	backups := make([]BackupInfo, 0, len(byID))
 	for _, b := range byID {
+		b.patchRoot = patchRoot
 		backups = append(backups, *b)
 	}
 	sort.Slice(backups, func(i, j int) bool { return backups[i].ID < backups[j].ID })
 	return backups, nil
 }
 
+// readSubmoduleRefs sets, on each backup in byID kept as a snapshot ref, the
+// submodules' backups that go with it.
+func readSubmoduleRefs(ctx context.Context, repoPath, copyID string, byID map[string]*BackupInfo) error {
+	prefix := submoduleRefPrefix + copyID + "/"
+	out, err := Git(ctx, repoPath, "for-each-ref", "--format=%(refname) %(objectname)", prefix)
+	if err != nil {
+		return fmt.Errorf("listing backups of %s: %w", repoPath, err)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		ref, oid, ok := strings.Cut(line, " ")
+		b := byID[strings.TrimPrefix(ref, prefix)]
+		if !ok || b == nil {
+			continue
+		}
+		data, err := GitOutput(ctx, repoPath, "cat-file", "blob", oid)
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", ref, err)
+		}
+		if err := json.Unmarshal(data, &b.Submodules); err != nil {
+			return fmt.Errorf("reading %s: %w", ref, err)
+		}
+	}
+	return nil
+}
+
 func patchBackup(patchRoot, copyID, id string) BackupInfo {
 	dir := filepath.Join(patchRoot, copyID, id)
-	b := BackupInfo{ID: id, CopyID: copyID, PatchDir: dir}
+	b := BackupInfo{ID: id, CopyID: copyID, PatchDir: dir, patchRoot: patchRoot}
 	if data, err := os.ReadFile(filepath.Join(dir, metadataFile)); err == nil {
 		var meta BackupMeta
 		if json.Unmarshal(data, &meta) == nil {
 			b.Meta = &meta
+			b.Submodules = meta.Submodules
 		}
 	}
 	return b
+}
+
+// submoduleBackup finds the backup sb of the submodule at path, under its
+// recorded copy ID: the submodule may have been cloned again since.
+func (b BackupInfo) submoduleBackup(ctx context.Context, path string, sb SubmoduleBackup) (BackupInfo, error) {
+	backups, err := listCopyBackups(ctx, path, b.patchRoot, sb.CopyID)
+	if err != nil {
+		return BackupInfo{}, err
+	}
+	for _, sub := range backups {
+		if sub.ID == sb.ID {
+			return sub, nil
+		}
+	}
+	return BackupInfo{}, fmt.Errorf("%w with ID %s for %s (copy %s)", ErrNoBackup, sb.ID, path, sb.CopyID)
 }
 
 // patchBackupIDs lists the complete backups in one copy's patch directory.
@@ -234,19 +293,53 @@ func lastBackup(backups []BackupInfo) *BackupInfo {
 // if HEAD has moved since the backup, git merges and reports any conflict.
 // Without a ref the patch backup is applied instead.
 func ApplyBackup(ctx context.Context, repoPath string, b BackupInfo) error {
-	if b.Commit != "" && GitExitCode(ctx, repoPath, "cat-file", "-e", b.Commit+"^{commit}") == 0 {
-		return applySnapshot(ctx, repoPath, b.Commit)
+	switch {
+	case b.Commit != "" && GitExitCode(ctx, repoPath, "cat-file", "-e", b.Commit+"^{commit}") == 0:
+		if err := applySnapshot(ctx, repoPath, b.Commit); err != nil {
+			return err
+		}
+	case b.PatchDir != "":
+		if err := applyPatchBackup(ctx, repoPath, b.PatchDir); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("backup %s has neither a snapshot in %s nor a patch backup", b.ID, repoPath)
 	}
-	if b.PatchDir != "" {
-		return applyPatchBackup(ctx, repoPath, b.PatchDir)
+	for _, path := range slices.Sorted(maps.Keys(b.Submodules)) {
+		subPath := filepath.Join(repoPath, path)
+		sub, err := b.submoduleBackup(ctx, subPath, b.Submodules[path])
+		if err == nil {
+			err = ApplyBackup(ctx, subPath, sub)
+		}
+		if err != nil {
+			return fmt.Errorf("submodule %s: %w", path, err)
+		}
 	}
-	return fmt.Errorf("backup %s has neither a snapshot in %s nor a patch backup", b.ID, repoPath)
+	return nil
 }
 
 // RestoreBackupInto clones the copy at repoPath into the empty or missing
 // directory into, checks out the backup's base commit there and restores the
 // backup on top, leaving the original working copy untouched.
 func RestoreBackupInto(ctx context.Context, repoPath string, b BackupInfo, into string) error {
+	if err := restoreInto(ctx, repoPath, b, into); err != nil {
+		return err
+	}
+	// Each submodule is restored as a clone of its own, in its place.
+	for _, path := range slices.Sorted(maps.Keys(b.Submodules)) {
+		subPath := filepath.Join(repoPath, path)
+		sub, err := b.submoduleBackup(ctx, subPath, b.Submodules[path])
+		if err == nil {
+			err = RestoreBackupInto(ctx, subPath, sub, filepath.Join(into, path))
+		}
+		if err != nil {
+			return fmt.Errorf("submodule %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func restoreInto(ctx context.Context, repoPath string, b BackupInfo, into string) error {
 	if entries, err := os.ReadDir(into); err == nil && len(entries) > 0 {
 		return fmt.Errorf("%s exists and is not empty", into)
 	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
