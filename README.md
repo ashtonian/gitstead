@@ -397,8 +397,12 @@ overrides:
 `git-mgr clone <url>` honors the scheme you pass (an `https://` URL clones over
 HTTPS, `git@…`/`ssh://` over SSH). A URL embedding a credential
 (`https://user:token@…`) is refused everywhere — clone, `repos:`, manifests,
-workspaces, adopt — so none lands in state or logs; use a credential helper. `git-mgr doctor` reports whether each
-provider's token resolves and whether configured SSH keys exist.
+workspaces, adopt — so none lands in state or logs; use a credential helper.
+One put into a clone's remote by hand afterwards is kept out too: remote URLs
+git-mgr writes down (archive and backup descriptions) are stored without it,
+plans show it redacted, and `--json` output redacts any URL credential.
+`git-mgr doctor` reports whether each provider's token resolves and whether
+configured SSH keys exist.
 
 ### Accounts
 

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 
 	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/state"
 	"github.com/willabides/kongplete"
 )
@@ -122,18 +124,23 @@ func (c *Context) ReloadConfig() (*config.Config, error) {
 	return c.LoadConfig()
 }
 
-// LoadState loads the state file, creating it if it doesn't exist.
 // Emit writes v, the command's result, as the one JSON document --json
-// prints.
+// prints. Any credential in a URL within it is redacted, whatever put it
+// there.
 func (c *Context) Emit(v any) error {
 	out := c.Out
 	if out == nil {
 		out = os.Stdout
 	}
-	enc := json.NewEncoder(out)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false)
-	return enc.Encode(v)
+	if err := enc.Encode(v); err != nil {
+		return err
+	}
+	_, err := io.WriteString(out, repourl.Redact(buf.String()))
+	return err
 }
 
 // errNoJSON is what a command with no result to print as JSON returns under
@@ -142,6 +149,7 @@ func errNoJSON(what string) error {
 	return fmt.Errorf("%s has no JSON output", what)
 }
 
+// LoadState loads the state file, creating it if it doesn't exist.
 func (c *Context) LoadState() (*state.State, error) {
 	if c.st != nil {
 		return c.st, nil

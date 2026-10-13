@@ -182,6 +182,26 @@ func HasCredentials(raw string) bool {
 	return hasPassword
 }
 
+// WithoutCredentials returns raw with any credential HasCredentials finds
+// taken out: the user info of an http(s) URL, the password of another. It is
+// what to keep of a URL read from a repository's config, which a person may
+// have put a token in; git's credential helper supplies it instead.
+func WithoutCredentials(raw string) string {
+	if !HasCredentials(raw) {
+		return raw
+	}
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return Redact(raw)
+	}
+	if u.Scheme == "http" || u.Scheme == "https" {
+		u.User = nil
+	} else {
+		u.User = url.User(u.User.Username())
+	}
+	return u.String()
+}
+
 // CheckNoCredentials returns an error naming the URL, redacted, when it embeds
 // a credential. git-mgr keeps URLs in state and logs, so it never accepts one.
 func CheckNoCredentials(raw string) error {
