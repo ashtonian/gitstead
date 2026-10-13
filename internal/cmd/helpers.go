@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/git-mgr/internal/hook"
 	"github.com/ashtonian/git-mgr/internal/oplog"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
@@ -43,6 +45,12 @@ func stateUpdater(cfg *config.Config, st *state.State) func(change func(*state.S
 	return func(change func(*state.State) error) error {
 		return st.Update(cfg.LockTimeout, change)
 	}
+}
+
+// hookRunner runs hooks within hooks.timeout, logging each checkout's last
+// run of each event under <state dir>/hooks; echo also gets the output.
+func hookRunner(cfg *config.Config, st *state.State, echo io.Writer) hook.Runner {
+	return hook.Runner{LogDir: filepath.Join(st.Dir(), "hooks"), Timeout: cfg.Hooks.Timeout, Echo: echo}
 }
 
 // staleCleanup judges tracked repos against a discovery pass under the

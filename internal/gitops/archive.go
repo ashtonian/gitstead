@@ -87,7 +87,7 @@ func archive(ctx context.Context, repoPath, dir, name string, scope archiveScope
 	meta.Branch, _ = Git(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
 
 	for _, sub := range slices.Sorted(maps.Keys(work.Submodules)) {
-		path, err := archive(ctx, filepath.Join(repoPath, sub), dir, name+"-"+safeName(sub), scopeClone)
+		path, err := archive(ctx, filepath.Join(repoPath, sub), dir, name+"-"+pathutil.FileName(sub), scopeClone)
 		if err != nil {
 			return "", fmt.Errorf("archiving submodule %s: %w", sub, err)
 		}
@@ -438,16 +438,5 @@ func remoteURLs(ctx context.Context, repoPath string) map[string]string {
 // newArchiveID names a new archive of name: unique, sortable by time, and
 // usable as a file name.
 func newArchiveID(name string) string {
-	return safeName(name) + "-" + time.Now().UTC().Format("20060102T150405.000000000Z")
-}
-
-// safeName turns a repo key or member name into a single path component.
-func safeName(name string) string {
-	return strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
-			return r
-		}
-		return '_'
-	}, name)
+	return pathutil.FileName(name) + "-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 }

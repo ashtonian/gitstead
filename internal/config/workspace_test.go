@@ -155,3 +155,40 @@ func TestValidateFleets(t *testing.T) {
 		})
 	}
 }
+
+func TestHooksFor(t *testing.T) {
+	allow, install, none := []string{"direnv allow"}, []string{"npm ci"}, []string{}
+	cfg := &Config{
+		Hooks:     HooksConfig{PostClone: []string{"direnv allow"}, PostCreate: []string{"echo top"}},
+		Accounts:  []Account{{Name: "work", Hosts: []string{"github.com"}, Owners: []string{"acme"}, Hooks: &HooksOverride{PostCreate: &allow}}},
+		Overrides: []Override{{Repos: []string{"github.com/acme/web"}, Hooks: &HooksOverride{PostClone: &install, PostCreate: &none}}},
+	}
+	for _, tt := range []struct {
+		key  string
+		want RepoHooks
+	}{
+		{"github.com/me/x", RepoHooks{PostClone: []string{"direnv allow"}, PostCreate: []string{"echo top"}}},
+		{"github.com/acme/api", RepoHooks{PostClone: []string{"direnv allow"}, PostCreate: []string{"direnv allow"}}},
+		{"github.com/acme/web", RepoHooks{PostClone: []string{"npm ci"}, PostCreate: []string{}}},
+	} {
+		if got := cfg.HooksFor(tt.key, ""); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("%s: %+v, want %+v", tt.key, got, tt.want)
+		}
+	}
+}
+
+func TestWorkspacePostCreate(t *testing.T) {
+	envCopy, none := []string{`cp "$GIT_MGR_SOURCE/.env" .env`}, []string{}
+	cfg := &Config{WorkspaceDefaults: WorkspaceDefaults{Hooks: WorkspaceHooks{PostCreate: &envCopy}}}
+	if got := cfg.WithDefaults(Workspace{Name: "a"}).PostCreate(); !reflect.DeepEqual(got, envCopy) {
+		t.Errorf("a workspace without hooks takes the defaults', got %v", got)
+	}
+	if got := cfg.WithDefaults(Workspace{Name: "b", Hooks: WorkspaceHooks{PostCreate: &none}}).PostCreate(); len(got) != 0 {
+		t.Errorf("an empty list runs nothing, got %v", got)
+	}
+	blank := []string{"  "}
+	cfg.Workspaces = []Workspace{{Name: "c", Hooks: WorkspaceHooks{PostCreate: &blank}}}
+	if err := validateHooks(cfg); err == nil {
+		t.Error("an empty command must be rejected")
+	}
+}

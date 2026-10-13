@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ashtonian/git-mgr/internal/hook"
 	"github.com/ashtonian/git-mgr/internal/state"
 )
 
@@ -183,6 +184,8 @@ type Env struct {
 	Concurrency int
 	// CloneTimeout bounds each clone; 0 means none.
 	CloneTimeout time.Duration
+	// Hooks runs the hooks of checkouts the plan makes.
+	Hooks hook.Runner
 	// ArchiveDir receives the unique work of anything removed.
 	ArchiveDir string
 	// StateDir is the state file's directory, where agents' runs keep their

@@ -860,6 +860,90 @@ func TestE2E_ArchiveAndRestore(t *testing.T) {
 	}
 }
 
+// TestE2E_Hooks: sync runs post_clone in a clone it makes; ws create runs
+// post_create in each copy, told where the repo's clone is; `hooks` runs
+// either again, and a failing hook fails the command but keeps the copy.
+func TestE2E_Hooks(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+	remote := filepath.Join(tmp, "remotes", "app.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	seed := filepath.Join(tmp, "seed")
+	gitCmd(t, tmp, "clone", "-q", remote, seed)
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("# app"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, seed, "add", ".")
+	gitCmd(t, seed, "-c", "user.name=e2e", "-c", "user.email=e2e@test.local", "commit", "-qm", "init")
+	gitCmd(t, seed, "push", "-q", "origin", "HEAD:main")
+
+	root := filepath.Join(tmp, "workspaces")
+	cfg := fmt.Sprintf(`base_dir: %s
+hooks:
+  post_clone: ['printf "%%s" "$GIT_MGR_REPO" > .cloned']
+workspace_defaults:
+  root: %s
+  hooks:
+    post_create: ['cp "$GIT_MGR_SOURCE/.env" .env', 'echo "$GIT_MGR_AGENT" >> ran']
+repos:
+  - url: %s
+`, env.baseDir, root, remote)
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := env.run(t, "sync"); code != 0 {
+		t.Fatalf("sync exit %d:\n%s", code, out)
+	}
+	clone := filepath.Join(env.baseDir, "local", "remotes", "app")
+	if got, _ := os.ReadFile(filepath.Join(clone, ".cloned")); string(got) != "local/remotes/app" {
+		t.Errorf("post_clone wrote %q", got)
+	}
+	if err := os.WriteFile(filepath.Join(clone, ".env"), []byte("TOKEN=x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if out, code := env.run(t, "ws", "create", "app", "--repo", "local/remotes/app", "--agents", "2"); code != 0 {
+		t.Fatalf("ws create exit %d:\n%s", code, out)
+	}
+	copyOf := func(agent string) string { return filepath.Join(root, "app", agent) }
+	for _, agent := range []string{"agent-1", "agent-2"} {
+		if got, _ := os.ReadFile(filepath.Join(copyOf(agent), ".env")); string(got) != "TOKEN=x\n" {
+			t.Errorf("%s: .env = %q", agent, got)
+		}
+	}
+
+	out, code := env.run(t, "hooks", "post-create", "app", "agent-2")
+	if code != 0 {
+		t.Fatalf("hooks post-create exit %d:\n%s", code, out)
+	}
+	if got, _ := os.ReadFile(filepath.Join(copyOf("agent-2"), "ran")); string(got) != "agent-2\nagent-2\n" {
+		t.Errorf("agent-2 ran = %q, want it twice", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(copyOf("agent-1"), "ran")); string(got) != "agent-1\n" {
+		t.Errorf("agent-1 ran = %q, want it once", got)
+	}
+	os.Remove(filepath.Join(clone, ".cloned"))
+	if out, code := env.run(t, "hooks", "post-clone", "local/remotes/app"); code != 0 {
+		t.Fatalf("hooks post-clone exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(clone, ".cloned")); err != nil {
+		t.Errorf("hooks post-clone didn't run: %v", err)
+	}
+
+	// A hook that fails fails the command, and the copy stays.
+	os.Remove(filepath.Join(clone, ".env"))
+	out, code = env.run(t, "ws", "create", "other", "--repo", "local/remotes/app")
+	if code == 0 || !strings.Contains(out, "post_create") {
+		t.Errorf("a failing hook must fail ws create, exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "other", "agent-1", "README.md")); err != nil {
+		t.Errorf("the copy must stay: %v", err)
+	}
+	if out, _ := env.run(t, "ws", "ls"); !strings.Contains(out, "other") {
+		t.Errorf("the workspace must be recorded:\n%s", out)
+	}
+}
+
 // TestE2E_PublishAndRetire: publish pushes an agent's branch to its remote;
 // retire archives the copy's uncommitted work, removes it, and catalogs the
 // archive.

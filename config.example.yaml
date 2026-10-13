@@ -438,6 +438,28 @@ remote_sync:
   keep: "720h"
 
 # =============================================================================
+# Hooks
+# =============================================================================
+# Commands git-mgr runs, each with /bin/sh -c, in a checkout it has just made:
+#   post_clone  - in a repo's new clone (not one adopted where it was)
+#   post_create - in a new workspace copy, after the repo's post_create comes
+#                 the workspace's (workspace_defaults.hooks / workspaces[].hooks)
+# Set here, per account (accounts[].hooks) or per repo (overrides[].hooks); the
+# most specific list wins, and an empty list runs nothing. Each command runs
+# in order with no input and no terminal; the first that fails stops the rest,
+# the checkout is kept and recorded, and the failure is reported. Output goes
+# to <state dir>/hooks/<checkout>.<event>.log. Hooks come only from this file,
+# never from a repository. Environment: GIT_MGR_EVENT, GIT_MGR_PATH,
+# GIT_MGR_REPO, GIT_MGR_SOURCE (the repo's clone), GIT_MGR_WORKSPACE,
+# GIT_MGR_AGENT, GIT_MGR_BRANCH. `git-mgr hooks post-clone|post-create` runs
+# them again.
+
+hooks:
+  post_clone: []           # e.g. ["direnv allow", "mise install"]
+  post_create: []          # e.g. ["npm ci"] -- per repo, in overrides[].hooks
+  timeout: "15m"           # each command; 0 = none
+
+# =============================================================================
 # Notifications
 # =============================================================================
 
@@ -508,6 +530,10 @@ workspace_defaults:
   branch: "agents/{{.Workspace}}/{{.Agent}}"
   base_ref: ""                      # new branches start here; "" = upstream's default branch
   agent: ""                         # the profile agents run; "" = the first one
+  # Run in each new copy after its repo's post_create hooks, unless a
+  # workspace sets its own (hooks: {post_create: [...]}; [] for none).
+  hooks:
+    post_create: []                 # e.g. ['cp "$GIT_MGR_SOURCE/.env" .env', "direnv allow"]
 
 workspaces: []
   # One repo, four agents: ~/workspaces/app/agent-1 .. agent-4.

@@ -50,6 +50,8 @@ type WorkspaceDefaults struct {
 	// Agent is the agent profile workspaces' agents run; empty for the first
 	// declared, or detected, one.
 	Agent string `koanf:"agent" yaml:"agent,omitempty"`
+	// Hooks are every workspace's own hooks, unless it sets its own.
+	Hooks WorkspaceHooks `koanf:"hooks" yaml:"hooks,omitempty"`
 }
 
 // Workspace is one repo, or several related ones, worked on by a number of
@@ -72,6 +74,7 @@ type Workspace struct {
 	BaseRef    string              `koanf:"base_ref"    yaml:"base_ref,omitempty"`
 	Agent      string              `koanf:"agent"       yaml:"agent,omitempty"`
 	RemoteSync *RemoteSyncOverride `koanf:"remote_sync" yaml:"remote_sync,omitempty"`
+	Hooks      WorkspaceHooks      `koanf:"hooks"       yaml:"hooks,omitempty"`
 }
 
 // FindWorkspace returns the declared workspace with name, or nil.
@@ -121,6 +124,9 @@ func (c *Config) WithDefaults(w Workspace) Workspace {
 	}
 	if w.Agent == "" {
 		w.Agent = d.Agent
+	}
+	if w.Hooks.PostCreate == nil {
+		w.Hooks.PostCreate = d.Hooks.PostCreate
 	}
 	w.Root, w.Path = ExpandHome(w.Root), ExpandHome(w.Path)
 	return w
