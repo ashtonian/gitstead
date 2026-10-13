@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"path"
 	"regexp"
 	"strings"
 	"text/template"
@@ -98,30 +100,56 @@ func Validate(cfg *Config) error {
 // filterRE matches the partial clone filters git-mgr accepts.
 var filterRE = regexp.MustCompile(`^(blob:none|blob:limit=[0-9]+[kmg]?|tree:[0-9]+)$`)
 
-// validateClone checks clone filters wherever they are set.
+// validateClone checks clone filters and sparse directories wherever they
+// are set.
 func validateClone(cfg *Config) error {
-	check := func(where, filter string) error {
-		if filter != "" && !filterRE.MatchString(filter) {
-			return fmt.Errorf("%s: clone.filter %q: use blob:none, blob:limit=<size> or tree:<depth>", where, filter)
+	check := func(where string, filter *string, sparse *[]string) error {
+		if filter != nil && *filter != "" && !filterRE.MatchString(*filter) {
+			return fmt.Errorf("%s: clone.filter %q: use blob:none, blob:limit=<size> or tree:<depth>", where, *filter)
+		}
+		if sparse != nil {
+			for _, dir := range *sparse {
+				if err := checkSparseDir(dir); err != nil {
+					return fmt.Errorf("%s: clone.sparse: %w", where, err)
+				}
+			}
 		}
 		return nil
 	}
-	if err := check("config", cfg.Clone.Filter); err != nil {
+	if err := check("config", &cfg.Clone.Filter, &cfg.Clone.Sparse); err != nil {
 		return err
 	}
 	for _, a := range cfg.Accounts {
-		if a.Clone != nil && a.Clone.Filter != nil {
-			if err := check(fmt.Sprintf("account %q", a.Name), *a.Clone.Filter); err != nil {
+		if a.Clone != nil {
+			if err := check(fmt.Sprintf("account %q", a.Name), a.Clone.Filter, a.Clone.Sparse); err != nil {
 				return err
 			}
 		}
 	}
 	for _, o := range cfg.Overrides {
-		if o.Clone != nil && o.Clone.Filter != nil {
-			if err := check(fmt.Sprintf("override %v", o.Repos), *o.Clone.Filter); err != nil {
+		if o.Clone != nil {
+			if err := check(fmt.Sprintf("override %v", o.Repos), o.Clone.Filter, o.Clone.Sparse); err != nil {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// checkSparseDir accepts a directory a cone-mode sparse checkout can name:
+// relative to the repo's top, in clean form, with no wildcards.
+func checkSparseDir(dir string) error {
+	switch {
+	case dir == "" || dir == ".":
+		return errors.New("an empty directory checks out everything; leave it out")
+	case strings.HasPrefix(dir, "/"):
+		return fmt.Errorf("%q: give the directory relative to the repo's top, without a leading /", dir)
+	case dir == ".." || strings.HasPrefix(dir, "../"):
+		return fmt.Errorf("%q is outside the repo", dir)
+	case strings.ContainsAny(dir, "*?[]\\!"):
+		return fmt.Errorf("%q: name directories, without wildcards", dir)
+	case path.Clean(dir) != dir:
+		return fmt.Errorf("%q: write it as %q", dir, path.Clean(dir))
 	}
 	return nil
 }

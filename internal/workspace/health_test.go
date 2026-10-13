@@ -21,7 +21,7 @@ func TestHealth(t *testing.T) {
 	source := filepath.Join(root, "src")
 	mustGit(t, root, "clone", "-q", remote, source)
 	copyPath := filepath.Join(root, "ws", "agent-1")
-	if err := gitops.AddWorktree(ctx, source, copyPath, "agents/ws/agent-1", ""); err != nil {
+	if err := gitops.AddWorktree(ctx, source, copyPath, "agents/ws/agent-1", "", gitops.CloneOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	spec := &workspace.Spec{Name: "ws", Isolation: config.IsolationWorktree, Replicas: []workspace.Replica{

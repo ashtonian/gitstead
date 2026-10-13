@@ -96,11 +96,17 @@ func createCopy(spec *Spec, r Replica, c Copy, replaces string) reconcile.RunFun
 		err := CreateCopy(cctx, spec.Isolation, spec.BaseRef, c)
 		err = ctxutil.TimedOut(cctx, err, "making the copy", env.CloneTimeout, "sync.clone_timeout")
 		cancel()
+		// A copy missing only some submodules is made: it is recorded, and
+		// the failure reported.
+		var partly error
+		if submodules := (*gitops.SubmoduleError)(nil); errors.As(err, &submodules) {
+			partly, err = err, nil
+		}
 		if err != nil {
 			return reconcile.Outcome{}, err
 		}
 		cs, err := copyState(ctx, spec.Isolation, c)
-		return reconcile.Outcome{Record: recordCopyState(spec.Name, r, cs, replaces)}, err
+		return reconcile.Outcome{Record: recordCopyState(spec.Name, r, cs, replaces)}, errors.Join(partly, err)
 	}
 }
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -69,13 +70,15 @@ func TestValidBranch(t *testing.T) {
 
 func TestValidateClone(t *testing.T) {
 	bad := "blob:everything"
+	badSparse := []string{"src/*"}
 	for _, cfg := range []Config{
 		{Clone: CloneConfig{Filter: "blob"}},
 		{Accounts: []Account{{Name: "a", Clone: &CloneOverride{Filter: &bad}}}},
 		{Overrides: []Override{{Repos: []string{"*"}, Clone: &CloneOverride{Filter: &bad}}}},
+		{Overrides: []Override{{Repos: []string{"*"}, Clone: &CloneOverride{Sparse: &badSparse}}}},
 	} {
 		if err := validateClone(&cfg); err == nil {
-			t.Errorf("validateClone(%+v) accepted a bad filter", cfg)
+			t.Errorf("validateClone(%+v) accepted a bad filter or sparse directory", cfg)
 		}
 	}
 	for _, f := range []string{"", "blob:none", "blob:limit=1m", "tree:0"} {
@@ -83,20 +86,33 @@ func TestValidateClone(t *testing.T) {
 			t.Errorf("filter %q: %v", f, err)
 		}
 	}
+	for dir, ok := range map[string]bool{
+		"services/api": true, "docs": true, ".github": true,
+		"": false, ".": false, "/src": false, "../x": false, "src/": false, "./src": false, "a//b": false, "src/*": false, "!src": false,
+	} {
+		err := validateClone(&Config{Clone: CloneConfig{Sparse: []string{dir}}})
+		if (err == nil) != ok {
+			t.Errorf("sparse %q: err = %v, want ok = %v", dir, err, ok)
+		}
+	}
 }
 
 func TestCloneFor_AccountThenOverride(t *testing.T) {
-	none, one := "blob:none", 1
+	none, one, yes, skip := "blob:none", 1, true, "skip"
+	full := []string{}
 	cfg := &Config{
-		Clone:     CloneConfig{Depth: 50},
-		Accounts:  []Account{{Name: "work", Hosts: []string{"github.com"}, Owners: []string{"acme"}, Clone: &CloneOverride{Filter: &none}}},
-		Overrides: []Override{{Repos: []string{"github.com/acme/big"}, Clone: &CloneOverride{Depth: &one}}},
+		Clone: CloneConfig{Depth: 50, LFS: "auto", Sparse: []string{"src"}},
+		Accounts: []Account{{Name: "work", Hosts: []string{"github.com"}, Owners: []string{"acme"},
+			Clone: &CloneOverride{Filter: &none, Submodules: &yes, LFS: &skip}}},
+		Overrides: []Override{{Repos: []string{"github.com/acme/big"}, Clone: &CloneOverride{Depth: &one, Sparse: &full}}},
 	}
-	if got := cfg.CloneFor("github.com/acme/big", ""); got != (CloneConfig{Filter: "blob:none", Depth: 1}) {
-		t.Errorf("acme/big = %+v", got)
+	want := CloneConfig{Filter: "blob:none", Depth: 1, Submodules: true, LFS: "skip", Sparse: []string{}}
+	if got := cfg.CloneFor("github.com/acme/big", ""); !reflect.DeepEqual(got, want) {
+		t.Errorf("acme/big = %+v, want %+v", got, want)
 	}
-	if got := cfg.CloneFor("github.com/me/x", ""); got != (CloneConfig{Depth: 50}) {
-		t.Errorf("me/x = %+v", got)
+	want = CloneConfig{Depth: 50, LFS: "auto", Sparse: []string{"src"}}
+	if got := cfg.CloneFor("github.com/me/x", ""); !reflect.DeepEqual(got, want) {
+		t.Errorf("me/x = %+v, want %+v", got, want)
 	}
 }
 

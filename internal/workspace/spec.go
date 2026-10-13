@@ -62,6 +62,9 @@ type Copy struct {
 	// config it manages in a clone (worktrees share their repo's).
 	SSHKey string
 	Config map[string]string
+	// Clone is the repo's clone config: how much of it a copy checks out,
+	// and how its submodules are cloned.
+	Clone config.CloneConfig
 }
 
 // Shared reports whether every agent of the workspace works in one folder.
@@ -156,6 +159,7 @@ func Resolve(cfg *config.Config, st *state.State, decl config.Workspace) (*Spec,
 				c.Path = filepath.Join(r.Path, dirs[key])
 			}
 			c.SSHKey, c.Config = reconcile.CopyAccess(cfg, key, repo.DiscoveredBy, repo.CloneURL)
+			c.Clone = cfg.CloneFor(key, repo.DiscoveredBy)
 			if spec.Isolation == config.IsolationWorktree {
 				c.Config = nil // worktrees share their repo's
 			}
@@ -181,6 +185,7 @@ func FromState(cfg *config.Config, st *state.State, ws *state.WorkspaceState) *S
 				}
 				if cfg != nil {
 					c.SSHKey, c.Config = reconcile.CopyAccess(cfg, cs.Repo, repo.DiscoveredBy, c.URL)
+					c.Clone = cfg.CloneFor(cs.Repo, repo.DiscoveredBy)
 					if spec.Isolation == config.IsolationWorktree {
 						c.Config = nil // worktrees share their repo's
 					}

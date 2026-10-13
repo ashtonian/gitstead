@@ -56,7 +56,7 @@ func TestCloneFromSource(t *testing.T) {
 	upstream, source := sourceFixture(t)
 	dest := filepath.Join(t.TempDir(), "ws", "agent-1")
 
-	if err := gitops.CloneFromSource(ctx, source, dest, upstream, "agents/ws/agent-1", "", false); err != nil {
+	if err := gitops.CloneFromSource(ctx, source, dest, upstream, "agents/ws/agent-1", "", false, gitops.CloneOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustGit(t, dest, "symbolic-ref", "--short", "HEAD"); got != "agents/ws/agent-1" {
@@ -108,7 +108,7 @@ func TestCloneFromSource_TracksOriginsBranch(t *testing.T) {
 	ctx := context.Background()
 	upstream, source := sourceFixture(t)
 	dest := filepath.Join(t.TempDir(), "agent-1")
-	if err := gitops.CloneFromSource(ctx, source, dest, upstream, "feature", "", false); err != nil {
+	if err := gitops.CloneFromSource(ctx, source, dest, upstream, "feature", "", false, gitops.CloneOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustGit(t, dest, "rev-parse", "--abbrev-ref", "@{u}"); got != "origin/feature" {
@@ -120,7 +120,7 @@ func TestCloneFromSource_Shared(t *testing.T) {
 	ctx := context.Background()
 	upstream, source := sourceFixture(t)
 	dest := filepath.Join(t.TempDir(), "agent-1")
-	if err := gitops.CloneFromSource(ctx, source, dest, upstream, "agents/x", "main", true); err != nil {
+	if err := gitops.CloneFromSource(ctx, source, dest, upstream, "agents/x", "main", true, gitops.CloneOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	alt, err := os.ReadFile(filepath.Join(dest, ".git", "objects", "info", "alternates"))
@@ -152,7 +152,7 @@ func TestRefreshFromSource_UsesTheSourcesFetch(t *testing.T) {
 	ctx := context.Background()
 	upstream, source := sourceFixture(t)
 	dest := filepath.Join(t.TempDir(), "agent-1")
-	if err := gitops.CloneFromSource(ctx, source, dest, upstream, "agents/x", "", false); err != nil {
+	if err := gitops.CloneFromSource(ctx, source, dest, upstream, "agents/x", "", false, gitops.CloneOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	head := pushUpstream(t, upstream, "b")
@@ -176,7 +176,7 @@ func TestCloneFromSource_RefusesAPartialSource(t *testing.T) {
 	partial := filepath.Join(t.TempDir(), "partial")
 	mustGit(t, filepath.Dir(partial), "clone", "--quiet", "--filter=blob:none", "file://"+upstream, partial)
 
-	err := gitops.CloneFromSource(ctx, partial, filepath.Join(t.TempDir(), "c"), upstream, "agents/x", "", false)
+	err := gitops.CloneFromSource(ctx, partial, filepath.Join(t.TempDir(), "c"), upstream, "agents/x", "", false, gitops.CloneOptions{})
 	if !errors.Is(err, gitops.ErrPartialSource) {
 		t.Fatalf("err = %v, want ErrPartialSource", err)
 	}
@@ -188,7 +188,7 @@ func TestAddWorktree(t *testing.T) {
 	root := t.TempDir()
 
 	fresh := filepath.Join(root, "ws", "agent-1")
-	if err := gitops.AddWorktree(ctx, source, fresh, "agents/ws/agent-1", ""); err != nil {
+	if err := gitops.AddWorktree(ctx, source, fresh, "agents/ws/agent-1", "", gitops.CloneOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if mustGit(t, fresh, "rev-parse", "HEAD") != mustGit(t, source, "rev-parse", "origin/main") {
@@ -199,7 +199,7 @@ func TestAddWorktree(t *testing.T) {
 	}
 
 	resumed := filepath.Join(root, "ws", "agent-2")
-	if err := gitops.AddWorktree(ctx, source, resumed, "feature", ""); err != nil {
+	if err := gitops.AddWorktree(ctx, source, resumed, "feature", "", gitops.CloneOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustGit(t, resumed, "rev-parse", "--abbrev-ref", "@{u}"); got != "origin/feature" {
@@ -209,7 +209,7 @@ func TestAddWorktree(t *testing.T) {
 	// A local branch is checked out as it is, here after its worktree was
 	// removed.
 	mustGit(t, source, "worktree", "remove", fresh)
-	if err := gitops.AddWorktree(ctx, source, fresh, "agents/ws/agent-1", "feature"); err != nil {
+	if err := gitops.AddWorktree(ctx, source, fresh, "agents/ws/agent-1", "feature", gitops.CloneOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if mustGit(t, fresh, "rev-parse", "HEAD") != mustGit(t, source, "rev-parse", "origin/main") {

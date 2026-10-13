@@ -20,6 +20,9 @@ agents at once, each in a copy of its own — keeping their WIP safe.
 - **Structured layout** — repos land at `{{.Host}}/{{.Owner}}/{{.Name}}` (fully
   templatable). Operate them in bulk with named **sets** (`--set`) and
   `run -- <cmd>`.
+- **Clone shapes for big repos** — partial and shallow clones, sparse checkout,
+  submodules and Git LFS skipping, per account or repo, for the repo's clone
+  and every workspace copy alike ([Clone options](#clone-options)).
 - **Transparent backups** of uncommitted work, per working copy and restorable
   exactly — never touches your working tree, index, `index.lock`, branches or
   stash list; `restore`
@@ -422,18 +425,48 @@ commit as the right account; worktrees share their repo's config. If you set one
 reports the difference (see [Config changes](#config-changes-plan-and-apply)).
 Changing an account updates every repo it covers on the next `sync` or `apply`.
 
-### Partial and shallow clones
+### Clone options
 
-Big repos can be cloned without every file's history: `clone.filter` makes a
-partial clone (git fetches file contents as they are checked out) and
-`clone.depth` keeps only recent commits, on every branch. Set them at the top,
-per account (`accounts[].clone`) or per repo (`overrides[].clone`). They apply
-to new clones; an existing clone keeps how it was made.
+`clone` shapes how much of a repo git-mgr fetches and checks out: its history
+(`filter`, `depth`), which directories (`sparse`), its submodules and its Git
+LFS content. Set it at the top, per account (`accounts[].clone`) or per repo
+(`overrides[].clone`); each level overrides the one before, field by field.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `clone.filter` | `""` | `blob:none`, `blob:limit=<size>` or `tree:<depth>`; empty clones every object. |
+| `clone.filter` | `""` | Partial clone: `blob:none`, `blob:limit=<size>` or `tree:<depth>`; git fetches file contents as they are checked out. Empty clones every object. |
 | `clone.depth` | `0` | Commits of history per branch; 0 keeps all. |
+| `clone.sparse` | `[]` | Check out only these directories (cone mode: the files at the top, and directly in each listed directory's parents, come too). Relative to the repo's top, no wildcards. Empty checks out everything; an override's `sparse: []` undoes a sparse default. |
+| `clone.submodules` | `false` | Check out submodules, recursively -- only those inside `sparse` -- cloned with `filter` and `depth` too. |
+| `clone.lfs` | `auto` | `auto`: Git LFS downloads what each checkout needs. `skip`: LFS files stay pointers and nothing is downloaded, kept as `lfs.fetchexclude=*` in the repo's git config. |
+
+```yaml
+overrides:
+  - repos: ["github.com/acme/monorepo"]
+    clone:
+      filter: blob:none            # with sparse: files outside it are never downloaded
+      sparse: [services/api, libs/auth]
+      submodules: true
+      lfs: skip
+```
+
+`filter`, `depth`, `sparse` and `submodules` shape new checkouts: the repo's
+clone, and every workspace copy made from it -- worktree or clone -- which
+takes the shape config gives now, whatever the repo's own checkout looks like.
+An existing clone keeps how it was made; change it with `git sparse-checkout`
+or `git submodule update --init` yourself. `lfs: skip` is managed git config,
+so it reaches existing clones too: `plan` shows it and the next sync or
+`apply` writes it, and their later checkouts skip LFS content.
+
+A sparse checkout is made empty and filled only once its directories are set,
+so nothing outside them is ever checked out -- or, in a partial clone,
+downloaded. git's own `submodule update` ignores the sparse cone, so git-mgr
+names it the submodules inside. A clone or copy whose submodules can't all be
+fetched (one you can't reach, say) is kept and recorded, and the failure
+reported once, rather than cloned again on every sync; `git submodule update
+--init --recursive` there finishes it. Workspace clones hardlink the repo's
+Git LFS objects, so their checkout downloads none of them again. Submodules
+with `filter` need git 2.36 or later.
 
 Workspace worktrees share their repo's clone, filter and depth included.
 Workspace clones can't be made from a partial clone, so `plan` blocks them.

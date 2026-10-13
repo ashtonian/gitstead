@@ -533,3 +533,54 @@ func TestRetire(t *testing.T) {
 		t.Errorf("retiring a running agent = %+v", r)
 	}
 }
+
+// New checkouts -- the repo's clone and each agent's copy -- take clone's
+// shape; clone.lfs: skip reaches clones made before, through managed config.
+func TestApply_CopiesTakeTheRepoShape(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remotes", "mono.git")
+	seed := filepath.Join(root, "seed")
+	mustGit(t, root, "init", "-q", "--bare", "-b", "main", remote)
+	mustGit(t, root, "init", "-q", "-b", "main", seed)
+	for _, f := range []string{"top.txt", "a/a.txt", "b/b.txt"} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(seed, f)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(seed, f), f+"\n")
+	}
+	mustGit(t, seed, "add", ".")
+	mustGit(t, seed, "commit", "-qm", "init")
+	mustGit(t, seed, "push", "-q", remote, "main")
+
+	for _, isolation := range []string{config.IsolationWorktree, config.IsolationClone} {
+		t.Run(isolation, func(t *testing.T) {
+			w := newWorld(t, filepath.Join(root, isolation))
+			w.cfg.Clone.Sparse = []string{"a"}
+			w.cfg.Repos = []config.ManualRepo{{URL: remote}}
+			w.cfg.Workspaces = []config.Workspace{{Name: "mono", Repos: []string{"local/remotes/mono"}, Isolation: isolation}}
+			w.converge()
+
+			source := w.st.Repos["local/remotes/mono"].LocalPath
+			copyPath := filepath.Join(w.cfg.WorkspaceDefaults.Root, "mono", "agent-1")
+			for _, dir := range []string{source, copyPath} {
+				for f, want := range map[string]bool{"top.txt": true, "a/a.txt": true, "b/b.txt": false} {
+					_, err := os.Stat(filepath.Join(dir, f))
+					if (err == nil) != want {
+						t.Errorf("%s: %s exists = %v, want %v", dir, f, err == nil, want)
+					}
+				}
+			}
+
+			w.cfg.Clone.LFS = "skip"
+			w.converge()
+			if got := mustGit(t, source, "config", "--local", gitops.LFSFetchExclude); got != "*" {
+				t.Errorf("the repo's clone: %s = %q, want *", gitops.LFSFetchExclude, got)
+			}
+			if isolation == config.IsolationClone {
+				if got := mustGit(t, copyPath, "config", "--local", gitops.LFSFetchExclude); got != "*" {
+					t.Errorf("the copy: %s = %q, want *", gitops.LFSFetchExclude, got)
+				}
+			}
+		})
+	}
+}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/discovery"
+	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/pathtemplate"
 	"github.com/ashtonian/git-mgr/internal/repourl"
 	"github.com/ashtonian/git-mgr/internal/shellutil"
@@ -94,14 +95,19 @@ func SSHCommand(key string) string {
 }
 
 // managedConfig is the repo-local git config git-mgr keeps for a copy: the
-// SSH key for SSH remotes, and what the covering account asks for.
-func managedConfig(url, sshKey string, accountConfig map[string]string) map[string]string {
+// SSH key for SSH remotes, what the covering account asks for, and Git LFS
+// kept from downloading under clone.lfs: skip -- for existing clones' later
+// checkouts too.
+func managedConfig(url, sshKey string, accountConfig map[string]string, clone config.CloneConfig) map[string]string {
 	cfg := maps.Clone(accountConfig)
 	if cfg == nil {
 		cfg = map[string]string{}
 	}
 	if sshKey != "" && !repourl.IsHTTP(url) {
 		cfg[keySSHCommand] = SSHCommand(sshKey)
+	}
+	if clone.SkipLFS() {
+		cfg[gitops.LFSFetchExclude] = "*"
 	}
 	if len(cfg) == 0 {
 		return nil
@@ -119,8 +125,8 @@ func (r *Repo) access(cfg *config.Config) {
 		r.Account = a.Name
 	}
 	r.accountConfig = AccountConfig(a)
-	r.Config = managedConfig(r.URL, r.SSHKey, r.accountConfig)
 	r.Clone = cfg.CloneFor(r.Key, r.Rule)
+	r.Config = managedConfig(r.URL, r.SSHKey, r.accountConfig, r.Clone)
 }
 
 // Repos returns what config wants for every repo this run can judge: those

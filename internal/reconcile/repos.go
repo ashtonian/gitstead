@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/ctxutil"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/repourl"
@@ -42,7 +43,7 @@ func PlanRepos(desired map[string]Repo, st *state.State, seen Seen, overwrite bo
 			if applied.ManuallyAdded {
 				d.Pinned, d.Path, d.URL, d.UserTags = true, applied.LocalPath, applied.CloneURL, applied.UserTags
 				d.Tags = tagUnion(d.Tags, applied.UserTags)
-				d.Config = managedConfig(d.URL, d.SSHKey, d.accountConfig)
+				d.Config = managedConfig(d.URL, d.SSHKey, d.accountConfig, d.Clone)
 			}
 			first = append(first, Action{
 				Kind: KindRename, Target: key, From: old, To: key,
@@ -271,11 +272,18 @@ func recordRepo(d Repo, here Copy) func(context.Context, *state.State) {
 // cloneRepo clones d to its path, or with adopt takes the clone already
 // there, then writes its managed git config and records it. The clone runs
 // outside the state lock, within env.CloneTimeout; one that fails removes
-// what it left behind, so a half-made clone is never adopted later.
+// what it left behind, so a half-made clone is never adopted later. A clone
+// whose submodules couldn't all be checked out is whole otherwise: it is
+// recorded, and the failure reported.
 func cloneRepo(d Repo, adopt bool) RunFunc {
 	return func(ctx context.Context, env *Env) (Outcome, error) {
+		var partly error
 		if !adopt {
-			if err := cloneInto(ctx, env, d); err != nil {
+			err := cloneInto(ctx, env, d)
+			if submodules := (*gitops.SubmoduleError)(nil); errors.As(err, &submodules) {
+				partly, err = err, nil
+			}
+			if err != nil {
 				return Outcome{Record: func(st *state.State) error {
 					if a := st.Repos[d.Key]; a != nil {
 						a.Cloned, a.Status = false, "missing"
@@ -319,7 +327,7 @@ func cloneRepo(d Repo, adopt bool) RunFunc {
 				a.IsArchived = d.Found.IsArchived
 			}
 			return nil
-		}}, nil
+		}}, partly
 	}
 }
 
@@ -330,8 +338,18 @@ func cloneInto(ctx context.Context, env *Env, d Repo) error {
 	}
 	ctx, cancel := ctxutil.WithTimeout(ctx, env.CloneTimeout)
 	defer cancel()
-	opts := gitops.CloneOptions{SSHKey: sshKey, Filter: d.Clone.Filter, Depth: d.Clone.Depth}
-	return ctxutil.TimedOut(ctx, gitops.Clone(ctx, d.URL, d.Path, opts), "clone", env.CloneTimeout, "sync.clone_timeout")
+	return ctxutil.TimedOut(ctx, gitops.Clone(ctx, d.URL, d.Path, CloneOptions(sshKey, d.Clone)), "clone", env.CloneTimeout, "sync.clone_timeout")
+}
+
+// CloneOptions is how git-mgr clones a repo with clone config c, fetching
+// with sshKey ("" for ssh's own choice), and shapes each checkout of it.
+func CloneOptions(sshKey string, c config.CloneConfig) gitops.CloneOptions {
+	return gitops.CloneOptions{
+		SSHKey: sshKey,
+		Filter: c.Filter,
+		Depth:  c.Depth,
+		Shape:  gitops.Shape{Sparse: c.Sparse, Submodules: c.Submodules, SkipLFS: c.SkipLFS()},
+	}
 }
 
 // WriteManagedConfig sets each wanted key that isn't set, and returns what it

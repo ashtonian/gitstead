@@ -258,6 +258,18 @@ overrides: []
 clone:
   filter: ""          # partial clone: blob:none, blob:limit=<size> or tree:<depth>
   depth: 0            # commits of history per branch; 0 = all
+  # Check out only these directories (cone mode: files at the top, and directly
+  # in each one's parents, come too). Empty = everything. New checkouts only:
+  # the repo's clone and each workspace copy. With filter: blob:none, files
+  # outside them are never downloaded.
+  sparse: []
+  # Check out submodules, recursively (only those inside sparse), cloned with
+  # filter and depth too. New checkouts only.
+  submodules: false
+  # Git LFS: "auto" downloads what each checkout needs; "skip" leaves LFS files
+  # as pointers and downloads nothing (lfs.fetchexclude=* in the repo's git
+  # config, so it reaches existing clones too).
+  lfs: auto
 
 # =============================================================================
 # Sync Settings
