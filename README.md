@@ -502,10 +502,12 @@ An account's folders are where config puts its repos: for each of its hosts
 and owners, the leading part of their path that doesn't depend on the repo's
 name (`~/repos/github.com/acme` under the default layout, `~/work/acme` with
 a `base_dir` of its own). Each account with something to set gets
-`~/.config/git-mgr/accounts/<name>.gitconfig`, and
+`~/.config/git-mgr/accounts/<name>-<digest>.gitconfig` (the name made a file
+name; the digest of the name keeps apart names that make the same one), and
 `~/.config/git-mgr/accounts.gitconfig` holds an `[includeIf "gitdir:<folder>/"]`
 for each folder, deeper folders last so an owner's account wins over its
-host's. A folder two accounts share is left out with a warning, and under
+host's. git writes both files, quoting what it must, and a folder's wildcard
+characters (`*`, `?`, `[`) are escaped so it matches only itself. A folder two accounts share is left out with a warning, and under
 `layout: name`, where every repo sits directly in `base_dir`, there are no
 folders to tell accounts apart by. `--install` adds one `include.path` line
 to your global git config, once; nothing else touches it. Run it again after
