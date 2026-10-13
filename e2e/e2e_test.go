@@ -374,10 +374,13 @@ func TestE2E_DiscoverByUser(t *testing.T) {
 // HTTPURL capture, the https clone path, and the cloned URL stored in state, all
 // through the real binary. (git-mgr's default transport is SSH, which the
 // container doesn't expose, so this also proves the protocol switch works.)
+// A private repo is cloned with what the user's git credential helper
+// supplies, and its origin keeps no credential.
 func TestE2E_DiscoverApplyHTTPS(t *testing.T) {
 	env := setupTestEnv(t)
 	token := env.createToken(t)
 	env.createRepo(t, token, "http-repo", false) // public: cloneable over HTTP without auth
+	env.createRepo(t, token, "private-repo", true)
 
 	cfg := fmt.Sprintf(`base_dir: %s
 clone_protocol: https
@@ -402,11 +405,14 @@ discovery:
 		t.Fatal(err)
 	}
 	// The container advertises its internal URL, localhost:3000, in clone
-	// URLs; git -- not git-mgr -- is told where that is mapped to.
+	// URLs; git -- not git-mgr -- is told where that is mapped to, and given
+	// a credential helper, as a user's git config would.
 	env.extraEnv = []string{
-		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_COUNT=2",
 		"GIT_CONFIG_KEY_0=url." + strings.TrimSuffix(env.httpURL, "/") + "/.insteadOf",
 		"GIT_CONFIG_VALUE_0=http://localhost:3000/",
+		"GIT_CONFIG_KEY_1=credential.helper",
+		fmt.Sprintf("GIT_CONFIG_VALUE_1=!f() { test \"$1\" = get && echo username=%s && echo password=%s; }; f", env.adminUser, token),
 	}
 
 	out, code := env.run(t, "discover", "--apply")
@@ -423,6 +429,14 @@ discovery:
 	}
 	if st := env.statusJSON(t)["localhost/"+env.adminUser+"/http-repo"]; st == nil || st["cloned"] != true {
 		t.Errorf("status: %v", st)
+	}
+
+	private := filepath.Join(env.baseDir, "localhost", env.adminUser, "private-repo")
+	if _, err := os.Stat(filepath.Join(private, "README.md")); err != nil {
+		t.Errorf("the private repo wasn't cloned with the credential helper's token: %v", err)
+	}
+	if origin := gitCmd(t, private, "remote", "get-url", "origin"); strings.Contains(origin, token) || strings.Contains(origin, "@") {
+		t.Errorf("the private repo's origin = %s, want no credential in it", origin)
 	}
 }
 
