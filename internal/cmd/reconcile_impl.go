@@ -152,17 +152,31 @@ func reportApplied(ctx *Context, plan *reconcile.Plan, results []reconcile.Resul
 // changesOutcome is the outcome of applying a plan: each failed or blocked
 // change counts against the changes attempted.
 func changesOutcome(results []reconcile.Result, plan *reconcile.Plan) error {
-	return outcome(failedChanges(results)+len(plan.Blocked), len(results)+len(plan.Blocked), "changes failed or could not be made")
+	return outcomeOf(changeErrors(results, plan), len(results)+len(plan.Blocked), "changes failed or could not be made")
 }
 
-func failedChanges(results []reconcile.Result) int {
-	n := 0
+// changeErrors are why changes failed: each failed change's error, a change
+// skipped for an earlier failure of its target taking that failure's, and
+// each blocked change's reason.
+func changeErrors(results []reconcile.Result, plan *reconcile.Plan) []error {
+	var errs []error
+	first := map[string]error{}
 	for _, r := range results {
-		if r.Err != nil {
-			n++
+		if r.Err == nil {
+			continue
 		}
+		err := r.Err
+		if cause, ok := first[r.Action.Target]; ok && errors.Is(err, reconcile.ErrSkipped) {
+			err = cause
+		} else if !ok {
+			first[r.Action.Target] = err
+		}
+		errs = append(errs, err)
 	}
-	return n
+	for _, b := range plan.Blocked {
+		errs = append(errs, errors.New(b.Reason))
+	}
+	return errs
 }
 
 func confirm(question string) bool {

@@ -65,9 +65,11 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 	}
 
 	var kept []targetError
+	var keptErrs []error
 	keep := func(key string, err error) {
 		fmt.Fprintf(os.Stderr, "  %s: kept and still tracked: %v\n", key, err)
 		kept = append(kept, targetError{key, err.Error()})
+		keptErrs = append(keptErrs, err)
 	}
 	var archives []state.ArchiveEntry
 	untrack := map[string]string{} // key -> the path it was removed at
@@ -159,7 +161,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 	// Other machines reading the manifest no longer clone it; the ones that
 	// have it keep it, as with a repos: entry dropped.
 	err = errors.Join(
-		outcome(len(kept), len(toRemove), "repos could not be deleted or archived and are still tracked: %s", strings.Join(keptKeys, ", ")),
+		outcomeOf(keptErrs, len(toRemove), "repos could not be deleted or archived and are still tracked: %s", strings.Join(keptKeys, ", ")),
 		dropFromManifest(cfg, removed...))
 	return ctx.finish(struct {
 		Removed  []string             `json:"removed"`

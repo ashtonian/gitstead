@@ -2,6 +2,7 @@ package workspace_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,12 @@ func (w *world) plan() *reconcile.Plan {
 
 func (w *world) apply(p *reconcile.Plan, include func(reconcile.Action) bool) []reconcile.Result {
 	w.t.Helper()
+	return w.applyIn(w.scope(), p, include)
+}
+
+// applyIn applies p, a plan for scope.
+func (w *world) applyIn(scope workspace.Scope, p *reconcile.Plan, include func(reconcile.Action) bool) []reconcile.Result {
+	w.t.Helper()
 	env := &reconcile.Env{
 		State:       w.st,
 		Update:      func(change func(*state.State) error) error { return w.st.Update(time.Second, change) },
@@ -99,7 +106,7 @@ func (w *world) apply(p *reconcile.Plan, include func(reconcile.Action) bool) []
 		KeepDirs:    []string{w.cfg.BaseDir, w.cfg.WorkspaceDefaults.Root},
 		Hooks:       hook.Runner{LogDir: filepath.Join(w.st.Dir(), "hooks")},
 	}
-	results := workspace.Apply(context.Background(), w.cfg, env, p, w.scope(), include)
+	results := workspace.Apply(context.Background(), w.cfg, env, p, scope, include)
 	for _, r := range results {
 		if r.Err != nil && !w.tolerate {
 			w.t.Fatalf("%s %s: %v", r.Action.Kind, r.Action.Target, r.Err)
@@ -386,6 +393,48 @@ func TestApply_SharedFolder(t *testing.T) {
 	w.cfg.Workspaces[0].Agents = 3
 	assertKinds(t, w.plan(), "workspace")
 	w.converge()
+}
+
+// A workspace made from flags is wanted as recorded: a copy that couldn't be
+// made then is made by a later run, which is given no flags.
+func TestApply_FlagsWorkspaceKeepsCopiesNotYetMade(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	w := newWorld(t, root)
+	w.cfg.Repos = []config.ManualRepo{{URL: bareRemote(t, root, "app")}}
+	w.converge()
+	flags := workspace.Scope{Extra: []config.Workspace{{Name: "app", Repos: []string{"local/remotes/app"}, Agents: 1}}}
+	p := workspace.Compute(ctx, w.cfg, w.st, flags)
+	assertKinds(t, p, "create-workspace", "create-copy")
+
+	release, err := gitops.LockRepo(ctx, w.st.Repos["local/remotes/app"].LocalPath, true, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.tolerate = true
+	results := w.applyIn(flags, p, reconcile.All)
+	release()
+	if len(results) != 2 || results[0].Err != nil || !errors.Is(results[1].Err, gitops.ErrRepoInUse) {
+		t.Fatalf("results = %+v, want the workspace made and its copy not", results)
+	}
+	if err := w.st.CheckRemovable("local/remotes/app"); err != nil {
+		t.Errorf("a copy not made yet holds nothing of the repo's, so mustn't keep it: %v", err)
+	}
+
+	w.tolerate = false
+	again := workspace.Compute(ctx, w.cfg, w.st, workspace.Scope{})
+	assertKinds(t, again, "create-copy")
+	if note := again.Actions[0].Note; note != "not made yet" {
+		t.Errorf("note = %q", note)
+	}
+	w.applyIn(workspace.Scope{}, again, reconcile.All)
+	copyPath := w.st.Workspaces["app"].Replicas[0].Copies[0].Path
+	if !gitops.HasGitDir(copyPath) || w.st.Workspaces["app"].Replicas[0].Copies[0].CopyID == "" {
+		t.Errorf("the copy at %s wasn't made and recorded: %+v", copyPath, w.st.Workspaces["app"])
+	}
+	if p := workspace.Compute(ctx, w.cfg, w.st, workspace.Scope{}); !p.Empty() {
+		t.Errorf("a further plan should be empty: %+v", p)
+	}
 }
 
 // A path already holding something else blocks the copy rather than

@@ -75,7 +75,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	}
 	plan := reconcile.Compute(ctx.GoCtx(), cfg, st, scope)
 	changes := applyAuto(ctx, cfg, st, plan, reconcile.AutoFilter(cfg.Reconcile.Auto))
-	changesFailed, changesTried := failedChanges(changes)+len(plan.Blocked), len(changes)+len(plan.Blocked)
+	changeErrs, changesTried := changeErrors(changes, plan), len(changes)+len(plan.Blocked)
 
 	// Judge staleness only if every rule succeeded. On a partial failure the
 	// discovered set is incomplete, and marking the missing repos stale (or
@@ -197,7 +197,11 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	for _, e := range failures {
 		doc.Failures = append(doc.Failures, targetError{e.repo, e.err.Error()})
 	}
-	return ctx.finish(doc, outcome(len(failures)+changesFailed, tried+changesTried, "sync operations failed"))
+	errs := changeErrs
+	for _, e := range failures {
+		errs = append(errs, e.err)
+	}
+	return ctx.finish(doc, outcomeOf(errs, tried+changesTried, "sync operations failed"))
 }
 
 // syncJSON is what sync --json prints.

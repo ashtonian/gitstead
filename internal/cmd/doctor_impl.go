@@ -431,7 +431,11 @@ func checkWorkspaces(ctx *Context, st *state.State, d *doctorReport) {
 				copies++
 				if !gitops.HasGitDir(c.Path) {
 					missing++
-					d.fail(fmt.Sprintf("workspace %s/%s: copy missing (%s); `git-mgr ws ensure %s` makes it again", name, r.Agent, c.Path, name))
+					what := "copy missing"
+					if c.Pending {
+						what = "copy not made yet"
+					}
+					d.fail(fmt.Sprintf("workspace %s/%s: %s (%s); `git-mgr ws ensure %s` makes it", name, r.Agent, what, c.Path, name))
 					continue
 				}
 				if ws.Isolation == config.IsolationReferenceClone {
