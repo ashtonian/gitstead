@@ -1,19 +1,21 @@
 # gitten
 
-**Clone and keep in sync every repo you work on** — whole orgs, users or
-searches across GitHub, GitLab and Gitea/Forgejo, filtered by language,
-topics, name or keywords, in one layout with the right account per repo.
+**Find, clone and keep in sync every repo you work on across GitHub, GitLab
+and Gitea/Forgejo, then launch coding agents on them side by side.**
 
-`gitten setup` asks a few questions and clones what your accounts track;
-`gitten clone --org acme --language go` grabs a set on the spot. From then on
+Pick repos by org, user or search, filtered by language, topics, name or
+keywords; they land in one layout with the right account per repo. `gitten
+setup` asks a few questions and clones what your accounts track; `gitten
+clone --org acme --language go` grabs a set on the spot. From then on
 a background sync fetches everything, clones what newly matches, follows
 renames and transfers, and flags what disappears upstream -- and backs up
 uncommitted work without ever touching your branches, working tree or index.
 A new machine is one command away.
 
-It also gives coding agents **workspaces**: a repo, or several related ones,
-worked on by several agents at once, each in a copy of its own, with their
-work backed up and never deleted until it's archived.
+For coding agents it makes **workspaces** -- a repo, or several related ones,
+with each agent in a copy of its own -- and launches them side by side in
+tmux, iTerm or Muxy, their work backed up and never deleted until it's
+archived.
 
 ## Highlights
 
