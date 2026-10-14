@@ -99,7 +99,7 @@ How it works inside -- components, data flow, locks, failure modes -- is in
 ```bash
 brew install --cask ashtonian/tap/gitstead        # macOS
 go install github.com/ashtonian/gitstead@latest   # Go version: see go.mod
-docker pull ashtonian/gitstead                    # linux/amd64, linux/arm64
+docker pull ghcr.io/ashtonian/gitstead            # linux/amd64, linux/arm64
 ```
 
 The [releases](https://github.com/ashtonian/gitstead/releases) have archives
@@ -391,8 +391,9 @@ two repos with the same name can't both be placed and are reported as blocked. A
 with neither may the default file be missing, meaning the defaults: a missing, unreadable or malformed file is an error rather
 than a silent fall back to defaults, which would otherwise run with no discovery
 rules and mark every discovered repo stale. A key that isn't a setting -- a typo,
-or one renamed since -- is an error too, naming every such key:
-`keys no field of config.Config decodes: sync.timout_per_repo`.
+or one renamed since -- is an error too, naming every such key with the
+setting it most likely misspells:
+`"sync.timout_per_repo" is not a setting (did you mean "sync.timeout_per_repo"?)`.
 
 ### Providers
 
@@ -1891,14 +1892,15 @@ vulnerability privately, is in [SECURITY.md](SECURITY.md).
 
 ## Docker
 
-From the first release, `ashtonian/gitstead` runs gitstead with git in a
-container:
+`ghcr.io/ashtonian/gitstead` runs gitstead with git in a container, for
+linux/amd64 and linux/arm64: `:<version>` and `:latest` for each release,
+`:edge` for `master`.
 
 ```bash
 docker run -v ~/.config/gitstead:/root/.config/gitstead \
            -v ~/repos:/root/repos \
            -v ~/.ssh:/root/.ssh:ro \
-           ashtonian/gitstead sync
+           ghcr.io/ashtonian/gitstead sync
 ```
 
 ## Development
