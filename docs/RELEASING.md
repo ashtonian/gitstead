@@ -21,15 +21,23 @@ A tag with a pre-release suffix (`v1.0.0-rc.1`) is published as a pre-release.
   CI, Docker and GoReleaser build from a clean checkout: every dependency,
   `github.com/ashtonian/pkg/config` included, is a pinned, published version.
 - **Public repository.** `go install`, the Go module proxy and the release
-  downloads need `ashtonian/gitstead` public. Make it public before tagging,
-  then remove the build-from-source note from the README's Install section.
+  downloads need `ashtonian/gitstead` public.
 - **Secrets** in the repository's Actions settings:
   - `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`: a Docker Hub access token with
     read and write. The `ashtonian/gitstead` repository is made on the first
     push.
-  - `HOMEBREW_TAP_GITHUB_TOKEN`: a fine-grained token with contents read and
-    write on `ashtonian/homebrew-tap`; the workflow's own token can't push to
-    another repository.
+  - `HOMEBREW_TAP_SSH_KEY`: the private half of an SSH key without a
+    passphrase, whose public half is a deploy key with write access on
+    `ashtonian/homebrew-tap` (Settings > Deploy keys). GoReleaser pushes the
+    cask with it; the workflow's own token can't push to another repository,
+    and a deploy key can write to that one repository only. To replace it:
+
+    ```bash
+    ssh-keygen -t ed25519 -N '' -C 'gitstead release -> homebrew-tap' -f tapkey
+    gh repo deploy-key add tapkey.pub -R ashtonian/homebrew-tap --allow-write --title "gitstead release (GoReleaser)"
+    gh secret set HOMEBREW_TAP_SSH_KEY -R ashtonian/gitstead < tapkey
+    rm tapkey tapkey.pub
+    ```
 - **CI green on `master`**: build, vet, gofmt, race tests, e2e, lint,
   govulncheck and the Docker build.
 
