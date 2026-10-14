@@ -542,7 +542,7 @@ accounts:
     hosts: [github.com]
     owners: [acme]                 # empty = every owner on these hosts no other account claims
     ssh_key: "~/.ssh/id_work"
-    git: {name: "Ashton Kinslow", email: "you@acme.com"}
+    git: {name: "Your Name", email: "you@acme.com"}
     signing:                       # inherit (default) | required | off
       mode: required               # required writes commit/tag.gpgsign, gpg.format,
       key: "~/.ssh/id_work.pub"    # user.signingkey and the signer program; off sets

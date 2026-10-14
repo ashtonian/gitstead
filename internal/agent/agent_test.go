@@ -26,7 +26,7 @@ func TestProfiles_DetectedWhenNoneDeclared(t *testing.T) {
 	if len(got) != 1 || got[0].Name != "codex" || got[0].Resume != "codex resume --last" {
 		t.Errorf("detected = %+v; want codex, the one on PATH", got)
 	}
-	declared := &config.Config{Agents: []config.AgentProfile{{Name: "mine", Command: "claudemore"}}}
+	declared := &config.Config{Agents: []config.AgentProfile{{Name: "mine", Command: "claude-wrapper"}}}
 	if p, err := Profile(declared, ""); err != nil || p.Name != "mine" {
 		t.Errorf("default profile = %+v, %v; declared profiles replace detected ones", p, err)
 	}
