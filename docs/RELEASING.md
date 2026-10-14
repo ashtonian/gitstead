@@ -10,7 +10,7 @@ then GoReleaser (`.goreleaser.yaml`) builds and publishes everything.
 | Archives for macOS and Linux, amd64 and arm64, with `checksums.txt` | the GitHub release for the tag | `builds`, `archives` |
 | Release notes from the commits since the last tag (`docs:`, `test:` and `ci:` left out) | the GitHub release | `changelog` |
 | Homebrew cask `gitstead` | `ashtonian/homebrew-tap`, `Casks/gitstead.rb` | `homebrew_casks` |
-| Docker image `ashtonian/gitstead:<version>` and `:latest`, amd64 and arm64 | Docker Hub | `dockers_v2`, `Dockerfile.goreleaser` |
+| Docker image `ghcr.io/ashtonian/gitstead:<version>` and `:latest`, amd64 and arm64 | GitHub Container Registry, linked to this repository | `dockers_v2`, `Dockerfile.goreleaser` |
 | `go install github.com/ashtonian/gitstead@<version>` | the Go module proxy, from the tag | nothing to do |
 
 A tag with a pre-release suffix (`v1.0.0-rc.1`) is published as a pre-release.
@@ -23,9 +23,6 @@ A tag with a pre-release suffix (`v1.0.0-rc.1`) is published as a pre-release.
 - **Public repository.** `go install`, the Go module proxy and the release
   downloads need `ashtonian/gitstead` public.
 - **Secrets** in the repository's Actions settings:
-  - `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`: a Docker Hub access token with
-    read and write. The `ashtonian/gitstead` repository is made on the first
-    push.
   - `HOMEBREW_TAP_SSH_KEY`: the private half of an SSH key without a
     passphrase, whose public half is a deploy key with write access on
     `ashtonian/homebrew-tap` (Settings > Deploy keys). GoReleaser pushes the
@@ -38,6 +35,10 @@ A tag with a pre-release suffix (`v1.0.0-rc.1`) is published as a pre-release.
     gh secret set HOMEBREW_TAP_SSH_KEY -R ashtonian/gitstead < tapkey
     rm tapkey tapkey.pub
     ```
+- **Images on ghcr.io.** The workflows push them with their own token
+  (`packages: write`), so they need no secret. The `gitstead` container package
+  is linked to this repository by the images' `org.opencontainers.image.source`
+  label; check that it is public (the package's settings) after the first push.
 - **CI green on `master`**: build, vet, gofmt, race tests, e2e, lint,
   govulncheck and the Docker build.
 
@@ -63,7 +64,7 @@ A tag with a pre-release suffix (`v1.0.0-rc.1`) is published as a pre-release.
 ```bash
 brew install --cask ashtonian/tap/gitstead && gitstead version
 go install github.com/ashtonian/gitstead@v0.1.0 && gitstead version
-docker run --rm ashtonian/gitstead:0.1.0 version
+docker run --rm ghcr.io/ashtonian/gitstead:0.1.0 version
 ```
 
 Each should print the tag's version and commit. Homebrew quarantines what

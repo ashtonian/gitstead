@@ -37,7 +37,7 @@ changelog:
 # builds the manifest itself, replacing the old dockers + docker_manifests).
 dockers_v2:
   - images:
-      - ashtonian/gitstead
+      - ghcr.io/ashtonian/gitstead
     tags:
       - "{{ .Version }}"
       - latest
