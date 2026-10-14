@@ -202,7 +202,7 @@ func render(t *testing.T, path string, a Answers) string {
 	if err := Render(doc, a); err != nil {
 		t.Fatal(err)
 	}
-	if err := doc.Save(); err != nil {
+	if err := doc.Save(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
@@ -226,7 +226,7 @@ func TestRender(t *testing.T) {
 		t.Errorf("path_template should give way to layout:\n%s", first)
 	}
 
-	cfg, err := config.Load(path)
+	cfg, err := config.Load(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestDefaults_ReadBackWhatRenderWrote(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	want := sampleAnswers()
 	render(t, path, want)
-	cfg, err := config.Load(path)
+	cfg, err := config.Load(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestDefaults_ReadBackWhatRenderWrote(t *testing.T) {
 	// sync.update round-trips too.
 	want.Update = true
 	render(t, path, want)
-	if cfg, err = config.Load(path); err != nil {
+	if cfg, err = config.Load(t.Context(), path); err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Sync.Update != "ff-only-clean" || !Defaults(Detected{}, cfg, "/nonexistent-home").Update {
@@ -306,7 +306,7 @@ func TestRender_Workspaces(t *testing.T) {
 	if second := render(t, path, a); second != first {
 		t.Fatalf("rendering twice changed the file:\n%s\nthen\n%s", first, second)
 	}
-	cfg, err := config.Load(path)
+	cfg, err := config.Load(t.Context(), path)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, first)
 	}

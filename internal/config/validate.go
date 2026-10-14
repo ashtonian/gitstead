@@ -7,49 +7,64 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"text/template"
 
+	pkgconfig "github.com/ashtonian/pkg/config"
 	"github.com/go-playground/validator/v10"
 
 	"github.com/ashtonian/gitstead/internal/repourl"
 )
 
-// --- Validation ---
-
-// Validate checks the config using go-playground/validator struct tags
-// plus custom cross-field validation.
-func Validate(cfg *Config) error {
+// tagValidator checks the struct tags, naming each field by its config key
+// (providers[0].type, not Providers[0].Type). One is shared: it caches
+// struct metadata and is safe for concurrent use.
+var tagValidator = sync.OnceValue(func() *validator.Validate {
 	v := validator.New()
-
-	// Register custom validator for regex patterns
-	_ = v.RegisterValidation("valid_regex", func(fl validator.FieldLevel) bool {
+	v.RegisterTagNameFunc(pkgconfig.FieldName)
+	if err := v.RegisterValidation("valid_regex", func(fl validator.FieldLevel) bool {
 		_, err := regexp.Compile(fl.Field().String())
 		return err == nil
-	})
-
-	// Struct tag validation (required, oneof, min, max, etc.)
-	if err := v.Struct(cfg); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			return formatValidationErrors(validationErrors)
-		}
-		return fmt.Errorf("validation: %w", err)
+	}); err != nil {
+		panic(err)
 	}
+	return v
+})
 
-	if err := validatePatterns(cfg); err != nil {
+// Check validates a config built in memory as Load validates one it reads:
+// the struct tags, then Validate.
+func Check(cfg *Config) error {
+	if err := tagValidator().Struct(cfg); err != nil {
+		var fields validator.ValidationErrors
+		if errors.As(err, &fields) {
+			return describeFields(fields)
+		}
 		return err
 	}
+	return cfg.validate()
+}
 
-	// Cross-field validation
-	if t, ok := Layouts[cfg.Layout]; ok && cfg.PathTemplate != DefaultPathTemplate && cfg.PathTemplate != t {
-		return fmt.Errorf("set layout or path_template, not both (layout %q, path_template %q)", cfg.Layout, cfg.PathTemplate)
+// Validate checks the rules no struct tag states: names that must be
+// unique, references that must resolve, settings that exclude each other.
+// Load runs it after the tags pass (pkgconfig.Validatable).
+func (c *Config) Validate() error {
+	if err := c.validate(); err != nil {
+		return &invalidError{err}
 	}
-	if _, err := template.New("test").Parse(cfg.PathTemplate); err != nil {
-		return fmt.Errorf("invalid path_template %q: %w", cfg.PathTemplate, err)
+	return nil
+}
+
+func (c *Config) validate() error {
+	if err := validatePatterns(c); err != nil {
+		return err
+	}
+	if _, err := template.New("path_template").Parse(c.PathTemplate); err != nil {
+		return fmt.Errorf("invalid path_template %q: %w", c.PathTemplate, err)
 	}
 
 	// Check duplicate provider names, capturing each provider's type.
 	provType := make(map[string]string)
-	for _, p := range cfg.Providers {
+	for _, p := range c.Providers {
 		if _, ok := provType[p.Name]; ok {
 			return fmt.Errorf("duplicate provider name: %q", p.Name)
 		}
@@ -67,42 +82,38 @@ func Validate(cfg *Config) error {
 
 	// Check discovery rules reference valid providers and use selectors that are
 	// valid for the provider's type.
-	for _, r := range cfg.Discovery {
+	for _, r := range c.Discovery {
 		typ, ok := provType[r.Provider]
 		if !ok {
 			return fmt.Errorf("discovery rule %q references unknown provider %q (available: %v)",
-				r.Name, r.Provider, providerNames(cfg.Providers))
+				r.Name, r.Provider, providerNames(c.Providers))
 		}
 		if err := validateSelector(r, typ); err != nil {
 			return err
 		}
 	}
 
-	if err := validateAccounts(cfg); err != nil {
+	if err := validateAccounts(c); err != nil {
 		return err
 	}
-	if err := validateRemoteSync(cfg); err != nil {
+	if err := validateRemoteSync(c); err != nil {
 		return err
 	}
-	for _, mr := range cfg.Repos {
+	for _, mr := range c.Repos {
 		if err := checkManualRepo(mr); err != nil {
 			return err
 		}
 	}
-	if err := validateWorkspaces(cfg); err != nil {
+	if err := validateWorkspaces(c); err != nil {
 		return err
 	}
-	if err := validateClone(cfg); err != nil {
+	if err := validateClone(c); err != nil {
 		return err
 	}
-	if err := validateHooks(cfg); err != nil {
+	if err := validateHooks(c); err != nil {
 		return err
 	}
-	if err := validateFleets(cfg); err != nil {
-		return err
-	}
-
-	return nil
+	return validateFleets(c)
 }
 
 // filterRE matches the partial clone filters gitstead accepts.
@@ -162,10 +173,12 @@ func checkSparseDir(dir string) error {
 	return nil
 }
 
-func formatValidationErrors(errs validator.ValidationErrors) error {
+// describeFields lists the struct-tag rules the config breaks, each on a
+// line of its own, naming fields by their config keys.
+func describeFields(errs validator.ValidationErrors) error {
 	var msgs []string
 	for _, e := range errs {
-		field := strings.TrimPrefix(e.Namespace(), "Config.")
+		_, field, _ := strings.Cut(e.Namespace(), ".") // drop the root type's name
 		switch e.Tag() {
 		case "required":
 			msgs = append(msgs, fmt.Sprintf("%s is required", field))

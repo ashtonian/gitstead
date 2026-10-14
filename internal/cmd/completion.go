@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 
 	"github.com/ashtonian/gitstead/internal/config"
@@ -45,7 +46,8 @@ func completionConfig() *config.Config {
 	if path == "" {
 		path, opts = config.DefaultConfigPath(), append(opts, config.WithOptionalFile())
 	}
-	cfg, err := config.Load(path, opts...)
+	// Completion runs outside any command, so nothing above it can cancel.
+	cfg, err := config.Load(context.Background(), path, opts...)
 	if err != nil {
 		return nil
 	}

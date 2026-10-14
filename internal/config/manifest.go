@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -164,17 +165,18 @@ func (c *Config) ManualPath(key, path string) string {
 
 // loadManifest adds the shared manifest's repos to cfg.Repos, checked as
 // repos: entries are: an account an entry names must be one of config's.
-func loadManifest(cfg *Config) error {
+func loadManifest(_ context.Context, cfg *Config) error {
 	if cfg.Manifest == "" {
 		return nil
 	}
-	m, err := ReadManifest(cfg.Manifest)
+	path := ExpandHome(cfg.Manifest)
+	m, err := ReadManifest(path)
 	if err != nil {
-		return err
+		return &stepError{err}
 	}
 	for _, r := range m.Repos {
 		if r.Account != "" && cfg.FindAccount(r.Account) == nil {
-			return fmt.Errorf("manifest %s: repos entry %s names unknown account %q", cfg.Manifest, r.URL, r.Account)
+			return &stepError{fmt.Errorf("manifest %s: repos entry %s names unknown account %q", path, r.URL, r.Account)}
 		}
 	}
 	cfg.Repos = append(cfg.Repos, m.Repos...)

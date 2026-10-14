@@ -8,11 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/knadh/koanf/providers/confmap"
 	"gopkg.in/yaml.v3"
+
+	"github.com/ashtonian/gitstead/internal/config"
 )
 
+// The defaults are the struct tags' alone: the environment is Load's.
 func TestDefaults(t *testing.T) {
+	t.Setenv("GITSTEAD_CONCURRENCY", "3")
 	cfg := config.Defaults()
 	home, _ := os.UserHomeDir()
 	wantBase := filepath.Join(home, "repos")
@@ -39,7 +43,7 @@ func TestDefaults(t *testing.T) {
 // A config file the caller named must exist: a typo in --config or
 // GITSTEAD_CONFIG must not silently run with zero discovery rules.
 func TestLoad_MissingRequiredFile(t *testing.T) {
-	_, err := config.Load(filepath.Join(t.TempDir(), "confg.yaml"))
+	_, err := config.Load(t.Context(), filepath.Join(t.TempDir(), "confg.yaml"))
 	if !errors.Is(err, config.ErrNotFound) {
 		t.Fatalf("want ErrNotFound for a missing required file, got %v", err)
 	}
@@ -47,7 +51,7 @@ func TestLoad_MissingRequiredFile(t *testing.T) {
 
 // The default location is optional: a zero-config run uses defaults and env.
 func TestLoad_MissingOptionalFile(t *testing.T) {
-	cfg, err := config.Load(filepath.Join(t.TempDir(), "config.yaml"), config.WithOptionalFile())
+	cfg, err := config.Load(t.Context(), filepath.Join(t.TempDir(), "config.yaml"), config.WithOptionalFile())
 	if err != nil {
 		t.Fatalf("missing optional file should load defaults: %v", err)
 	}
@@ -57,7 +61,7 @@ func TestLoad_MissingOptionalFile(t *testing.T) {
 }
 
 func TestLoad_DirectoryIsAnError(t *testing.T) {
-	if _, err := config.Load(t.TempDir(), config.WithOptionalFile()); err == nil {
+	if _, err := config.Load(t.Context(), t.TempDir(), config.WithOptionalFile()); err == nil {
 		t.Fatal("a directory as config path must be an error")
 	}
 }
@@ -70,7 +74,7 @@ func TestLoad_UnreadableFileIsAnError(t *testing.T) {
 	if err := os.WriteFile(path, []byte("base_dir: /x\n"), 0o000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := config.Load(path, config.WithOptionalFile()); err == nil {
+	if _, err := config.Load(t.Context(), path, config.WithOptionalFile()); err == nil {
 		t.Fatal("an unreadable config must be an error, not defaults")
 	}
 }
@@ -80,8 +84,42 @@ func TestLoad_MalformedFileIsAnError(t *testing.T) {
 	if err := os.WriteFile(path, []byte("discovery: [\n  - name: x\n    provider: [unclosed\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := config.Load(path, config.WithOptionalFile()); err == nil {
-		t.Fatal("malformed YAML must be an error, not defaults")
+	_, err := config.Load(t.Context(), path, config.WithOptionalFile())
+	if err == nil || !strings.Contains(err.Error(), path+" does not parse: yaml: line ") {
+		t.Fatalf("Load = %v, want the parser's message, naming the line", err)
+	}
+}
+
+// An empty base_dir is refused, not taken for the current directory.
+func TestLoad_EmptyBaseDir(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("base_dir: \"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(t.Context(), path); err == nil || !strings.Contains(err.Error(), "base_dir is required") {
+		t.Fatalf("Load = %v, want base_dir required", err)
+	}
+}
+
+// The environment overrides the file, and flags override both; a flag's
+// value is validated as the file's is.
+func TestLoad_Precedence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("concurrency: 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	flag := func(n int) config.Option {
+		return config.WithFlags(confmap.Provider(map[string]any{"concurrency": n}, "."))
+	}
+	t.Setenv("GITSTEAD_CONCURRENCY", "16")
+	if cfg, err := config.Load(t.Context(), path); err != nil || cfg.Concurrency != 16 {
+		t.Errorf("with the environment: %v, %v; want 16", cfg, err)
+	}
+	if cfg, err := config.Load(t.Context(), path, flag(4)); err != nil || cfg.Concurrency != 4 {
+		t.Errorf("with a flag: %v, %v; want 4", cfg, err)
+	}
+	if _, err := config.Load(t.Context(), path, flag(500)); err == nil || !strings.Contains(err.Error(), "concurrency must be <= 128") {
+		t.Errorf("an out-of-range flag: %v", err)
 	}
 }
 
@@ -126,7 +164,7 @@ providers:
 `
 	os.WriteFile(cfgPath, []byte(content), 0600)
 
-	cfg, err := config.Load(cfgPath)
+	cfg, err := config.Load(t.Context(), cfgPath)
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
@@ -241,7 +279,7 @@ overrides:
 	if err := os.WriteFile(cfgPath, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Load(cfgPath)
+	cfg, err := config.Load(t.Context(), cfgPath)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -286,7 +324,7 @@ overrides:
 	if err := os.WriteFile(cfgPath, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Load(cfgPath)
+	cfg, err := config.Load(t.Context(), cfgPath)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -309,13 +347,11 @@ func containsStr(s, sub string) bool {
 	return false
 }
 
-// TestLoad_EnvUnderscoreKey proves env overrides of koanf keys containing
-// underscores now work. The previous hand-rolled loader mapped GITSTEAD_BASE_DIR
-// to "base.dir" (≠ koanf key "base_dir") and silently ignored it; the pkg
-// loader's struct-aware env mapping resolves it correctly.
+// A variable sets the key whose path it spells, underscores within a key
+// included: GITSTEAD_BASE_DIR is base_dir.
 func TestLoad_EnvUnderscoreKey(t *testing.T) {
 	t.Setenv("GITSTEAD_BASE_DIR", "/custom/env/repos")
-	cfg, err := config.Load(filepath.Join(t.TempDir(), "config.yaml"), config.WithOptionalFile())
+	cfg, err := config.Load(t.Context(), filepath.Join(t.TempDir(), "config.yaml"), config.WithOptionalFile())
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -343,7 +379,7 @@ overrides:
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Load(path)
+	cfg, err := config.Load(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +408,7 @@ func TestLoad_OverridesAreValidated(t *testing.T) {
 			if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := config.Load(path); err == nil {
+			if _, err := config.Load(t.Context(), path); err == nil {
 				t.Errorf("Load accepted %s", override)
 			}
 		})
@@ -381,7 +417,7 @@ func TestLoad_OverridesAreValidated(t *testing.T) {
 	if err := os.WriteFile(path, []byte("overrides:\n  - repos: [\"github.com/[acme/*\"]\n    clone_protocol: https\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := config.Load(path); err == nil || !strings.Contains(err.Error(), "overrides[0].repos") {
+	if _, err := config.Load(t.Context(), path); err == nil || !strings.Contains(err.Error(), "overrides[0].repos") {
 		t.Errorf("Load = %v, want the malformed glob named", err)
 	}
 }
@@ -415,7 +451,7 @@ func TestLoad_InvalidIsReportedOnce(t *testing.T) {
 	if err := os.WriteFile(path, []byte("concurrency: -1\nlock_timeout: -1s\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := config.Load(path)
+	_, err := config.Load(t.Context(), path)
 	if err == nil {
 		t.Fatal("Load accepted an invalid config")
 	}

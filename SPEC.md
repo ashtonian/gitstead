@@ -55,7 +55,7 @@
 
 ### CLI & Config Framework
 
-**Decision: Kong (CLI) + Koanf (config)**.
+**Decision: Kong (CLI) + Koanf (config, through `github.com/ashtonian/pkg/config`)**.
 
 - **Kong** (`github.com/alecthomas/kong`) -- struct-based CLI definition, cleaner than cobra for this scale. Subcommands as struct fields, flags as struct tags.
 - **Koanf** (`github.com/knadh/koanf/v2`) -- config loading with layered precedence: defaults -> config file -> env vars -> CLI flags. Supports `koanf:"field"`, `default:"value"`, `validate:"required"` struct tags.
@@ -1768,7 +1768,7 @@ gitstead/
 ├── e2e/                    # end-to-end tests: Forgejo in Docker, plus local ones
 └── internal/
     ├── cmd/                # the CLI: one *_impl.go per command family
-    ├── config/             # loading (pkg config), defaults, validation, resolution, edits
+    ├── config/             # loading (pkg/config), defaults, validation, resolution, edits
     ├── discovery/          # provider clients, filters, stale detection and cleanup
     ├── reconcile/          # desired vs recorded vs on-disk for repos; the plan engine
     ├── workspace/          # workspaces: specs, planning, copies, health (depends on the above)
@@ -1794,7 +1794,8 @@ The direct dependencies, from `go.mod`:
 github.com/alecthomas/kong                 # CLI framework
 github.com/willabides/kongplete            # shell completion for kong
 github.com/posener/complete
-github.com/ashtonian/pkg/config   # config loading (koanf underneath); to be its own module
+github.com/ashtonian/pkg/config                 # config loading (koanf underneath)
+github.com/ashtonian/pkg/config/kongprovider    # --concurrency as a config source
 github.com/go-playground/validator/v10     # struct validation
 gopkg.in/yaml.v3                           # state file, config edits
 

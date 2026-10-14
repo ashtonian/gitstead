@@ -5,32 +5,28 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 
 	pkgconfig "github.com/ashtonian/pkg/config"
+	"github.com/go-playground/validator/v10"
+	"github.com/knadh/koanf/v2"
 )
 
 // ErrNotFound reports that a config file the caller required does not exist.
 var ErrNotFound = errors.New("config file not found")
 
-// --- Options pattern ---
+// EnvPrefix starts the environment variables that set config keys:
+// GITSTEAD_BASE_DIR sets base_dir, GITSTEAD_SYNC_TIMEOUT_PER_REPO
+// sync.timeout_per_repo.
+const EnvPrefix = "GITSTEAD"
 
 // Option configures how config is loaded.
 type Option func(*loadOptions)
 
 type loadOptions struct {
-	configPath     string
-	optionalFile   bool
-	envPrefix      string
-	skipValidation bool
-	extraDefaults  map[string]any
-}
-
-// WithConfigFile sets the config file path.
-func WithConfigFile(path string) Option {
-	return func(o *loadOptions) { o.configPath = path }
+	optionalFile bool
+	flags        koanf.Provider
 }
 
 // WithOptionalFile treats a missing config file as "use defaults and env".
@@ -40,146 +36,147 @@ func WithOptionalFile() Option {
 	return func(o *loadOptions) { o.optionalFile = true }
 }
 
-// WithEnvPrefix sets the env var prefix (default: "GITSTEAD_").
-func WithEnvPrefix(prefix string) Option {
-	return func(o *loadOptions) { o.envPrefix = prefix }
+// WithFlags sets config keys from command-line flags: p's keys, above the
+// file and the environment, and validated with them.
+func WithFlags(p koanf.Provider) Option {
+	return func(o *loadOptions) { o.flags = p }
 }
 
-// WithSkipValidation disables validation.
-func WithSkipValidation() Option {
-	return func(o *loadOptions) { o.skipValidation = true }
-}
-
-// WithDefaults provides programmatic defaults (override struct tag defaults).
-func WithDefaults(defaults map[string]any) Option {
-	return func(o *loadOptions) { o.extraDefaults = defaults }
-}
-
-// Defaults returns a Config populated from struct tag defaults.
+// Defaults returns the config the struct-tag defaults make, normalized as
+// Load normalizes: no file, no environment.
 func Defaults() *Config {
-	cfg, _ := Load("", WithSkipValidation())
+	// Nothing is read, so there is nothing to cancel.
+	cfg, err := pkgconfig.Load[Config](context.Background(),
+		pkgconfig.WithValidator(tagValidator()),
+		pkgconfig.WithPostLoad(normalize),
+	)
+	if err != nil {
+		panic(fmt.Sprintf("config: the defaults are not a valid config: %v", err))
+	}
 	return cfg
 }
 
-// configValidator adapts gitstead's domain Validate(*Config) to the
-// pkgconfig.Validator seam (Struct(any) error) so cross-field validation
-// -- duplicate provider names, selector-vs-type, query exclusivity, workspace
-// rules, path-template parsing -- runs inside GetConfig's pipeline. These rules
-// are not expressible as struct tags, so go-playground/validator alone cannot
-// cover them. Validation is normalization-independent (it inspects raw config
-// values, not expanded paths), so running it before normalize() is equivalent
-// to gitstead's previous validate-after-normalize order.
-type configValidator struct{}
+// Load reads the config file at path over the struct-tag defaults, with
+// GITSTEAD_* environment variables and then flags (WithFlags) over it, and
+// validates the result. An empty path reads no file. A path that does not
+// exist is ErrNotFound unless WithOptionalFile is given; a file that exists
+// must read and parse.
+//
+// github.com/ashtonian/pkg/config does the loading: it fails on a key no
+// setting takes, maps each variable to its key by Config's own keys, and
+// validates with the struct tags and then Config.Validate. gitstead's
+// post-load steps -- the shared manifest's repos, then normalize -- run
+// before validation, so the rules judge the config commands will use.
+func Load(ctx context.Context, path string, opts ...Option) (*Config, error) {
+	o := &loadOptions{}
+	for _, opt := range opts {
+		opt(o)
+	}
+	path = ExpandHome(path)
 
-func (configValidator) Struct(v any) error {
-	cfg, ok := v.(*Config)
-	if !ok {
-		return nil
+	kopts := []pkgconfig.Option{
+		pkgconfig.WithEnvPrefix(EnvPrefix),
+		pkgconfig.WithValidator(tagValidator()),
+		pkgconfig.WithPostLoad(loadManifest),
+		pkgconfig.WithPostLoad(normalize),
 	}
-	if err := Validate(cfg); err != nil {
-		return &invalidError{err}
+	switch {
+	case path == "":
+	case o.optionalFile:
+		kopts = append(kopts, pkgconfig.WithFile(path))
+	default:
+		kopts = append(kopts, pkgconfig.WithRequiredFile(path))
 	}
-	return nil
+	if o.flags != nil {
+		kopts = append(kopts, pkgconfig.WithOverrideProvider(o.flags, nil))
+	}
+	cfg, err := pkgconfig.Load[Config](ctx, kopts...)
+	if err != nil {
+		return nil, loadError(path, err)
+	}
+	return cfg, nil
 }
 
-// invalidError carries gitstead's validation error through the loader's
-// wrapping, so Load can report it on its own.
+// invalidError is a rule the config breaks, carried through the loader's
+// wrapping so Load reports it as the config being invalid.
 type invalidError struct{ err error }
 
 func (e *invalidError) Error() string { return e.err.Error() }
 func (e *invalidError) Unwrap() error { return e.err }
 
-// --- Loading ---
+// stepError is a post-load step's failure that names its own subject (the
+// manifest), carried through the loader's wrapping so Load reports it as
+// written.
+type stepError struct{ err error }
 
-// Load reads configuration from path, layered over defaults and env. An empty
-// path loads defaults and env only. A path that does not exist is ErrNotFound
-// unless WithOptionalFile is given; any other problem reading it is an error.
-//
-// Loading is delegated to github.com/ashtonian/pkg/config, which
-// supplies struct-tag + programmatic defaults, struct-aware env mapping (so
-// GITSTEAD_BASE_DIR maps to the koanf key "base_dir", not "base.dir"), and the
-// koanf decode pipeline. gitstead layers its own path normalization and
-// cross-field validation (via configValidator) on top.
-func Load(path string, opts ...Option) (*Config, error) {
-	o := &loadOptions{
-		configPath: path,
-		envPrefix:  "GITSTEAD_",
-	}
-	for _, opt := range opts {
-		opt(o)
-	}
+func (e *stepError) Error() string { return e.err.Error() }
+func (e *stepError) Unwrap() error { return e.err }
 
-	o.configPath = ExpandHome(o.configPath)
-
-	kopts := []pkgconfig.Option{
-		// pkgconfig trims a trailing "_" itself; pass the bare prefix.
-		pkgconfig.WithEnvPrefix(strings.TrimSuffix(o.envPrefix, "_")),
+// loadError is err, a failure loading the config file at path, in gitstead's
+// words.
+func loadError(path string, err error) error {
+	where := "config"
+	if path != "" {
+		where = "config " + path
 	}
-	if o.configPath != "" {
-		info, err := os.Stat(o.configPath)
-		switch {
-		case err == nil && info.IsDir():
-			return nil, fmt.Errorf("config path %s is a directory", o.configPath)
-		case err == nil:
-			// Must: pkgconfig skips an optional file it cannot read or parse,
-			// which would turn a YAML typo into a defaults-only run.
-			kopts = append(kopts, pkgconfig.WithMustConfigFile(o.configPath))
-		case errors.Is(err, fs.ErrNotExist) && o.optionalFile:
-			// Zero-config run: defaults and env only.
-		case errors.Is(err, fs.ErrNotExist):
-			return nil, fmt.Errorf("%w: %s", ErrNotFound, o.configPath)
-		default:
-			return nil, fmt.Errorf("reading config %s: %w", o.configPath, err)
+	var (
+		readErr  *fs.PathError
+		parseErr *pkgconfig.ParseError
+		fields   validator.ValidationErrors
+		invalid  *invalidError
+		step     *stepError
+	)
+	switch {
+	case errors.Is(err, pkgconfig.ErrFileRead) && errors.As(err, &readErr):
+		if errors.Is(readErr, fs.ErrNotExist) {
+			return fmt.Errorf("%w: %s", ErrNotFound, path)
 		}
+		return fmt.Errorf("reading %s: %w", where, readErr)
+	case errors.As(err, &parseErr):
+		// The loader leaves the parser's message out, in case it quotes a
+		// secret. It is shown here: the file is the user's own, and the
+		// message says what is wrong where.
+		return fmt.Errorf("%s does not parse: %w", where, parseErr.Err)
+	case errors.As(err, &fields):
+		return invalidConfig(where, describeFields(fields))
+	case errors.As(err, &invalid):
+		return invalidConfig(where, invalid.err)
+	case errors.As(err, &step):
+		return step.err
 	}
-	if len(o.extraDefaults) > 0 {
-		kopts = append(kopts, pkgconfig.WithDefaults(o.extraDefaults))
-	}
-	if o.skipValidation {
-		kopts = append(kopts, pkgconfig.WithSkipValidation())
-	} else {
-		kopts = append(kopts, pkgconfig.WithValidator(configValidator{}))
-	}
-
-	cfg, err := pkgconfig.GetConfig[Config](context.Background(), kopts...)
-	if invalid := (*invalidError)(nil); errors.As(err, &invalid) {
-		where := "config"
-		if o.configPath != "" {
-			where = "config " + o.configPath
-		}
-		sep := " " // a list of problems starts on a line of its own
-		if strings.HasPrefix(invalid.err.Error(), "\n") {
-			sep = ""
-		}
-		return nil, fmt.Errorf("%s is invalid:%s%w", where, sep, invalid.err)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if o.configPath != "" && !o.skipValidation {
-		if err := checkKeys(o.configPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return nil, err
-		}
-	}
-
-	normalize(cfg)
-	if err := loadManifest(cfg); err != nil {
-		return nil, err
-	}
-	return cfg, nil
+	return fmt.Errorf("%s: %w", where, err)
 }
 
-// normalize applies gitstead's post-load fixups: ~ expansion, BaseDir cleaning,
-// trailing-slash trimming on provider URLs, and the PatchDir default.
-func normalize(cfg *Config) {
+// invalidConfig reports the problems with the config at where, a list of
+// problems starting on a line of its own.
+func invalidConfig(where string, problems error) error {
+	sep := " "
+	if strings.HasPrefix(problems.Error(), "\n") {
+		sep = ""
+	}
+	return fmt.Errorf("%s is invalid:%s%w", where, sep, problems)
+}
+
+// normalize makes the config what commands use: layout's path_template in
+// place of the default, paths with ~ expanded, and the data directories
+// filled in where the config leaves them out.
+func normalize(_ context.Context, cfg *Config) error {
 	if t, ok := Layouts[cfg.Layout]; ok {
+		if cfg.PathTemplate != DefaultPathTemplate && cfg.PathTemplate != t {
+			return &invalidError{fmt.Errorf("set layout or path_template, not both (layout %q, path_template %q)", cfg.Layout, cfg.PathTemplate)}
+		}
 		cfg.PathTemplate = t
 	}
 	expandPaths(cfg)
-	cfg.BaseDir = filepath.Clean(cfg.BaseDir)
+	// An empty base_dir stays empty, for validation to reject, rather than
+	// becoming ".".
+	if cfg.BaseDir != "" {
+		cfg.BaseDir = filepath.Clean(cfg.BaseDir)
+	}
 	for i := range cfg.Providers {
 		cfg.Providers[i].URL = strings.TrimRight(cfg.Providers[i].URL, "/")
 	}
+	return nil
 }
 
 func expandPaths(cfg *Config) {

@@ -28,7 +28,7 @@ providers:
 `)
 
 	w := config.Workspace{Name: "scratch", Repos: []string{"/code/app"}, Agents: 2, BaseRef: "main"}
-	if err := config.SaveWorkspace(path, w, false); err != nil {
+	if err := config.SaveWorkspace(t.Context(), path, w, false); err != nil {
 		t.Fatalf("SaveWorkspace: %v", err)
 	}
 
@@ -40,7 +40,7 @@ providers:
 	if !strings.Contains(s, "name: scratch") || !strings.Contains(s, "- /code/app") {
 		t.Errorf("workspace not appended:\n%s", s)
 	}
-	cfg, err := config.Load(path)
+	cfg, err := config.Load(t.Context(), path)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -55,18 +55,18 @@ func TestSaveWorkspace_ConflictRequiresForce(t *testing.T) {
 	writeFile(t, path, "base_dir: ~/repos\n")
 
 	w := config.Workspace{Name: "dup", Repos: []string{"/a"}}
-	if err := config.SaveWorkspace(path, w, false); err != nil {
+	if err := config.SaveWorkspace(t.Context(), path, w, false); err != nil {
 		t.Fatalf("first save: %v", err)
 	}
-	err := config.SaveWorkspace(path, w, false)
+	err := config.SaveWorkspace(t.Context(), path, w, false)
 	if !errors.Is(err, config.ErrWorkspaceExists) {
 		t.Fatalf("duplicate save = %v, want ErrWorkspaceExists", err)
 	}
 	w.Repos = []string{"/b"}
-	if err := config.SaveWorkspace(path, w, true); err != nil {
+	if err := config.SaveWorkspace(t.Context(), path, w, true); err != nil {
 		t.Fatalf("force save: %v", err)
 	}
-	cfg, _ := config.Load(path)
+	cfg, _ := config.Load(t.Context(), path)
 	if len(cfg.Workspaces) != 1 || cfg.Workspaces[0].Repos[0] != "/b" {
 		t.Errorf("force-replace failed: %+v", cfg.Workspaces)
 	}
@@ -76,10 +76,10 @@ func TestSaveWorkspace_CreatesFileWhenAbsent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "config.yaml") // dir doesn't exist yet
 
-	if err := config.SaveWorkspace(path, config.Workspace{Name: "new", Repos: []string{"/x"}}, false); err != nil {
+	if err := config.SaveWorkspace(t.Context(), path, config.Workspace{Name: "new", Repos: []string{"/x"}}, false); err != nil {
 		t.Fatalf("save to absent file: %v", err)
 	}
-	cfg, err := config.Load(path)
+	cfg, err := config.Load(t.Context(), path)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
