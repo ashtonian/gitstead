@@ -134,6 +134,13 @@ func (s Schedule) Files(home string) []string {
 	return nil
 }
 
+// ValidInterval reports whether a sync can be scheduled every d: d must
+// divide an hour or a day, which cron and systemd can run exactly.
+func ValidInterval(d time.Duration) error {
+	_, err := calendar(d)
+	return err
+}
+
 // calendar is the interval as a schedule both cron and systemd can run
 // exactly: every m minutes within an hour, or every h hours within a day.
 type cal struct{ minutes, hours int }

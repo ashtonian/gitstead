@@ -54,9 +54,9 @@ Host *
 
 	answers := map[string]string{
 		"gh auth status --json hosts": `{"hosts":{"github.com":[
-			{"state":"success","active":true,"host":"github.com","login":"me","scopes":"repo","gitProtocol":"https"},
-			{"state":"success","active":false,"host":"github.com","login":"me","scopes":"repo","gitProtocol":"https"},
-			{"state":"success","active":false,"host":"github.com","login":"me-at-acme","scopes":"repo, read:org","gitProtocol":"ssh"}]}}`,
+			{"state":"success","active":true,"host":"github.com","login":"me","scopes":"repo","gitProtocol":"https","tokenSource":"GITHUB_TOKEN"},
+			{"state":"success","active":false,"host":"github.com","login":"me","scopes":"repo","gitProtocol":"https","tokenSource":"keyring"},
+			{"state":"success","active":false,"host":"github.com","login":"me-at-acme","scopes":"repo, read:org","gitProtocol":"ssh","tokenSource":"keyring"}]}}`,
 		"git config --global --get user.name":                                               "Me",
 		"git config --global --get user.email":                                              "me@home",
 		"git config --global --get-regexp":                                                  "includeif.gitdir:~/work/.path ~/.gitconfig-work",
@@ -83,7 +83,8 @@ func TestDetect(t *testing.T) {
 	})
 	det := (&Detector{Home: home, Run: run, RunCombined: probe, Probe: true, LookPath: onPath("codex", "tmux"), Exists: exists("/Applications/Muxy.app")}).Detect(context.Background())
 
-	if got := fmt.Sprint(det.GH); got != "[{github.com me true repo https} {github.com me-at-acme false repo, read:org ssh}]" {
+	// An env-var token gh lists beside a stored login gives way to it.
+	if got := fmt.Sprint(det.GH); got != "[{github.com me false repo https keyring} {github.com me-at-acme false repo, read:org ssh keyring}]" {
 		t.Errorf("gh accounts = %s", got)
 	}
 	if got := fmt.Sprint(det.SSHHosts); got != fmt.Sprintf("[{github-work github.com  %s} {lab gitlab.com git } {gitlab-alt gitlab.com git }]", filepath.Join(home, ".ssh", "id_work")) {

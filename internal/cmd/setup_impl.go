@@ -33,7 +33,8 @@ type SetupCmd struct {
 	DryRun      bool   `help:"Show the config changes and checks; change nothing." name:"dry-run"`
 	Offline     bool   `help:"Skip network checks: ssh -T and provider API calls."`
 
-	noSchedule bool // set by bootstrap, which installs the agent itself
+	// Set by bootstrap, which clones and installs the agent itself.
+	noSchedule, noClone bool
 }
 
 func (c *SetupCmd) Run(ctx *Context) error {
@@ -57,7 +58,11 @@ func (c *SetupCmd) Run(ctx *Context) error {
 	}
 
 	fmt.Println("Looking at this machine: gh accounts, SSH keys and config, git identities, existing clones...")
-	det := (&setup.Detector{Home: home, Run: setup.ExecRunner, RunCombined: setup.ExecCombinedRunner, Probe: !c.Offline}).Detect(ctx.GoCtx())
+	det := (&setup.Detector{Home: home, Run: setup.ExecRunner, RunCombined: setup.ExecCombinedRunner, Probe: !c.Offline,
+		AccountsInclude: accountsIncludeFile()}).Detect(ctx.GoCtx())
+	if s := st.Schedules[scheduler.DefaultName]; s != nil {
+		det.Schedule = &setup.InstalledSchedule{Interval: s.Interval}
+	}
 
 	var answers setup.Answers
 	switch {
@@ -84,7 +89,13 @@ func (c *SetupCmd) Run(ctx *Context) error {
 
 	answers.Adopt = slices.DeleteFunc(answers.Adopt, func(p string) bool { return tracked[p] })
 	if c.noSchedule {
-		answers.Schedule = false
+		answers.Schedule, det.Schedule = false, nil // left alone
+	}
+	if c.noClone {
+		answers.Clone = false
+	}
+	if det.ShellRC == nil {
+		answers.Shell = false
 	}
 
 	doc, err := config.OpenDocument(configPath)
@@ -104,8 +115,11 @@ func (c *SetupCmd) Run(ctx *Context) error {
 		return fmt.Errorf("the answers make an invalid config: %w", err)
 	}
 
-	printSetupReview(configPath, before, after, answers)
+	printSetupReview(configPath, before, after, answers, det)
 	checks := (setup.Checker{Probe: !c.Offline, RunCombined: setup.ExecCombinedRunner}).Check(ctx.GoCtx(), candidate)
+	if answers.Schedule {
+		checks = append(checks, setup.ScheduleChecks(candidate, os.Getenv)...)
+	}
 	failed := printChecks(checks)
 	// What setup did, as --json prints it: the config it wrote, or would.
 	result := struct {
@@ -113,8 +127,11 @@ func (c *SetupCmd) Run(ctx *Context) error {
 		Written bool          `json:"written"`
 		Text    string        `json:"text"`
 		Checks  []doctorCheck `json:"checks"`
-		// Schedule is install-agent's result, when setup installed one.
-		Schedule json.RawMessage `json:"schedule,omitempty"`
+		// Schedule is install-agent's result, when setup installed or
+		// removed the background sync; Steps are the results of the other
+		// steps after the config was written, by name.
+		Schedule json.RawMessage            `json:"schedule,omitempty"`
+		Steps    map[string]json.RawMessage `json:"steps,omitempty"`
 	}{Config: configPath, Text: string(after), Checks: []doctorCheck{}}
 	for _, ch := range checks {
 		result.Checks = append(result.Checks, doctorCheck{Level: string(ch.Status), Message: ch.Message})
@@ -140,6 +157,11 @@ func (c *SetupCmd) Run(ctx *Context) error {
 	}
 	result.Written = true
 	fmt.Printf("Wrote %s\n", tildify(configPath))
+	// What follows runs on the config just written, not the one this
+	// command started with.
+	if _, err := ctx.ReloadConfig(); err != nil {
+		return err
+	}
 	if c.SaveAnswers != "" {
 		if err := writeAnswers(config.ExpandHome(c.SaveAnswers), answers); err != nil {
 			return err
@@ -147,47 +169,120 @@ func (c *SetupCmd) Run(ctx *Context) error {
 		fmt.Printf("Answers saved to %s; repeat this setup with `git-mgr setup --answers %s`.\n", c.SaveAnswers, c.SaveAnswers)
 	}
 
-	schedule, err := afterSetup(ctx, candidate, answers)
-	result.Schedule = schedule
-	if err != nil {
-		return ctx.finish(result, err)
-	}
-	fmt.Println("\nNext: `git-mgr plan` shows what will be cloned and changed; `git-mgr apply` does it.")
-	if answers.Workspaces != nil {
-		fmt.Println("Then give a repo its agents: `git-mgr ws create <name> --repo <repo> --save`, and open them with `git-mgr ws open <name>`.")
-	}
-	return ctx.finish(result, outcome(failed, len(checks), "setup checks failed"))
+	done, err := afterSetup(ctx, candidate, answers, det)
+	result.Schedule, result.Steps = done.schedule, done.steps
+	printSetupDone(configPath, answers, det, done)
+	return ctx.finish(result, errors.Join(err, outcome(failed, len(checks), "setup checks failed")))
 }
 
-// afterSetup adopts the chosen clones and installs the background agent,
-// returning the agent's result under --json.
-func afterSetup(ctx *Context, cfg *config.Config, a setup.Answers) (json.RawMessage, error) {
+// setupDone is what afterSetup did: the steps it ran and those that failed,
+// by name, each one's result under --json, and the background sync's.
+type setupDone struct {
+	ran, failed []string
+	steps       map[string]json.RawMessage
+	schedule    json.RawMessage
+}
+
+// afterSetup carries out the answers beyond the config: it adopts the chosen
+// clones, makes each account's identity git's own under its folders, adds the
+// shell integration, clones, and installs or removes the background sync --
+// last, so its first run doesn't race the clone. A step that fails is
+// reported and the rest still run; the error names each one.
+func afterSetup(ctx *Context, cfg *config.Config, a setup.Answers, det setup.Detected) (setupDone, error) {
+	done := setupDone{steps: map[string]json.RawMessage{}}
+	var errs []error
+	step := func(name, title string, run func(*Context) error) json.RawMessage {
+		fmt.Printf("\n==> %s\n", title)
+		done.ran = append(done.ran, name)
+		doc, err := ctx.captured(run)
+		if len(doc) > 0 {
+			done.steps[name] = doc
+		}
+		if err != nil {
+			done.failed = append(done.failed, name)
+			errs = append(errs, fmt.Errorf("%s: %w", title, err))
+			fmt.Fprintf(os.Stderr, "  %s failed: %v\n", title, err)
+		}
+		return doc
+	}
+
 	if len(a.Adopt) > 0 {
-		st, err := ctx.LoadState()
-		if err != nil {
-			return nil, err
-		}
-		failed := 0
-		for _, path := range a.Adopt {
-			if err := (&AdoptCmd{}).adoptSingle(ctx, cfg, st, path); err != nil {
-				fmt.Fprintf(os.Stderr, "  %s: %v\n", tildify(path), err)
-				failed++
+		step("adopt", fmt.Sprintf("Tracking %d existing clone(s) where they are", len(a.Adopt)), func(ctx *Context) error {
+			st, err := ctx.LoadState()
+			if err != nil {
+				return err
 			}
-		}
-		if err := outcome(failed, len(a.Adopt), "clones could not be adopted"); err != nil {
-			return nil, err
-		}
+			failed := 0
+			for _, path := range a.Adopt {
+				if err := (&AdoptCmd{}).adoptSingle(ctx, cfg, st, path); err != nil {
+					fmt.Fprintf(os.Stderr, "  %s: %v\n", tildify(path), err)
+					failed++
+				}
+			}
+			return outcome(failed, len(a.Adopt), "clones could not be adopted")
+		})
 	}
-	if a.Schedule {
-		fmt.Println("\nInstalling the background sync agent:")
-		agent := &InstallAgentCmd{Interval: 15 * time.Minute, Linger: a.Linger}
-		doc, err := ctx.captured(agent.Run)
-		if err != nil {
-			return doc, fmt.Errorf("installing the background agent: %w", err)
-		}
-		return doc, nil
+	if a.GitIncludes {
+		step("git_includes", "Giving each account's identity to repos you clone yourself under its folders",
+			(&AccountsGitconfigCmd{Install: true}).Run)
 	}
-	return nil, nil
+	if a.Shell && det.ShellRC != nil {
+		rc := *det.ShellRC
+		step("shell", "Adding git-mgr to "+tildify(rc.Path), func(ctx *Context) error {
+			if err := rc.Install(); err != nil {
+				return err
+			}
+			fmt.Printf("  %s\n", rc.Line())
+			return ctx.finish(map[string]string{"shell": rc.Shell, "file": rc.Path, "line": rc.Line()}, nil)
+		})
+	}
+	if a.Clone && len(cfg.Discovery) > 0 {
+		step("clone", "Cloning what your accounts track", (&DiscoverCmd{Apply: true}).Run)
+	}
+	switch {
+	case a.Schedule:
+		agent := &InstallAgentCmd{Interval: a.Interval(), Linger: a.Linger}
+		done.schedule = step("schedule", "Installing the background sync, every "+setup.FormatInterval(a.Interval()), agent.Run)
+	case det.Schedule != nil:
+		agent := &InstallAgentCmd{Uninstall: true}
+		done.schedule = step("schedule", "Removing the background sync", agent.Run)
+	}
+	return done, errors.Join(errs...)
+}
+
+// printSetupDone says what setup set up and what to do next.
+func printSetupDone(configPath string, a setup.Answers, det setup.Detected, done setupDone) {
+	ok := func(step string) bool { return slices.Contains(done.ran, step) && !slices.Contains(done.failed, step) }
+	fmt.Println("\nSetup done:")
+	fmt.Printf("  config             %s\n", tildify(configPath))
+	if ok("clone") {
+		fmt.Printf("  repos              cloned under %s\n", a.BaseDir)
+	}
+	switch {
+	case a.Schedule && ok("schedule"):
+		fmt.Printf("  background sync    every %s; `git-mgr install-agent --list` shows it\n", setup.FormatInterval(a.Interval()))
+	case !a.Schedule:
+		fmt.Println("  background sync    off; `git-mgr install-agent` turns it on")
+	}
+	if ok("git_includes") {
+		fmt.Println("  git identities     each account's, under its folders (`git-mgr accounts ls` lists them)")
+	}
+	if ok("shell") {
+		fmt.Printf("  shell              open a new terminal (or `exec %s`) for `git-mgr cd` and tab completion\n", det.ShellRC.Shell)
+	}
+	if len(done.failed) > 0 {
+		fmt.Printf("  not done           %s (above); run setup again once fixed\n", strings.Join(done.failed, ", "))
+	}
+	fmt.Println("\nNext:")
+	if !ok("clone") {
+		fmt.Println("  git-mgr plan              what config would clone and change; `git-mgr apply` does it")
+	}
+	fmt.Println("  git-mgr status            what git-mgr tracks, and how each repo is")
+	fmt.Println("  git-mgr cd <name>         jump to a repo (`git-mgr open <name>` opens it in your editor)")
+	if a.Workspaces != nil {
+		fmt.Println("  git-mgr ws create <name> --repo <repo> --save, then git-mgr ws open <name>   give a repo its agents")
+	}
+	fmt.Println("  git-mgr doctor            if anything looks wrong")
 }
 
 // existingConfig loads the config at path, or nil if there is none yet.
@@ -238,7 +333,7 @@ func writeAnswers(path string, a setup.Answers) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-func printSetupReview(path string, before, after []byte, a setup.Answers) {
+func printSetupReview(path string, before, after []byte, a setup.Answers, det setup.Detected) {
 	fmt.Printf("\nChanges to %s:\n", tildify(path))
 	if d := configDiff(before, after); d != "" {
 		fmt.Println(d)
@@ -251,8 +346,27 @@ func printSetupReview(path string, before, after []byte, a setup.Answers) {
 			fmt.Printf("  + %s\n", tildify(p))
 		}
 	}
-	if a.Schedule {
-		fmt.Println("\nInstall the background agent: `git-mgr sync` every 15 minutes.")
+	var then []string
+	if a.GitIncludes {
+		then = append(then, fmt.Sprintf("give each account's identity to repos you clone yourself under its folders: write %s and include it from your global git config", tildify(accountsIncludeFile())))
+	}
+	if a.Shell && det.ShellRC != nil {
+		then = append(then, fmt.Sprintf("add `git-mgr cd` and tab completion to %s", tildify(det.ShellRC.Path)))
+	}
+	if a.Clone {
+		then = append(then, "clone what your accounts track (git-mgr discover --apply)")
+	}
+	switch {
+	case a.Schedule:
+		then = append(then, "install the background sync: `git-mgr sync` every "+setup.FormatInterval(a.Interval()))
+	case det.Schedule != nil:
+		then = append(then, "remove the background sync")
+	}
+	if len(then) > 0 {
+		fmt.Println("\nThen:")
+		for _, t := range then {
+			fmt.Printf("  - %s\n", t)
+		}
 	}
 }
 
@@ -306,15 +420,70 @@ func askSetup(ctx *Context, det setup.Detected, a setup.Answers, tracked map[str
 	if err := askWorkspaces(det, &a); err != nil {
 		return a, err
 	}
-	if a.Schedule && scheduler.DefaultKind() == scheduler.Systemd {
-		err := huh.NewConfirm().Title("Keep syncing while you are logged out?").
-			Description("Enables lingering (loginctl enable-linger); without it the timer stops at logout. Recommended.").
-			Value(&a.Linger).Run()
-		if err != nil {
+	if a.Schedule {
+		if err := askSchedule(&a); err != nil {
 			return a, err
 		}
 	}
-	return a, askAdopt(det, &a, tracked, home)
+	if err := askAdopt(det, &a, tracked, home); err != nil {
+		return a, err
+	}
+	return a, askFinish(det, &a)
+}
+
+// askSchedule asks how often the background sync runs, and on Linux whether
+// it keeps running while you are logged out.
+func askSchedule(a *setup.Answers) error {
+	interval := setup.FormatInterval(a.Interval())
+	intervals := []string{"5m", "10m", "15m", "30m", "1h", "2h", "6h"}
+	if !slices.Contains(intervals, interval) {
+		intervals = append(intervals, interval)
+	}
+	fields := []huh.Field{huh.NewSelect[string]().Title("How often should it sync?").
+		Description("Each run fetches what changed, backs up uncommitted work and clones what's new; a quiet repo costs little.").
+		Options(huh.NewOptions(intervals...)...).Value(&interval)}
+	if scheduler.DefaultKind() == scheduler.Systemd {
+		fields = append(fields, huh.NewConfirm().Title("Keep syncing while you are logged out?").
+			Description("Enables lingering (loginctl enable-linger); without it the timer stops at logout. Recommended.").
+			Value(&a.Linger))
+	}
+	if err := huh.NewForm(huh.NewGroup(fields...)).Run(); err != nil {
+		return err
+	}
+	a.ScheduleInterval = interval
+	return nil
+}
+
+// askFinish asks about what setup does beyond the config: your shell, your
+// global git config, and cloning now.
+func askFinish(det setup.Detected, a *setup.Answers) error {
+	var fields []huh.Field
+	switch {
+	case det.ShellRC != nil && det.ShellIntegrated:
+		a.Shell = false
+	case det.ShellRC != nil:
+		fields = append(fields, huh.NewConfirm().
+			Title("Add `git-mgr cd` and tab completion to your shell?").
+			Description(fmt.Sprintf("Adds one line to %s: %s", tildify(det.ShellRC.Path), det.ShellRC.Line())).
+			Value(&a.Shell))
+	}
+	if len(a.Accounts) > 0 && !det.GitIncludes {
+		fields = append(fields, huh.NewConfirm().
+			Title("Use each account's identity in repos you clone yourself?").
+			Description("git-mgr sets it in the repos it clones. This covers the rest, under each account's folders, "+
+				"with includeIf: one include.path line in your global git config. Recommended with several accounts.").
+			Value(&a.GitIncludes))
+	}
+	if len(a.Accounts) > 0 {
+		fields = append(fields, huh.NewConfirm().
+			Title("Clone the repos your accounts track now?").
+			Description("Otherwise the first background sync does it, or `git-mgr apply`.").
+			Value(&a.Clone))
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return huh.NewForm(huh.NewGroup(fields...)).Run()
 }
 
 func askLayout(det setup.Detected, a *setup.Answers, home string) error {
@@ -572,8 +741,8 @@ func askFeatures(a *setup.Answers) error {
 		huh.NewNote().Title("Features").Description("Recommended answers are preselected; everything else stays off until you turn it on."),
 		huh.NewConfirm().Title("Back up uncommitted work during sync?").
 			Description("Snapshots that never touch your working tree or the index lock. Recommended.").Value(&a.Backups),
-		huh.NewConfirm().Title("Run sync in the background every 15 minutes?").
-			Description("Installs a launchd agent, systemd timer or cron entry. Recommended.").Value(&a.Schedule),
+		huh.NewConfirm().Title("Run sync in the background?").
+			Description("Installs a launchd agent, systemd timer or cron entry that runs `git-mgr sync`; you choose how often next. Recommended.").Value(&a.Schedule),
 		huh.NewConfirm().Title("Push backup refs to each repo's remote?").
 			Description("Offsite copies of your backups under refs/git-mgr/*; visible to anyone who can read the remote.").Value(&a.RemoteSync),
 		huh.NewConfirm().Title("Fast-forward clones that are behind during sync?").

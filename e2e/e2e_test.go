@@ -2196,6 +2196,64 @@ accounts:
 	}
 }
 
+// TestE2E_SetupAnswers: setup from an answers file writes the config, tracks
+// the clone it names where it is and adds the shell integration to the
+// shell's startup file; run again, it changes nothing twice. (The background
+// sync stays off: a test never installs one.)
+func TestE2E_SetupAnswers(t *testing.T) {
+	env := newLocalEnv(t)
+	home := t.TempDir()
+	app := filepath.Join(home, "code", "app")
+	gitCmd(t, home, "init", "-q", "--bare", "-b", "main", filepath.Join(home, "remotes", "app.git"))
+	gitCmd(t, home, "clone", "-q", filepath.Join(home, "remotes", "app.git"), app)
+	answers := filepath.Join(home, "answers.yaml")
+	if err := os.WriteFile(answers, []byte(fmt.Sprintf(`base_dir: %s
+layout: owner/name
+accounts: []
+adopt: [%s]
+backups: true
+schedule: false
+remote_sync: false
+update: false
+reconcile_auto: safe
+cleanup: mark_stale
+shell: true
+git_includes: false
+clone: false
+`, filepath.Join(home, "repos"), app)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env.extraEnv = []string{"HOME=" + home, "SHELL=/bin/zsh", "ZDOTDIR="}
+	rc := filepath.Join(home, ".zshrc")
+	if err := os.WriteFile(rc, []byte("export EDITOR=vim\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for run := range 2 {
+		var doc struct {
+			Written bool                       `json:"written"`
+			Steps   map[string]json.RawMessage `json:"steps"`
+		}
+		stderr, code := env.runJSON(t, &doc, "setup", "--answers", answers, "--offline")
+		if code != 0 || !doc.Written || doc.Steps["shell"] == nil {
+			t.Fatalf("setup run %d: exit %d, %+v\n%s", run+1, code, doc, stderr)
+		}
+	}
+	text := mustRead(t, rc)
+	if !strings.HasPrefix(text, "export EDITOR=vim\n") || strings.Count(text, "git-mgr shell-init zsh") != 1 {
+		t.Errorf(".zshrc after two setups:\n%s", text)
+	}
+	if cfg := mustRead(t, env.configFile); !strings.Contains(cfg, "layout: owner/name") {
+		t.Errorf("config:\n%s", cfg)
+	}
+	if repos := env.statusJSON(t); len(repos) != 1 {
+		t.Errorf("tracked after setup: %v, want the adopted clone", repos)
+	}
+	if _, err := os.Stat(filepath.Join(home, "Library", "LaunchAgents")); err == nil {
+		t.Error("setup installed a launchd agent with schedule: false")
+	}
+}
+
 func mustRead(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)

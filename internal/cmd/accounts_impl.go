@@ -107,7 +107,7 @@ func (c *AccountsGitconfigCmd) Run(ctx *Context) error {
 		return err
 	}
 	dir := filepath.Join(config.ConfigDir(), "accounts")
-	doc := gitconfigJSON{File: filepath.Join(config.ConfigDir(), "accounts.gitconfig"), Accounts: []accountJSON{}}
+	doc := gitconfigJSON{File: accountsIncludeFile(), Accounts: []accountJSON{}}
 
 	claims := map[string][]string{}
 	for i := range cfg.Accounts {
@@ -215,6 +215,10 @@ func (c *AccountsGitconfigCmd) Run(ctx *Context) error {
 	}
 	return ctx.finish(doc, nil)
 }
+
+// accountsIncludeFile is the file of includeIf sections accounts gitconfig
+// writes, which your global git config includes.
+func accountsIncludeFile() string { return filepath.Join(config.ConfigDir(), "accounts.gitconfig") }
 
 // accountFileName is the name of account name's git config file: the name
 // made a file name, which can make two names one, so with a digest of the
