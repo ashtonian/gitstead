@@ -1,0 +1,29 @@
+# A self-hosted GitLab and a Forgejo instance side by side, cloned over
+# HTTPS through git's credential helper. The GitLab group includes its
+# subgroups; each instance's repos land under their own host.
+base_dir: ~/code
+layout: host/owner/name
+
+providers:
+  - name: gitlab.acme.dev
+    type: gitlab
+    url: https://gitlab.acme.dev
+    token_env: GITLAB_TOKEN           # the background sync can't see shell variables:
+                                      # prefer token_command for a scheduled sync
+    clone_protocol: https
+  - name: git.example.org
+    type: forgejo
+    url: https://git.example.org
+    token_command: "pass show forgejo/token"
+    clone_protocol: https
+
+discovery:
+  - name: platform
+    provider: gitlab.acme.dev
+    group: platform/backend
+    include_archived: false
+    tags: [work]
+  - name: homelab
+    provider: git.example.org
+    org: homelab
+    tags: [homelab]

@@ -1,0 +1,48 @@
+# Two GitHub accounts on one machine. Each repo gets its account's identity
+# and SSH key written into it, so you (and your agents) always commit as the
+# right person. Work repos live apart, in ~/work.
+base_dir: ~/code
+layout: host/owner/name
+
+accounts:
+  - name: personal
+    hosts: [github.com]
+    owners: [your-login]
+    ssh_key: ~/.ssh/id_personal
+    git: {name: Your Name, email: you@example.com}
+  - name: work
+    hosts: [github.com]
+    owners: [acme, acme-labs]
+    ssh_key: ~/.ssh/id_work
+    git: {name: Your Name, email: you@acme.com}
+    signing: {mode: required, key: ~/.ssh/id_work.pub}
+
+providers:
+  - name: personal
+    type: github
+    account: personal
+    token_command: gh auth token --hostname github.com --user your-login
+  - name: work
+    type: github
+    account: work
+    token_command: gh auth token --hostname github.com --user your-work-login
+
+discovery:
+  - name: personal
+    provider: personal
+    affiliation: [owner]
+    tags: [personal]
+  - name: work
+    provider: work
+    org: acme
+    tags: [work]
+  - name: work/acme-labs
+    provider: work
+    org: acme-labs
+    tags: [work, labs]
+
+overrides:
+  # Work repos in ~/work/<owner>/<name> instead of under base_dir.
+  - repos: ["github.com/acme/*", "github.com/acme-labs/*"]
+    base_dir: ~/work
+    path_template: "{{.Owner}}/{{.Name}}"

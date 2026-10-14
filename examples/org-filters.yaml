@@ -1,0 +1,37 @@
+# Only some of an organization's repos: its Go services, its Terraform
+# modules, and nothing archived or experimental. Sets then name groups of
+# them for bulk work: `gitten run --set services -- make test`.
+base_dir: ~/code
+layout: owner/name
+
+providers:
+  - name: github.com
+    type: github
+    token_command: gh auth token --hostname github.com
+
+discovery:
+  - name: acme-services
+    provider: github.com
+    org: acme
+    languages: [Go]                 # any of these
+    topics: [service]               # all of these
+    name_pattern: "^svc-"           # a regular expression on the name
+    tags: [services]
+  - name: acme-terraform
+    provider: github.com
+    org: acme
+    languages: [HCL]
+    name_pattern: "^terraform-"
+    visibility: private
+    tags: [infra]
+
+exclude:
+  - name_pattern: "-(sandbox|experiment)$"
+  - repos: ["github.com/acme/svc-legacy-*"]
+
+sets:
+  - name: services
+    tags: [services]
+    exclude_archived: true
+  - name: infra
+    rules: [acme-terraform]

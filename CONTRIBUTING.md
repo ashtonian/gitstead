@@ -51,6 +51,8 @@ cd e2e && go test ./...
   directory or git config: each package's `TestMain` calls `testenv.Main`.
 - Update the README, SPEC and `config.example.yaml` in the same change as the
   behavior they describe; every config key belongs in the README's tables.
+  The configs in `examples/` are loaded by `TestExamplesLoad`, so a change
+  that breaks one fails the tests.
 - Conventional-style commit prefixes (`feat:`, `fix:`, `docs:`, `ci:`, …) feed
   the release changelog.
 

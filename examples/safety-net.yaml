@@ -1,0 +1,34 @@
+# Belt and braces: uncommitted work backed up every sync and kept for a
+# month; it and commits no remote has pushed to a private backup remote;
+# a full mirror of every upstream; and repos gone upstream archived whole
+# rather than deleted.
+base_dir: ~/code
+layout: host/owner/name
+
+providers:
+  - name: github.com
+    type: github
+    token_command: gh auth token --hostname github.com
+
+discovery:
+  - name: mine
+    provider: github.com
+    affiliation: [owner]
+
+backup:
+  enabled: true
+  keep_daily: 720h                  # newest backup of each day for 30 days
+
+remote_sync:
+  enabled: true
+  remote: "git@backup.example.org:{{.Host}}/{{.FullName}}.git"
+  wip: ref                          # each backup as a hidden ref
+  unpushed: push                    # each branch's unpushed commits too
+
+mirror:
+  enabled: true
+  interval: 24h
+
+cleanup:
+  policy: archive                   # gone upstream: untrack and move into the archive
+  grace_period: 720h
