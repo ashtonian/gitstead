@@ -53,6 +53,9 @@ type copyOutcome struct {
 	offsite     *gitops.OffsiteRecord
 	offsitePlan gitops.OffsitePlan
 	offsiteErr  error
+	// offsiteSubs is what taking each checked-out submodule offsite did, by
+	// path; nil when they weren't listed.
+	offsiteSubs map[string]offsitePush
 	status      *gitops.RepoStatus
 	at          time.Time
 }

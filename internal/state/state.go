@@ -123,6 +123,10 @@ type OffsiteStatus struct {
 	OffsiteBundled   map[string]string `yaml:"offsite_bundled,omitempty" json:"offsite_bundled,omitempty"`
 	LastOffsite      time.Time         `yaml:"last_offsite,omitempty"       json:"last_offsite,omitzero"`
 	LastOffsiteError string            `yaml:"last_offsite_error,omitempty" json:"last_offsite_error,omitempty"`
+	// OffsiteSubmodules is, by path, what went offsite of each checked-out
+	// submodule: a working copy of its own, pushed to its own remote under
+	// its own copy's namespace.
+	OffsiteSubmodules map[string]OffsiteStatus `yaml:"offsite_submodules,omitempty" json:"offsite_submodules,omitempty"`
 }
 
 // ScheduleState is a background sync git-mgr installed, kept so it can be

@@ -864,8 +864,13 @@ copies alike:
   never pushed. Once a remote has the commits (you pushed for real), the
   saved copy is deleted.
 
-A submodule's uncommitted work is backed up locally with its parent's (see
-above) but not taken offsite; commit and push it in the submodule.
+Each checked-out submodule goes offsite too, as a working copy of its own:
+its uncommitted work (from the backup of it that went with its parent's) and
+its commits no remote has -- a commit on its detached HEAD is saved as
+`<namespace>/heads/HEAD` -- go to the submodule's own remote (the remote
+`remote` names, in the submodule, or the template filled in from its origin),
+under its own copy's namespace. `remote-sync --list` lists them under the
+repo, by submodule; restore from inside a clone of the submodule's remote.
 
 `<namespace>` is `refs/git-mgr/<machine>/<copy>`: every machine and every copy
 -- each agent's clone or worktree -- owns its refs, so copies on one branch
@@ -877,7 +882,7 @@ don't trigger CI, but anyone who can read the remote can fetch them; point
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `remote_sync.enabled` | `false` | Sync takes copies offsite on its own. `git-mgr remote-sync` does it on demand either way. |
-| `remote_sync.remote` | `origin` | A remote name, or a URL template (`git@backup:{{.Host}}/{{.FullName}}.git`) for a separate backup remote. |
+| `remote_sync.remote` | `origin` | A remote name, or a URL template (`git@backup:{{.Host}}/{{.FullName}}.git`) for a separate backup remote. A submodule uses its own remote of that name, or the template filled in from its origin. |
 | `remote_sync.wip` | `ref` | `ref` (hidden refs), `branch` (a visible branch per copy, `git-mgr/wip/<machine>/<copy>`: tracked changes only, on top of HEAD) or `off`. |
 | `remote_sync.unpushed` | `push` | `push` (hidden refs), `bundle` (a local bundle in `backup.archive_dir/unpushed/`, which protects against a deleted branch but not a lost disk) or `off`. |
 | `remote_sync.namespace` | `refs/git-mgr/{{.Machine}}/{{.Copy}}` | Must stay under `refs/`, outside branches and tags, and include `{{.Copy}}`. |

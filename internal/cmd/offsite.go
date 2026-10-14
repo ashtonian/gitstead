@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/gitops"
@@ -20,8 +21,9 @@ import (
 	"github.com/ashtonian/git-mgr/internal/workspace"
 )
 
-// offsiteSpec is how one copy goes offsite. The copy's ID completes it when
-// its job runs.
+// offsiteSpec is how one copy goes offsite, and each of its checked-out
+// submodules as a working copy of its own. A copy's ID completes it when its
+// job runs.
 type offsiteSpec struct {
 	policy     config.RemoteSyncConfig
 	machine    string
@@ -29,26 +31,38 @@ type offsiteSpec struct {
 	sshKey     string
 	archiveDir string
 	last       gitops.OffsiteRecord
-	dryRun     bool
+	// lastSubs is what earlier pushes left of each submodule, by path.
+	lastSubs map[string]gitops.OffsiteRecord
+	dryRun   bool
+	// patchDir is where a dry run, which backs nothing up, finds the latest
+	// patch backups to plan from.
+	patchDir string
 }
 
 // offsiteFor is the offsite spec for a copy under policy, or nil when there
 // is nothing to push and nothing earlier runs left to clean up.
 func offsiteFor(cfg *config.Config, policy config.RemoteSyncConfig, machine string, id repourl.Identity, sshKey string, last state.OffsiteStatus) *offsiteSpec {
-	rec := offsiteRecord(last)
-	if policy.WIP == "off" && policy.Unpushed == "off" && len(rec.WIP) == 0 && rec.Branch == "" && len(rec.Heads) == 0 && len(rec.Bundled) == 0 {
+	spec := &offsiteSpec{policy: policy, machine: machine, id: id, sshKey: sshKey, archiveDir: cfg.Backup.ArchiveDir,
+		last: offsiteRecord(last), lastSubs: map[string]gitops.OffsiteRecord{}}
+	leftovers := !spec.last.Empty()
+	for path, sub := range last.OffsiteSubmodules {
+		spec.lastSubs[path] = offsiteRecord(sub)
+		leftovers = leftovers || !spec.lastSubs[path].Empty()
+	}
+	if policy.WIP == "off" && policy.Unpushed == "off" && !leftovers {
 		return nil
 	}
-	return &offsiteSpec{policy: policy, machine: machine, id: id, sshKey: sshKey, archiveDir: cfg.Backup.ArchiveDir, last: rec}
+	return spec
 }
 
-// resolve fills in the copy's own namespace, branch and bundle.
-func (s offsiteSpec) resolve(copyID string) (gitops.Offsite, error) {
+// resolve fills in the namespace, branch and bundle of the copy with copyID,
+// a copy of repo id.
+func (s offsiteSpec) resolve(id repourl.Identity, copyID string) (gitops.Offsite, error) {
 	ns, err := config.OffsiteNamespace(s.policy.Namespace, s.machine, copyID)
 	if err != nil {
 		return gitops.Offsite{}, err
 	}
-	remote, err := config.OffsiteRemote(s.policy.Remote, s.id)
+	remote, err := config.OffsiteRemote(s.policy.Remote, id)
 	if err != nil {
 		return gitops.Offsite{}, err
 	}
@@ -60,20 +74,41 @@ func (s offsiteSpec) resolve(copyID string) (gitops.Offsite, error) {
 	}, nil
 }
 
-// pushOffsite pushes the copy offsite, or plans it on a dry run. The WIP
-// state comes from this run's backup; without one it is unknown and the WIP
-// refs are left as they are, except on a dry run, which plans from the
-// latest backup there is.
+// offsitePush is what taking one working copy offsite did: the record it
+// left (nil when it didn't run) and its plan, or the plan alone on a dry run.
+type offsitePush struct {
+	rec  *gitops.OffsiteRecord
+	plan gitops.OffsitePlan
+	err  error
+}
+
+// run pushes the working copy at path offsite under off, or plans it on a
+// dry run.
+func (s offsiteSpec) run(ctx context.Context, path string, latest *gitops.Latest, off gitops.Offsite, last gitops.OffsiteRecord) offsitePush {
+	if s.dryRun {
+		plan, err := gitops.PlanOffsite(ctx, path, latest, off, last)
+		return offsitePush{plan: plan, err: err}
+	}
+	rec, plan, err := gitops.PushOffsite(ctx, path, latest, off, last)
+	return offsitePush{rec: &rec, plan: plan, err: err}
+}
+
+// pushOffsite pushes the copy offsite, or plans it on a dry run, and then
+// each of its checked-out submodules, to its own remote. The WIP state comes
+// from this run's backup; without one it is unknown and the WIP refs are left
+// as they are, except on a dry run, which plans from the latest backup there
+// is.
 func (o *copyOutcome) pushOffsite(ctx context.Context, job copyJob) {
 	spec := job.offsite
 	var latest *gitops.Latest
+	var dryBackup *gitops.BackupInfo
 	copyID := ""
 	switch {
 	case o.backup != nil && o.backupErr == nil:
 		latest, copyID = &gitops.Latest{Snapshot: o.backup.Snapshot, BackupID: o.backup.ID}, o.backup.CopyID
-	case spec.dryRun && job.backup != nil:
-		if b, err := gitops.FindBackup(ctx, job.path, job.backup.PatchDir, "latest"); err == nil {
-			latest = &gitops.Latest{Snapshot: b.Commit, BackupID: b.ID}
+	case spec.dryRun:
+		if b, err := gitops.FindBackup(ctx, job.path, spec.patchDir, "latest"); err == nil {
+			latest, dryBackup = &gitops.Latest{Snapshot: b.Snapshot(), BackupID: b.ID}, &b
 		}
 	}
 	if copyID == "" {
@@ -83,31 +118,111 @@ func (o *copyOutcome) pushOffsite(ctx context.Context, job copyJob) {
 			return
 		}
 	}
-	off, err := spec.resolve(copyID)
+	off, err := spec.resolve(spec.id, copyID)
 	if err != nil {
 		o.offsiteErr = err
 		return
 	}
-	if spec.dryRun {
-		o.offsitePlan, o.offsiteErr = gitops.PlanOffsite(ctx, job.path, latest, off, spec.last)
-		return
-	}
-	rec, plan, err := gitops.PushOffsite(ctx, job.path, latest, off, spec.last)
-	o.offsite, o.offsitePlan, o.offsiteErr = &rec, plan, err
+	top := spec.run(ctx, job.path, latest, off, spec.last)
+	o.offsite, o.offsitePlan, o.offsiteErr = top.rec, top.plan, top.err
+	o.pushSubmodulesOffsite(ctx, job, latest != nil, dryBackup)
 }
 
-// recordOffsite stores what the offsite push left.
+// pushSubmodulesOffsite takes each checked-out submodule of the copy offsite
+// as a working copy of its own: its uncommitted work, from the backup of it
+// that went with the copy's, and its unpushed commits, to its own remote --
+// remote_sync.remote named in it, or the template filled in with its origin
+// -- under its own copy's namespace. known says whether the copy's WIP state
+// is known (see pushOffsite); dryBackup is the backup a dry run plans from.
+func (o *copyOutcome) pushSubmodulesOffsite(ctx context.Context, job copyJob, known bool, dryBackup *gitops.BackupInfo) {
+	spec := job.offsite
+	paths, err := gitops.Submodules(ctx, job.path)
+	if err != nil {
+		o.offsiteErr = errors.Join(o.offsiteErr, fmt.Errorf("listing submodules: %w", err))
+		return
+	}
+	o.offsiteSubs = map[string]offsitePush{}
+	for _, path := range paths {
+		subPath := filepath.Join(job.path, path)
+		var latest *gitops.Latest
+		copyID := ""
+		switch {
+		case dryBackup != nil:
+			sub, ok, err := dryBackup.Submodule(ctx, job.path, path)
+			switch {
+			case err != nil:
+			case ok:
+				latest = &gitops.Latest{Snapshot: sub.Snapshot(), BackupID: sub.ID}
+			default:
+				latest = &gitops.Latest{}
+			}
+		case known:
+			latest = &gitops.Latest{}
+			if r := o.backup.Submodules[path]; r != nil {
+				latest, copyID = &gitops.Latest{Snapshot: r.Snapshot, BackupID: r.ID}, r.CopyID
+			}
+		}
+		push := o.pushSubmoduleOffsite(ctx, spec, subPath, copyID, latest, spec.lastSubs[path])
+		if push.err != nil {
+			o.offsiteErr = errors.Join(o.offsiteErr, fmt.Errorf("submodule %s: %w", path, push.err))
+		}
+		o.offsiteSubs[path] = push
+	}
+}
+
+func (o *copyOutcome) pushSubmoduleOffsite(ctx context.Context, spec *offsiteSpec, subPath, copyID string, latest *gitops.Latest, last gitops.OffsiteRecord) offsitePush {
+	if copyID == "" {
+		var err error
+		if copyID, err = gitops.CopyID(ctx, subPath); err != nil {
+			return offsitePush{err: err}
+		}
+	}
+	var id repourl.Identity
+	if parsed, err := gitops.ParseRemoteURL(ctx, subPath); err == nil {
+		id = *parsed
+	} else if config.IsRemoteURL(spec.policy.Remote) {
+		return offsitePush{err: fmt.Errorf("remote_sync.remote is a URL template, which its origin can't fill in: %w", err)}
+	}
+	off, err := spec.resolve(id, copyID)
+	if err != nil {
+		return offsitePush{err: err}
+	}
+	return spec.run(ctx, subPath, latest, off, last)
+}
+
+// recordOffsite stores what the offsite push left: the copy's record, and
+// each submodule's. A submodule that couldn't be pushed keeps its record; one
+// gone from the copy is dropped, with what was pushed of it left where it is.
 func (o copyOutcome) recordOffsite(s *state.OffsiteStatus) {
 	if o.offsite == nil {
 		return
 	}
-	r := o.offsite
+	setOffsite(s, *o.offsite, o.offsiteErr, o.at)
+	if o.offsiteSubs == nil {
+		return
+	}
+	subs := map[string]state.OffsiteStatus{}
+	for path, push := range o.offsiteSubs {
+		sub := s.OffsiteSubmodules[path]
+		if push.rec != nil {
+			setOffsite(&sub, *push.rec, push.err, o.at)
+		} else {
+			sub.LastOffsiteError = errString(push.err)
+		}
+		if !offsiteRecord(sub).Empty() || sub.LastOffsiteError != "" {
+			subs[path] = sub
+		}
+	}
+	s.OffsiteSubmodules = nil
+	if len(subs) > 0 {
+		s.OffsiteSubmodules = subs
+	}
+}
+
+func setOffsite(s *state.OffsiteStatus, r gitops.OffsiteRecord, err error, at time.Time) {
 	s.OffsiteRemote, s.OffsiteNamespace = r.Remote, r.Namespace
 	s.OffsiteWIP, s.OffsiteBranch, s.OffsiteHeads, s.OffsiteBundled = r.WIP, r.Branch, r.Heads, r.Bundled
-	s.LastOffsite, s.LastOffsiteError = o.at, ""
-	if o.offsiteErr != nil {
-		s.LastOffsiteError = o.offsiteErr.Error()
-	}
+	s.LastOffsite, s.LastOffsiteError = at, errString(err)
 }
 
 func offsiteRecord(s state.OffsiteStatus) gitops.OffsiteRecord {
@@ -115,6 +230,20 @@ func offsiteRecord(s state.OffsiteStatus) gitops.OffsiteRecord {
 		Remote: s.OffsiteRemote, Namespace: s.OffsiteNamespace,
 		WIP: s.OffsiteWIP, Branch: s.OffsiteBranch, Heads: s.OffsiteHeads, Bundled: s.OffsiteBundled,
 	}
+}
+
+// offsitePlanned reports whether the copy's push, or that of one of its
+// submodules, changed anything or would.
+func (o copyOutcome) offsitePlanned() bool {
+	if !o.offsitePlan.Empty() {
+		return true
+	}
+	for _, sub := range o.offsiteSubs {
+		if !sub.plan.Empty() {
+			return true
+		}
+	}
+	return false
 }
 
 // offsiteWanted reports whether remote_sync is enabled anywhere: at the top,
@@ -311,9 +440,13 @@ func (c *RemoteSyncCmd) Run(ctx *Context) error {
 	})
 	jobs = slices.DeleteFunc(jobs, func(j copyJob) bool { return j.offsite == nil })
 	if c.DryRun {
+		// A dry run writes no backup; it plans from the latest one.
 		for i := range jobs {
 			jobs[i].offsite.dryRun = true
-			jobs[i].backup = nil // a dry run writes no backup; it plans from the latest one
+			if jobs[i].backup != nil {
+				jobs[i].offsite.patchDir = jobs[i].backup.PatchDir
+			}
+			jobs[i].backup = nil
 		}
 	}
 
@@ -334,12 +467,19 @@ func (c *RemoteSyncCmd) Run(ctx *Context) error {
 			fmt.Fprintf(os.Stderr, "  %s: %v\n", o.job.label, errors.Join(errs...))
 			continue
 		}
-		if o.offsitePlan.Empty() {
+		if !o.offsitePlanned() {
 			continue
 		}
 		pushed++
 		if !ctx.Quiet || c.DryRun {
-			fmt.Printf("  %s: %s\n", o.job.label, describeOffsite(o.offsitePlan, c.DryRun))
+			if !o.offsitePlan.Empty() {
+				fmt.Printf("  %s: %s\n", o.job.label, describeOffsite(o.offsitePlan, c.DryRun))
+			}
+			for _, path := range slices.Sorted(maps.Keys(o.offsiteSubs)) {
+				if plan := o.offsiteSubs[path].plan; !plan.Empty() {
+					fmt.Printf("  %s, submodule %s: %s\n", o.job.label, path, describeOffsite(plan, c.DryRun))
+				}
+			}
 		}
 	}
 	if !ctx.Quiet {
@@ -387,11 +527,6 @@ func describeOffsite(p gitops.OffsitePlan, dryRun bool) string {
 // on its backup remote, and how to get it back.
 func listOffsite(ctx *Context, cfg *config.Config, st *state.State, pass func(string, *state.RepoState) bool) error {
 	failed, listed := 0, 0
-	// The refs each repo's remote holds, under the repo's key.
-	type remoteRefs struct {
-		Remote string   `json:"remote"`
-		Refs   []string `json:"refs"`
-	}
 	doc := map[string]remoteRefs{}
 	for _, key := range slices.Sorted(maps.Keys(st.Repos)) {
 		repo := st.Repos[key]
@@ -399,13 +534,8 @@ func listOffsite(ctx *Context, cfg *config.Config, st *state.State, pass func(st
 			continue
 		}
 		policy := cfg.RemoteSyncFor(key, repo.DiscoveredBy)
-		remote, err := config.OffsiteRemote(policy.Remote, identityOf(repo))
-		if err != nil {
-			return err
-		}
 		lctx, cancel := context.WithTimeout(ctx.GoCtx(), cfg.ResolveForRepo(key).Sync.TimeoutPerRepo)
-		out, err := gitops.GitWithSSHKey(lctx, repo.LocalPath, cfg.ResolveSSHKey(key, repo.DiscoveredBy),
-			"ls-remote", remote, "refs/git-mgr/*", "refs/heads/git-mgr/wip/*")
+		refs, err := offsiteRefsOf(lctx, repo.LocalPath, policy.Remote, identityOf(repo), cfg.ResolveSSHKey(key, repo.DiscoveredBy))
 		cancel()
 		if err != nil {
 			failed++
@@ -413,27 +543,95 @@ func listOffsite(ctx *Context, cfg *config.Config, st *state.State, pass func(st
 			continue
 		}
 		listed++
-		var refs []string
-		for _, line := range strings.Split(out, "\n") {
-			if _, ref, ok := strings.Cut(line, "\t"); ok {
-				refs = append(refs, ref)
-			}
-		}
-		if len(refs) == 0 {
+		if len(refs.Refs) == 0 && len(refs.Submodules) == 0 {
 			continue
 		}
-		doc[key] = remoteRefs{remote, refs}
-		fmt.Printf("%s (%s):\n", key, remote)
-		for _, ref := range refs {
-			fmt.Printf("  %s\n", ref)
-		}
+		doc[key] = refs
+		printOffsiteRefs(key, refs)
 	}
 	if listed > 0 {
 		fmt.Println(`
-Restore from inside a clone of the repo:
+Restore from inside a clone of the repo (a submodule's, from inside it):
   uncommitted work:   git fetch <remote> <.../wip/<id>> && git stash apply --index FETCH_HEAD
   a visible WIP ref:  git fetch <remote> <refs/heads/git-mgr/wip/...> && git cherry-pick --no-commit FETCH_HEAD
   unpushed commits:   git fetch <remote> <.../heads/<branch>>:refs/heads/<branch>-recovered`)
 	}
 	return ctx.finish(doc, outcome(failed, failed+listed, "repos' remotes could not be listed"))
+}
+
+// remoteRefs are the offsite refs on a working copy's backup remote, and on
+// each of its submodules'.
+type remoteRefs struct {
+	Remote     string                `json:"remote"`
+	Refs       []string              `json:"refs,omitempty"`
+	Submodules map[string]remoteRefs `json:"submodules,omitempty"`
+}
+
+// offsiteRefsOf lists the offsite refs on the backup remote of the working
+// copy at path, a copy of repo id -- remoteTmpl names it, or is its URL
+// template -- and on each of its checked-out submodules' remotes.
+func offsiteRefsOf(ctx context.Context, path, remoteTmpl string, id repourl.Identity, sshKey string) (remoteRefs, error) {
+	refs, err := offsiteRefsAt(ctx, path, remoteTmpl, id, sshKey)
+	if err != nil {
+		return refs, err
+	}
+	subs, err := gitops.Submodules(ctx, path)
+	if err != nil {
+		return refs, fmt.Errorf("listing submodules: %w", err)
+	}
+	for _, sub := range subs {
+		subPath := filepath.Join(path, sub)
+		var subID repourl.Identity
+		if parsed, err := gitops.ParseRemoteURL(ctx, subPath); err == nil {
+			subID = *parsed
+		} else if config.IsRemoteURL(remoteTmpl) {
+			return refs, fmt.Errorf("submodule %s: remote_sync.remote is a URL template, which its origin can't fill in: %w", sub, err)
+		}
+		subRefs, err := offsiteRefsAt(ctx, subPath, remoteTmpl, subID, sshKey)
+		if err != nil {
+			return refs, fmt.Errorf("submodule %s: %w", sub, err)
+		}
+		if len(subRefs.Refs) > 0 {
+			if refs.Submodules == nil {
+				refs.Submodules = map[string]remoteRefs{}
+			}
+			refs.Submodules[sub] = subRefs
+		}
+	}
+	return refs, nil
+}
+
+// offsiteRefsAt lists the offsite refs on the backup remote of the working
+// copy at path alone.
+func offsiteRefsAt(ctx context.Context, path, remoteTmpl string, id repourl.Identity, sshKey string) (remoteRefs, error) {
+	remote, err := config.OffsiteRemote(remoteTmpl, id)
+	if err != nil {
+		return remoteRefs{}, err
+	}
+	out, err := gitops.GitWithSSHKey(ctx, path, sshKey, "ls-remote", remote, "refs/git-mgr/*", "refs/heads/git-mgr/wip/*")
+	if err != nil {
+		return remoteRefs{}, err
+	}
+	refs := remoteRefs{Remote: remote}
+	for _, line := range strings.Split(out, "\n") {
+		if _, ref, ok := strings.Cut(line, "\t"); ok {
+			refs.Refs = append(refs.Refs, ref)
+		}
+	}
+	return refs, nil
+}
+
+func printOffsiteRefs(key string, refs remoteRefs) {
+	if len(refs.Refs) > 0 {
+		fmt.Printf("%s (%s):\n", key, refs.Remote)
+		for _, ref := range refs.Refs {
+			fmt.Printf("  %s\n", ref)
+		}
+	}
+	for _, sub := range slices.Sorted(maps.Keys(refs.Submodules)) {
+		fmt.Printf("%s, submodule %s (%s):\n", key, sub, refs.Submodules[sub].Remote)
+		for _, ref := range refs.Submodules[sub].Refs {
+			fmt.Printf("  %s\n", ref)
+		}
+	}
 }

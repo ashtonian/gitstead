@@ -68,7 +68,9 @@ type BackupInfo struct {
 	patchRoot string // where its submodules' patch backups are
 }
 
-func (b BackupInfo) snapshot() string {
+// Snapshot is the commit holding the backed-up state: the snapshot ref's,
+// or the one a patch backup recorded.
+func (b BackupInfo) Snapshot() string {
 	if b.Commit != "" {
 		return b.Commit
 	}
@@ -224,6 +226,17 @@ func patchBackup(patchRoot, copyID, id string) BackupInfo {
 		}
 	}
 	return b
+}
+
+// Submodule is the backup of the submodule at path, relative to repoPath,
+// that goes with b. ok is false when b names none: the submodule was clean.
+func (b BackupInfo) Submodule(ctx context.Context, repoPath, path string) (sub BackupInfo, ok bool, err error) {
+	sb, ok := b.Submodules[path]
+	if !ok {
+		return BackupInfo{}, false, nil
+	}
+	sub, err = b.submoduleBackup(ctx, filepath.Join(repoPath, path), sb)
+	return sub, true, err
 }
 
 // submoduleBackup finds the backup sb of the submodule at path, under its

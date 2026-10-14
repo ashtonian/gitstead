@@ -411,7 +411,17 @@ unpushed     branches with commits no refs/remotes/* reach (a linked worktree:
   bundle     git bundle create <archive_dir>/unpushed/<copy>.bundle <branches> --not --remotes
 one `git push` per copy with every refspec; deletions are checked with
 `ls-remote` first; a failed part keeps its old record and is retried next run
+submodules   each checked-out submodule (recursively), the same way, as a copy of
+             its own: run in the submodule, its own copy ID and namespace, the
+             remote named in it or the template filled in from its origin; latest
+             is the submodule's backup that went with the parent's (clean when the
+             parent's names none). Records in offsite_submodules, by path; a
+             submodule gone from the copy drops its record, its refs left
 ```
+
+A dry run plans from the latest backup and the backups of submodules it
+names. `--list` lists each repo's refs and, under `submodules`, each
+checked-out submodule's on its own remote.
 
 #### `git-mgr config [flags]`
 
@@ -982,6 +992,11 @@ repos:
     offsite_heads: {feat/backup: 0123abcd...}
     last_offsite: "2026-04-17T10:30:00Z"
     last_offsite_error: ""
+    offsite_submodules:                   # the same, for each checked-out submodule, by path
+      lib:
+        offsite_remote: origin            # the submodule's own origin
+        offsite_namespace: refs/git-mgr/mac-1a2b3c/1f2e3d4c5b6a7980
+        offsite_heads: {HEAD: 4567cdef...}   # a commit on its detached HEAD no remote has
 
 # Workspaces. declared: true means config declares it, so removing the
 # declaration removes the workspace; workspaces created from flags or adopted

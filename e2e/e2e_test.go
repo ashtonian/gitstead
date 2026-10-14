@@ -1606,6 +1606,117 @@ func TestE2E_RemoteSync(t *testing.T) {
 	}
 }
 
+// TestE2E_RemoteSyncSubmodules: a submodule's uncommitted work and the
+// commits it has that no remote does go offsite to the submodule's own
+// remote, under its own copy's namespace, and come back from that remote
+// alone; a dry run plans from the latest backup, and --list shows them.
+func TestE2E_RemoteSyncSubmodules(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+	seed := func(name string) string {
+		gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", name+".git")
+		dir := filepath.Join(tmp, "seed-"+name)
+		gitCmd(t, tmp, "clone", "-q", name+".git", dir)
+		if err := os.WriteFile(filepath.Join(dir, name+".txt"), []byte("v1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitCmd(t, dir, "add", ".")
+		gitCmd(t, dir, "-c", "user.email=e@e", "-c", "user.name=e", "commit", "-qm", "init")
+		gitCmd(t, dir, "push", "-q", "origin", "HEAD")
+		return dir
+	}
+	seed("lib")
+	top := seed("app")
+	gitCmd(t, top, "-c", "protocol.file.allow=always", "submodule", "add", "-q", filepath.Join(tmp, "lib.git"), "lib")
+	gitCmd(t, top, "-c", "user.email=e@e", "-c", "user.name=e", "commit", "-qm", "lib")
+	gitCmd(t, top, "push", "-q", "origin", "HEAD")
+	app := filepath.Join(tmp, "app")
+	gitCmd(t, tmp, "-c", "protocol.file.allow=always", "clone", "-q", "--recurse-submodules", "app.git", app)
+	lib := filepath.Join(app, "lib")
+
+	cfg := fmt.Sprintf("base_dir: %s\nsync:\n  auto_discover: false\nbackup:\n  patch_dir: %s\nremote_sync:\n  enabled: true\n",
+		env.baseDir, filepath.Join(tmp, "patches"))
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := env.run(t, "adopt", app); code != 0 {
+		t.Fatalf("adopt exit %d:\n%s", code, out)
+	}
+
+	// In the submodule, on its detached HEAD: a commit no remote has, then
+	// uncommitted work on top.
+	if err := os.WriteFile(filepath.Join(lib, "lib.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, lib, "-c", "user.email=e@e", "-c", "user.name=e", "commit", "-qam", "local only")
+	if err := os.WriteFile(filepath.Join(lib, "lib.txt"), []byte("v2\nwip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var synced struct {
+		Copies []struct {
+			OffsiteSubmodules map[string][]string `json:"offsite_submodules"`
+		} `json:"copies"`
+	}
+	if stderr, code := env.runJSON(t, &synced, "sync", "--no-fetch"); code != 0 {
+		t.Fatalf("sync exit %d:\n%s", code, stderr)
+	}
+	if len(synced.Copies) != 1 || len(synced.Copies[0].OffsiteSubmodules["lib"]) == 0 {
+		t.Errorf("sync --json should report lib's offsite push: %+v", synced)
+	}
+
+	libRemote := filepath.Join(tmp, "lib.git")
+	refs := gitCmd(t, libRemote, "for-each-ref", "--format=%(refname)", "refs/git-mgr/")
+	var wipRef, headRef string
+	for _, r := range strings.Split(refs, "\n") {
+		switch {
+		case strings.Contains(r, "/wip/"):
+			wipRef = r
+		case strings.HasSuffix(r, "/heads/HEAD"):
+			headRef = r
+		}
+	}
+	if wipRef == "" || headRef == "" {
+		t.Fatalf("lib's remote after sync:\n%s\nwant a WIP ref and the unpushed detached HEAD", refs)
+	}
+	if appRefs := gitCmd(t, filepath.Join(tmp, "app.git"), "for-each-ref", "--format=%(refname)", "refs/git-mgr/"); strings.Contains(appRefs, "/heads/HEAD") {
+		t.Errorf("lib's commit went to app's remote:\n%s", appRefs)
+	}
+
+	// lib's remote alone gives it back.
+	restore := filepath.Join(tmp, "restore")
+	gitCmd(t, tmp, "clone", "-q", "lib.git", restore)
+	gitCmd(t, restore, "fetch", "-q", "origin", headRef+":refs/heads/recovered")
+	gitCmd(t, restore, "checkout", "-q", "recovered")
+	gitCmd(t, restore, "fetch", "-q", "origin", wipRef)
+	gitCmd(t, restore, "stash", "apply", "-q", "--index", "FETCH_HEAD")
+	if got, _ := os.ReadFile(filepath.Join(restore, "lib.txt")); string(got) != "v2\nwip\n" {
+		t.Errorf("restored lib.txt = %q", got)
+	}
+
+	// New work, backed up: a dry run plans its push from that backup.
+	if err := os.WriteFile(filepath.Join(lib, "lib.txt"), []byte("v2\nmore wip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := env.run(t, "backup"); code != 0 {
+		t.Fatalf("backup exit %d:\n%s", code, out)
+	}
+	if out, code := env.run(t, "remote-sync", "--dry-run"); code != 0 || !strings.Contains(out, "submodule lib: push ") || !strings.Contains(out, "/wip/") {
+		t.Errorf("remote-sync --dry-run exit %d, want it to plan lib's new WIP:\n%s", code, out)
+	}
+	if out, code := env.run(t, "remote-sync", "--list"); code != 0 || !strings.Contains(out, "submodule lib") || !strings.Contains(out, headRef) {
+		t.Errorf("remote-sync --list exit %d, want lib's refs:\n%s", code, out)
+	}
+
+	// Once lib's commit is on its remote, its saved copy is deleted.
+	gitCmd(t, lib, "push", "-q", "origin", "HEAD:refs/heads/main")
+	if out, code := env.run(t, "sync"); code != 0 {
+		t.Fatalf("sync exit %d:\n%s", code, out)
+	}
+	if refs := gitCmd(t, libRemote, "for-each-ref", "--format=%(refname)", "refs/git-mgr/"); strings.Contains(refs, "/heads/HEAD") {
+		t.Errorf("lib's saved commit should be deleted once pushed:\n%s", refs)
+	}
+}
+
 // gatedGit puts a git in front of the real one, on a PATH it returns: once
 // one of its arguments is gateOn, it runs the real command, then holds until
 // gate/go exists, having made gate/reached; every command is logged to

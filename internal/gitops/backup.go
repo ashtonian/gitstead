@@ -214,7 +214,7 @@ func backupRepo(ctx context.Context, repoPath string, cfg BackupConfig, subs map
 	}
 
 	var errs []error
-	if latest := lastBackup(backups); latest != nil && latest.snapshot() == snap.Commit && maps.Equal(latest.Submodules, subs) &&
+	if latest := lastBackup(backups); latest != nil && latest.Snapshot() == snap.Commit && maps.Equal(latest.Submodules, subs) &&
 		(!wantRef || latest.Ref != "") && (!wantPatch || latest.PatchDir != "") {
 		res.Outcome, res.ID, res.Ref, res.PatchDir = BackupUnchanged, latest.ID, latest.Ref, latest.PatchDir
 	} else {
