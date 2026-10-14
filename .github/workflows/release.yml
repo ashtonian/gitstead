@@ -32,6 +32,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # PAT with contents:write on ashtonian/homebrew-tap (the default
-          # GITHUB_TOKEN can't push to a second repo).
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          # Private half of ashtonian/homebrew-tap's write deploy key (the
+          # default GITHUB_TOKEN can't push to a second repo).
+          HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}

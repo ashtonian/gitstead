@@ -56,7 +56,11 @@ homebrew_casks:
       owner: ashtonian
       name: homebrew-tap
       branch: main
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+      # Pushed over SSH with a deploy key that can write to the tap and
+      # nothing else; the workflow's own token can't push to another repo.
+      git:
+        url: "git@github.com:ashtonian/homebrew-tap.git"
+        private_key: "{{ .Env.HOMEBREW_TAP_SSH_KEY }}"
     homepage: "https://github.com/ashtonian/gitstead"
     description: "Find, clone and sync every repo you work on, then launch coding agents on them"
     # The binaries aren't notarized, and Homebrew quarantines what it
