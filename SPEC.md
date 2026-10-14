@@ -439,6 +439,32 @@ Print resolved configuration.
 | `--validate` | Validate config and exit |
 | `--path` | Print config file path |
 
+#### `git-mgr cd|path|open <query>`
+
+Find a tracked repo, workspace, agent's folder or copy from part of its name
+(`internal/jump`). Each candidate is matched by key, `owner/name`, name and
+folder; a whole name fits best, then a path suffix (`acme/api`), a prefix, a
+substring, and last the letters in order. Several words must all fit (`app
+2` is workspace app's agent-2). A repo beats a workspace that fits equally
+(`--kind` picks one); two of one kind are asked about on a terminal, else
+listed with exit 1. `path` prints the folder; `cd` does too, unless the
+`shell-init` function runs it, which changes directory; `open` runs `editor`,
+else `$VISUAL`, else `$EDITOR`, with the path as its last argument, in that
+folder, and `open --web` opens the repo's page on its host.
+
+#### `git-mgr shell-init bash|zsh|fish`
+
+Print the shell integration, which the startup file evaluates (`eval "$(git-mgr
+shell-init zsh)"`; fish: `git-mgr shell-init fish | source`): a `git-mgr`
+function that runs `cd` as `cd "$(command git-mgr path ...)"` and hands
+everything else to the binary, and tab completion -- `complete -o default -C
+<this binary> git-mgr` (zsh: through `bashcompinit`, loading `compinit` first
+when `compdef` isn't defined; fish: a `complete -c git-mgr` function setting
+`COMP_LINE`). The binary answers completion requests (`COMP_LINE` set)
+through kongplete's predictors: repo keys, tags, sets, workspaces, fleets,
+jump targets. `install-completions` prints the completion part alone, for
+the login shell kongplete detects.
+
 #### `git-mgr version`
 
 Print version, commit, build date.

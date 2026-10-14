@@ -545,6 +545,14 @@ into the repo's own git config, so your own git commands there behave the same:
 | `commit.gpgsign`, `tag.gpgsign`, `gpg.format`, `user.signingkey`, `gpg.ssh.program`/`gpg.program`/`gpg.x509.program`, `gpg.ssh.allowedSignersFile` | `signing.mode: required` |
 | `commit.gpgsign = false`, `tag.gpgsign = false` | `signing.mode: off`, so an agent never stalls on a passphrase prompt |
 
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `accounts[].signing.mode` | `inherit` | `inherit` leaves signing to your global git config; `required` signs every commit and tag; `off` never signs in these repos. |
+| `accounts[].signing.key` | | `user.signingkey`: an SSH key (`.pub` path or `key::...`), a GPG key ID or an X.509 certificate ID. Required with `mode: required`, except for GPG, which can use its default key. |
+| `accounts[].signing.format` | from the key | `gpg.format`: `ssh` for a `.pub` or `key::` key, `openpgp` otherwise, or `x509`. |
+| `accounts[].signing.program` | | A signer in place of `ssh-keygen`, `gpg` or `gpgsm`, such as 1Password's `op-ssh-sign`. |
+| `accounts[].signing.allowed_signers` | | `gpg.ssh.allowedSignersFile`, for verifying SSH signatures. |
+
 With `signing.mode: required`, `git-mgr doctor` makes a test signature the way
 an agent would — no terminal, 20-second limit — and fails if it can't: SSH
 signing through an agent or a passphrase-less key works unattended; GPG needs
@@ -909,6 +917,21 @@ Guarantees:
 - **Retention by age.** Per copy: every backup from the last 24 hours
   (`keep_all`), then the newest of each day for 14 days (`keep_daily`), capped at
   100 (`max_per_copy`). The newest backup is always kept.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `backup.enabled` | `true` | Back up uncommitted work during `sync` (and `backup`, `ws backup`). |
+| `backup.strategy` | `both` | `stash-ref`, `patch` or `both` (above). |
+| `backup.include_untracked` | `true` | Snapshot untracked files too, within the limits below. |
+| `backup.max_untracked_file_mb` | `50` | Untracked files bigger than this are left out, and reported. |
+| `backup.max_untracked_total_mb` | `500` | Untracked files past this total are left out, and reported. |
+| `backup.keep_all` | `24h` | Keep every backup younger than this. |
+| `backup.keep_daily` | `336h` | Then the newest backup of each day younger than this. |
+| `backup.max_per_copy` | `100` | And at most this many per working copy. |
+| `backup.patch_dir` | `~/.local/share/git-mgr/patches` | Where patch backups go. |
+| `backup.archive_dir` | `~/.local/share/git-mgr/archive` | Where what is saved before deleting goes (see [Deleting without losing work](#deleting-without-losing-work)). |
+
+Each can be set per repo in `overrides[].backup`, except `archive_dir`.
 
 ```bash
 git-mgr backup --list --repos "*/my-repo"
@@ -1541,6 +1564,8 @@ Nothing waits on a person or hangs forever:
 | `sync.inspect_timeout` | `1m` | One look at a working copy -- its git config and identity -- while planning (`plan`, `apply`, `sync`, `ws ensure`). |
 | `sync.api_timeout` | `60s` | One provider API request attempt. |
 | `sync.discovery_timeout` | `5m` | One discovery rule: listing plus language/topic lookups, retries and rate-limit waits. |
+| `sync.retries` | `2` | Further attempts at a failed fetch (0 to 10), within `sync.timeout_per_repo`. A fetch that finds git's lock taken isn't retried; the next run tries again. |
+| `sync.retry_backoff` | `2s` | The wait before the first retry, doubling before each one after. |
 | `lock_timeout` | `2m` | How long a command waits for another run's state write, or for a repo another command is deleting, moving or making a workspace copy of, before exiting 75. |
 | `token_command` | `30s` (fixed) | Running a provider's `token_command`. |
 | `notify.timeout` | `10s` | Sending one desktop notification, which can hang without a desktop session. |
@@ -1732,6 +1757,23 @@ Then:
   ensure <name>` makes missing copies; `git-mgr ws retire <name> <agent>`
   finishes a retire that was cut short.
 
+### Stale repos
+
+A repo discovery no longer finds -- deleted or transferred upstream, or out
+of your token's reach -- is marked stale and stays tracked; what happens next
+is `cleanup.policy`'s call, and only for repos found by rules that ran
+completely (see [Resilience](#resilience)):
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `cleanup.policy` | `mark_stale` | `mark_stale` keeps it, marked; `remove` stops tracking it after the grace period, leaving its files; `archive` stops tracking it and moves its clone into the archive ([Archiving instead of deleting](#archiving-instead-of-deleting)); `remove_and_delete` archives its unique work and deletes it ([Deleting without losing work](#deleting-without-losing-work)); `ignore` never marks anything stale. |
+| `cleanup.grace_period` | `720h` | How long a repo stays stale before `remove`, `archive` or `remove_and_delete` acts. |
+| `cleanup.protect_manual` | `true` | Never judge repos added by hand (`clone`, `adopt`, `repos:` entries). |
+
+`discover --apply` and `sync` apply it; each repo kept rather than removed is
+listed with the reason, and `sync` counts it as a failure until a later run
+removes it.
+
 ## Resilience
 
 GitHub and Gitea requests retry on rate limits (429, GitHub's primary and
@@ -1747,8 +1789,8 @@ marks work repos stale; repos from a failed rule are left exactly as they are.
 A rule whose result may be missing repos -- a search capped at 1000, a
 language or topic lookup that failed or timed out -- still adds what it found,
 but judges none of its repos stale that run. Repos added by hand (`clone`,
-`adopt`, `repos:` entries) are never judged, and `cleanup.policy: ignore`
-judges nothing. A stale repo is no longer fetched or pushed offsite, but its
+`adopt`, `repos:` entries) are never judged while `cleanup.protect_manual` is
+on (the default), and `cleanup.policy: ignore` judges nothing. A stale repo is no longer fetched or pushed offsite, but its
 local work is still backed up.
 An interrupted run is safe to repeat (see
 [Config changes](#config-changes-plan-and-apply)). SIGINT/SIGTERM cancels
