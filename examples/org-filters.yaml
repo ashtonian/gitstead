@@ -15,7 +15,7 @@ discovery:
     org: acme
     languages: [Go]                 # any of these
     topics: [service]               # all of these
-    names: ["svc-*"]                # globs on the name, any of them, ignoring case
+    names: ["svc-*"]                # a glob over the name; a word (billing) matches whole words
     tags: [services]
   - name: acme-terraform
     provider: github.com

@@ -3,10 +3,11 @@
 **Find, clone and keep in sync every repo you work on across GitHub, GitLab
 and Gitea/Forgejo, then launch coding agents on them side by side.**
 
-Pick repos by org, user or search, filtered by language, topics, name or
-keywords; they land in one layout with the right account per repo. `gitten
-setup` asks a few questions and clones what your accounts track; `gitten
-clone --org acme --language go` grabs a set on the spot. From then on
+Pick repos by org, user or search, by words in their names, language or
+topics -- see what that finds, pick from the list, and they land in one layout
+with the right account per repo. `gitten setup` asks a few questions and clones
+what your accounts track; `gitten clone --org acme --name billing` adds a set
+later, the same way ([Finding your repos](#finding-your-repos)). From then on
 a background sync fetches everything, clones what newly matches, follows
 renames and transfers, and flags what disappears upstream -- and backs up
 uncommitted work without ever touching your branches, working tree or index.
@@ -21,10 +22,12 @@ archived.
 
 - **Discovery that keeps up** — GitHub, GitHub Enterprise, GitLab (incl.
   self-hosted), and Gitea/Forgejo, by user, org, group or raw search, filtered
-  by language, topics, name pattern, visibility, forks and archived. Saved as
-  rules, every sync clones what newly matches, follows renames and transfers,
-  and flags what disappears; `gitten clone --org acme --language go` does it
-  once, on the spot ([Cloning a selection](#cloning-a-selection)).
+  by words in the name (`billing` matches `billing-api`, not `rebilling`),
+  globs, language, topics, visibility, forks and archived. Every search shows
+  what it finds before anything is cloned, with how many repos each name
+  matched, and lets you pick from the list. Saved as rules, every sync clones
+  what newly matches, follows renames and transfers, and flags what
+  disappears ([Finding your repos](#finding-your-repos)).
 - **Quick setup** — `gitten setup` asks a few questions and clones; `gitten
   bootstrap` sets up a machine that already has a config, and a shared
   manifest carries repos added by hand from machine to machine
@@ -81,7 +84,7 @@ It **doesn't**:
 
 ## Contents
 
-- [Install](#install) and [Quick start](#quick-start)
+- [Install](#install), [Quick start](#quick-start) and [Finding your repos](#finding-your-repos)
 - [Commands](#commands), [JSON output](#json-output), [Live view](#live-view-gitten-top), [Jump and open](#jump-and-open), [Shell completions](#shell-completions)
 - [Configuration](#configuration): [providers](#providers), [discovery](#discovery-rules), [authentication](#authentication), [accounts](#accounts), [clone options](#clone-options), [hooks](#hooks), [several machines](#several-machines)
 - [Config changes: plan and apply](#config-changes-plan-and-apply)
@@ -125,11 +128,12 @@ finds on your machine, so on a typical machine you mostly press Enter:
 2. **Accounts** — every account `gh` is logged in to, plus any you add by hand
    (GitLab, Gitea/Forgejo, another GitHub). For each: whose repos to track
    (your own, including private ones, and your organizations, listed from the
-   provider) and, if you like, only those with names like some globs
-   (`*billing*, *payments*`), in some languages or with some topics. It then
-   looks up what that finds and lists it -- `acme, named *billing* or
-   *payments*: 14 repos` and their names -- and asks whether to track them or
-   change the choice, before anything is written or cloned. Then: how git
+   provider) and, if you like, only those whose names have some words
+   (`billing, payments`) or match some globs (`svc-*`), in some languages or
+   with some topics. It then looks up what that finds and lists it -- how many
+   repos, how many each name matched, and their names -- and asks: track them
+   all, pick from the list, or change the choice; nothing is written or cloned
+   yet ([Finding your repos](#finding-your-repos)). Then: how git
    reaches the host (an SSH key — setup asks each host which
    account your keys sign in as — or HTTPS), the commit identity (from your
    global git config or `includeIf` files), signing, and optionally a separate
@@ -201,11 +205,90 @@ machine: it runs `setup --yes` only if there's no config yet, then `doctor`,
 `discover --apply`, `sync`, and installs the background sync (`--profile`
 scopes all of it to a tag).
 
+## Finding your repos
+
+gitten finds repos by owner -- you, an organization, a GitLab group -- or by
+search, narrowed by words in their names, language or topics. Every way in
+shows what that finds before anything is cloned, and lets you pick from the
+list. What you keep becomes a discovery rule: every sync clones what newly
+matches it.
+
+**The first time**, `gitten setup` walks through it (prompts condensed; each
+answer starts at what it found, so Enter mostly accepts):
+
+```
+$ gitten setup
+Looking at this machine: gh accounts, SSH keys and config, git identities, existing clones...
+
+? Whose repos should this account track?
+    [ ] jdoe   (your own repos, private ones included)
+  > [x] acme   (organization)
+? Track only some of their repos?  Yes
+? Only names like:  billing, payments
+Looking up what jdoe tracks...
+  acme, named billing or payments: 23 repos
+    by name: billing 15, payments 9
+    billing-api, billing-ledger, billing-worker, ..., and 11 more
+? Track these 23 repos with jdoe?
+  > Yes, all of them
+    Pick from the list
+    No, change whose repos or the filters
+...
+? Clone the 23 repos your accounts track now?  Yes
+```
+
+`by name` shows what each word matched, so one that catches more than you
+meant stands out. **Pick from the list** opens a checklist of every match,
+all ticked: untick the ones you don't want and they are skipped by name from
+then on (the rule's `skip`), while new matches still arrive.
+
+**Later**, add more the same way -- another team's repos, another org --
+without touching what you have:
+
+```
+$ gitten clone --org acme --name ledger --save acme-ledger
+Searching acme's repos on github.com...
+4 repos match:
+  + github.com/acme/ledger-api
+  + github.com/acme/ledger-exports
+  + github.com/acme/ledger-legacy
+  + github.com/acme/ledger-web
+? Clone these 4 repos?  Pick from the list
+? Which to clone  [x] ledger-api  [x] ledger-exports  [ ] ledger-legacy  [x] ledger-web
+Saved discovery rule "acme-ledger" in ~/.config/gitten/config.yaml
+```
+
+Each saved rule keeps working on its own: every `sync` clones what newly
+matches it. To see or change what's tracked:
+
+- `gitten discover` shows what every rule finds now and what would change,
+  and ends saying nothing was changed, how many repos would be cloned and what
+  would clone them -- and whether a background sync will.
+- `gitten setup` again changes an account's owners and filters, starting from
+  what is set up; rules you added with `clone` stay as they are.
+- `gitten clone ... --dry-run` lists a selection without asking anything.
+
+### Matching names
+
+| You write | Matches | Doesn't match |
+| --- | --- | --- |
+| `billing` | `billing`, `billing-api`, `team-billing`, `BillingPortal`, `billing_v2` | `rebilling`, `billings` |
+| `billing-api` | `billing-api`, `old-billing-api-v2` (those words, in order) | `billing-web-api` |
+| `billing-*` | names starting `billing-` | `team-billing-api` |
+| `*bill*` | anything containing `bill` (`rebilling` too) | |
+
+A word without `*`, `?` or `[...]` matches whole words of the name, which is
+split at `-`, `_`, `.` and other punctuation, where camelCase changes case,
+and where letters meet digits; with one, it's a glob over the whole name.
+Case never matters. Several are alternatives: a repo matching any of them is
+kept. A `name_pattern` regular expression narrows further, and a rule's
+`skip` leaves out repos by their exact names.
+
 ## Commands
 
 | Command | Description |
 |---|---|
-| `gitten setup` (`init`) | Set up gitten, or change your setup: layout, accounts, what to track (showing what it finds), features. `--yes`, `--answers`, `--save-answers`, `--dry-run`, `--offline`. |
+| `gitten setup` (`init`) | Set up gitten, or change your setup: layout, accounts, what to track (showing what it finds, to keep, pick from or change), features. `--yes`, `--answers`, `--save-answers`, `--dry-run`, `--offline`. |
 | `gitten bootstrap` | Set up a fresh machine in one command: setup → doctor → discover --apply → sync → install agent. `--profile`, `--no-agent`, `--dry-run`. |
 | `gitten discover` | Discover repos from providers and show the plan, changing nothing; `--apply` makes the changes that move and delete nothing (clone new repos, update URLs, managed git config, tags). `--rule`, `--tag` to scope. |
 | `gitten sync` | Discover, apply config changes as far as `reconcile.auto` allows, fetch all repos, back up uncommitted changes and, with `remote_sync.enabled`, take them offsite (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`. |
@@ -217,7 +300,7 @@ scopes all of it to a tag).
 | `gitten status` | Table of managed repos. `--live` inspects working trees now (dirty + ahead/behind, no network); `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
 | `gitten doctor` | Diagnose tooling, auth (tokens/SSH keys), config, and repo-on-disk health. Read-only; `plan`/`apply` fix what config can. |
 | `gitten clone <url>` | Clone and track one repo by hand, at its templated path or `--path`. `--tag`. A repo added by hand keeps the path and URL it was given. |
-| `gitten clone --org\|--user\|--group\|--mine\|--query …` | Clone every repo a selection finds, narrowed by `--language`, `--topic`, `--name`, `--visibility`, `--forks`, `--archived`; `--dry-run` lists them. Offers to save the selection as a discovery rule (`--save <name>`, `--no-save`). See [Cloning a selection](#cloning-a-selection). |
+| `gitten clone --org\|--user\|--group\|--mine\|--query …` | Find a set of repos -- narrowed by `--name` (words or globs), `--name-pattern`, `--language`, `--topic`, `--visibility`, `--forks`, `--archived` -- list it, and on a terminal ask: clone them all, pick from the list, or none. Offers to save the selection as a discovery rule, so every sync clones what newly matches (`--save <name>`, `--no-save`); `--dry-run` only lists. See [Finding your repos](#finding-your-repos). |
 | `gitten adopt <path>` | Track an existing clone where it is. `--scan` for batch, `--dry-run`, `--tag`. |
 | `gitten remove <pattern>` | Stop tracking repos. `--tag`/`--set`, `--yes`. `--delete` also removes the clone from disk after archiving its unique work (see [Deleting without losing work](#deleting-without-losing-work)); `--archive` moves the clone, whole, into the archive instead (see [Archiving instead of deleting](#archiving-instead-of-deleting)). |
 | `gitten run -- <cmd>` | Run a command in each matching repo (parallel). `--repos`/`--tag`/`--set`, `--fail-fast`. |
@@ -454,8 +537,9 @@ discovery:
     visibility: "all"                 # all | public | private | internal
     languages: ["Go", "Rust"]         # any of these, case-insensitive
     topics: ["service"]               # repo must have ALL listed topics
-    names: ["svc-*", "*-worker"]      # globs on the name, any of them, ignoring case
+    names: [billing, "svc-*"]         # words in the name, or globs; any of them (see Matching names)
     # name_pattern: "^svc-"           # or a regular expression; with names, both must match
+    skip: [billing-legacy]            # repos left out by exact name (what picking off the list writes)
     include_forks: false
     include_archived: false
     tags: ["work", "services"]
@@ -470,21 +554,22 @@ that pass the cheaper filters). When a provider genuinely can't honor a filter,
 `gitten discover` on its own is a preview: it lists what each rule found and
 what would change, then says so -- nothing was cloned or changed, how many
 repos would be cloned, the commands that would make the changes (`discover
---apply`, `apply`), and whether a background sync is installed that will make
-them on its next run. With no background sync, nothing changes until you run
-one of those.
+--apply`, `apply`) or change what's tracked (`setup`, `clone ... --save`),
+and whether a background sync is installed that will make them on its next
+run. With no background sync, nothing changes until you run one of those.
 
 ### Cloning a selection
 
-To clone a set of repos now, without writing a rule first, give `clone` a
-selection instead of a URL. It runs the same discovery a rule does, lists
-what matches, and clones what isn't tracked yet:
+To clone a set of repos without writing a rule first, give `clone` a
+selection instead of a URL. It runs the same discovery a rule does, lists what
+matches, and on a terminal asks: clone them all, pick from the list, or none.
+It clones only what isn't tracked yet:
 
 ```bash
 gitten clone --org acme --dry-run                       # everything in acme: list only
+gitten clone --org acme --name billing,payments         # acme's repos with billing or payments as a word in the name
 gitten clone --org acme --language go --topic service  # acme's Go services
 gitten clone --user someone --name 'terraform-*'        # someone's public terraform-* repos
-gitten clone --org acme --name '*billing*,*payments*'   # acme's repos with billing or payments in the name
 gitten clone --mine --language rust                     # your own Rust repos, private ones included
 gitten clone --query "org:acme payments in:name,description,readme archived:false"
 ```
@@ -496,19 +581,21 @@ gitten clone --query "org:acme payments in:name,description,readme archived:fals
 | `--query` | What the provider's own search finds; no other filter applies. |
 | `--language` | Only repos in one of these languages (repeat it, or comma-separate). |
 | `--topic` | Only repos with all of these topics. |
-| `--name` | Only repos whose name matches one of these globs, ignoring case (`'svc-*'`, `'*billing*'`); repeat it, or comma-separate. |
+| `--name` | Only repos whose name has one of these words, or matches one of these globs (`billing`, `'svc-*'`; see [Matching names](#matching-names)); repeat it, or comma-separate. |
 | `--name-pattern` | Only repos whose name matches this regular expression. |
 | `--visibility`, `--forks`, `--archived` | Public, private or internal only; include forks; include archived repos. |
 | `--provider` | Which configured provider to search: the only one by default. With none configured, github.com, with gh's token when gh is logged in there and `GITHUB_TOKEN` isn't set. |
 | `--tag` | Tags for what it clones. |
 
 On a terminal it then asks whether to keep the selection as a discovery rule
--- named after what it selects, such as `acme-go-service`, or as `--save
-<name>` says -- written into your config (with the provider, if config
-didn't have it). Kept, every `sync` clones what newly matches, follows
-renames and flags what stops matching, as with any rule. Not kept
-(`--no-save`, and the default without a terminal), its repos are tracked as
-cloned by hand: they keep their place and are never judged stale.
+-- named after what it selects, such as `acme-billing-payments`, or as
+`--save <name>` says -- written into your config (with the provider, if
+config didn't have it), the repos you picked off as its `skip`. Kept, every
+`sync` clones what newly matches, follows renames and flags what stops
+matching, as with any rule. Not kept (`--no-save`, and the default without a
+terminal), its repos are tracked as cloned by hand: they keep their place and
+are never judged stale. Without a terminal, or with `--json`, it clones the
+whole selection without asking.
 
 ### Raw search queries
 
@@ -758,7 +845,7 @@ repos:
 # Skip repos even if a rule matched them.
 exclude:
   - name_pattern: "^deprecated-"                # a regular expression on the name
-  - names: ["*-sandbox", "*-experiment"]         # globs on the name, ignoring case
+  - names: [sandbox, "*-experiment"]             # words in the name, or globs, as rules' names
   - repos: ["github.com/my-org/legacy-*"]        # repo keys or globs over them, as in overrides
 
 # Override any setting per repo or glob (later entries win).

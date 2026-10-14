@@ -164,9 +164,13 @@ type DiscoveryRule struct {
 	Languages       []string `koanf:"languages"        yaml:"languages,omitempty"`
 	Topics          []string `koanf:"topics"           yaml:"topics,omitempty"`
 	NamePattern     string   `koanf:"name_pattern"     yaml:"name_pattern,omitempty"  validate:"omitempty,valid_regex"`
-	// Names keeps the repos whose name matches any of these globs, ignoring
-	// case: billing-* or *payments*. With name_pattern too, a name must match both.
+	// Names keeps the repos whose name matches any of these patterns,
+	// ignoring case: a word (payments: payments-api, not prepayments) or a
+	// glob (svc-*); see NameMatches. With name_pattern too, both must match.
 	Names []string `koanf:"names" yaml:"names,omitempty"`
+	// Skip leaves out the repos with these names, ignoring case: the ones
+	// picked off a rule's list by hand. Matched whole, not as patterns.
+	Skip []string `koanf:"skip" yaml:"skip,omitempty"`
 	// Affiliation narrows a GitHub rule with no user, org or query -- the
 	// token's own repos -- to repos the account owns, collaborates on, or
 	// sees through an organization. Empty means all three, GitHub's default.
@@ -180,7 +184,7 @@ type DiscoveryRule struct {
 // matches name_pattern or any of names, or its key any of repos.
 type ExcludeRule struct {
 	NamePattern string `koanf:"name_pattern" yaml:"name_pattern,omitempty" validate:"omitempty,valid_regex"`
-	// Names are globs over repo names, ignoring case: *-sandbox.
+	// Names are patterns over repo names, as a rule's are: sandbox, *-old.
 	Names []string `koanf:"names" yaml:"names,omitempty"`
 	// Repos are repo keys or globs over them, as overrides' are:
 	// github.com/acme/legacy-*.
