@@ -1,5 +1,5 @@
 {
-  description = "gitstead: clone and keep in sync every repo you work on, across orgs, accounts and forges";
+  description = "gitstead: find, clone and keep in sync every repo you work on, then launch coding agents on them side by side";
 
   outputs = { self }: {
     # home-manager module: programs.gitstead. Give it the gitstead package;

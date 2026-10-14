@@ -58,7 +58,7 @@ homebrew_casks:
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/ashtonian/gitstead"
-    description: "Clone and keep in sync every repo from your orgs, users and searches"
+    description: "Find, clone and sync every repo you work on, then launch coding agents on them"
     # The binaries aren't signed and notarized, so macOS would refuse the
     # first run of a downloaded one.
     hooks:
