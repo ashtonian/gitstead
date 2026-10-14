@@ -62,5 +62,9 @@ Each should print the tag's version and commit. Homebrew quarantines what
 it downloads and the binaries aren't notarized, so the cask clears the
 quarantine after install (`postflight_steps`, from `custom_block` in
 `.goreleaser.yaml`); a "cannot be opened" dialog means that step didn't run.
+Signing and notarizing the macOS binaries (GoReleaser's `notarize`, with an
+Apple Developer ID certificate and an App Store Connect API key as secrets)
+would make the step unnecessary, and would let Gatekeeper trust a binary
+downloaded any other way too.
 Install by the full name, `ashtonian/tap/gitstead`: Homebrew 7 requires trust
 for third-party taps, and naming the cask in full trusts it.
