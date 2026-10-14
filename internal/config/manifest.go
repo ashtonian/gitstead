@@ -200,15 +200,11 @@ func MatchesRepo(key string) func(*yaml.Node) bool {
 	}
 }
 
-// manifestLock is the lock file for the manifest at path: in this user's
-// cache directory, named for the manifest's path, never beside it, where it
-// would end up committed to the dotfiles repo it sits in.
+// manifestLock is the lock file for the manifest at path: in git-mgr's cache
+// directory, named for the manifest's path, never beside it, where it would
+// end up committed to the dotfiles repo it sits in.
 func manifestLock(path string) (string, error) {
-	dir, err := os.UserCacheDir()
-	if err != nil {
-		dir = os.TempDir()
-	}
-	dir = filepath.Join(dir, "git-mgr", "locks")
+	dir := filepath.Join(CacheDir(), "locks")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}

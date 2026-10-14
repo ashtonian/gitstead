@@ -30,6 +30,8 @@ const niceness = 10
 // Kind is a scheduler backend.
 type Kind string
 
+// The scheduler backends: macOS's launchd, Linux's systemd user timers, and
+// cron anywhere else.
 const (
 	Launchd Kind = "launchd"
 	Systemd Kind = "systemd"
@@ -108,8 +110,11 @@ func (s Schedule) unit() string {
 }
 
 // Every is the interval as people write it: 15m, 2h.
-func (s Schedule) Every() string {
-	return strings.TrimSuffix(strings.TrimSuffix(s.Interval.String(), "0s"), "0m")
+func (s Schedule) Every() string { return FormatInterval(s.Interval) }
+
+// FormatInterval writes an interval as people do: 15m, 2h.
+func FormatInterval(d time.Duration) string {
+	return strings.TrimSuffix(strings.TrimSuffix(d.String(), "0s"), "0m")
 }
 
 // Argv is the command the schedule runs.

@@ -282,6 +282,8 @@ func (g *GitHubProvider) Discover(ctx context.Context, rule config.DiscoveryRule
 	}, nil
 }
 
+// EnrichLanguages fills in each repo's languages, one API call per repo, at
+// most concurrency at once; only rules that filter on language need it.
 func (g *GitHubProvider) EnrichLanguages(ctx context.Context, repos []Repo, concurrency int) error {
 	return g.core.enrichLanguages(ctx, repos, concurrency)
 }

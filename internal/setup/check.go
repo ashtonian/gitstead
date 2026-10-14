@@ -17,6 +17,8 @@ import (
 // Status is how a check went.
 type Status string
 
+// How a check can go: Pass and Info are fine, Warn needs a look, Fail
+// stops what depends on it.
 const (
 	Pass Status = "ok"
 	Info Status = "info"
