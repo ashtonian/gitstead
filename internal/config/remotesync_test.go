@@ -95,11 +95,12 @@ func TestLoad_RejectsUnknownKeys(t *testing.T) {
 	tests := []struct {
 		yaml, err string
 	}{
-		{"sync:\n  timout_per_repo: 1m\n", "sync.timout_per_repo"},
-		{"remote_sync:\n  remote_name: backup\n", "remote_sync.remote_name"},
-		{"accounts:\n  - name: work\n    ssh-key: ~/.ssh/id\n", "accounts[0].ssh-key"},
+		{"sync:\n  timout_per_repo: 1m\n", `"sync.timout_per_repo" is not a setting (did you mean "sync.timeout_per_repo"?)`},
+		{"remote_sync:\n  remote_name: backup\n", `"remote_sync.remote_name" is not a setting`},
+		{"accounts:\n  - name: work\n    ssh-key: ~/.ssh/id\n", `"accounts[0].ssh-key" is not a setting (did you mean "accounts[0].ssh_key"?)`},
+		{"backup:\n  max_per_repo: 10\n", `"backup.max_per_repo" is not a setting (did you mean "backup.max_per_copy"?)`},
 		// Every unknown key is named, not just the first.
-		{"backup:\n  max_per_repo: 10\n  push_branch: false\n", "backup.max_per_repo, backup.push_branch"},
+		{"backup:\n  max_per_repo: 10\n  push_branch: false\n", `"backup.push_branch" is not a setting`},
 		{"agents:\n  - name: claude\n    command: claude\n    env: {ANTHROPIC_MODEL: opus}\n", ""}, // a map takes any key
 		{"accounts:\n  - name: work\n    remote_sync:\n      wip: off\n", ""},
 	}
@@ -109,8 +110,8 @@ func TestLoad_RejectsUnknownKeys(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err := config.Load(t.Context(), path)
-		if tt.err == "" && err != nil || tt.err != "" && (err == nil || !strings.Contains(err.Error(), tt.err)) {
-			t.Errorf("Load(%q) = %v, want %q", tt.yaml, err, tt.err)
+		if tt.err == "" && err != nil || tt.err != "" && (err == nil || !strings.HasSuffix(err.Error(), tt.err)) {
+			t.Errorf("Load(%q) = %v, want it to end %q", tt.yaml, err, tt.err)
 		}
 	}
 }

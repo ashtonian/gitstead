@@ -1849,11 +1849,11 @@ All dependencies pinned to latest stable versions at build time. No go-git.
 - **CI** (`.github/workflows/ci.yml`, on pushes and pull requests to
   `master`): build, vet, gofmt, race tests; the e2e module against a Forgejo
   container; govulncheck; golangci-lint; and a linux/amd64 + linux/arm64 image
-  build, pushed as `ashtonian/gitten:edge` from `master` when Docker Hub
-  credentials are set.
+  build, pushed as `ghcr.io/ashtonian/gitten:edge` from `master` with the
+  workflow's own token.
 - **Release** (`.github/workflows/release.yml`, on a `v*` tag): the race
   tests, then GoReleaser publishes the archives and checksums, the Homebrew
-  cask and the Docker images. [docs/RELEASING.md](docs/RELEASING.md) has the
+  cask and the images on ghcr.io. [docs/RELEASING.md](docs/RELEASING.md) has the
   steps and the secrets.
 
 ---
