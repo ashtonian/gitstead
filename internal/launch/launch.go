@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitstead/internal/config"
 )
 
 // Launcher opens a plan's terminals.
@@ -49,7 +49,7 @@ func ProcessEnv(confirm func(string) bool) Env {
 }
 
 // PluginPrefix starts the name of a launcher plugin's executable.
-const PluginPrefix = "git-mgr-launch-"
+const PluginPrefix = "gitstead-launch-"
 
 // ErrNoLauncher reports that auto found no launcher to use.
 var ErrNoLauncher = errors.New("no launcher found: install tmux, or set launchers.default to iterm, muxy or a plugin")
@@ -76,7 +76,7 @@ func New(name string, cfg config.LaunchersConfig, env Env) (Launcher, error) {
 	return &Plugin{Launcher: name, Path: path, Options: cfg.Plugins[name], Env: env}, nil
 }
 
-// auto picks the launcher for the terminal git-mgr runs in: tmux inside
+// auto picks the launcher for the terminal gitstead runs in: tmux inside
 // tmux, Muxy inside Muxy, iTerm inside iTerm, else tmux when installed.
 func auto(cfg config.LaunchersConfig, env Env) (Launcher, error) {
 	switch {

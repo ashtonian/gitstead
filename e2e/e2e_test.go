@@ -1,7 +1,7 @@
-// Package e2e contains git-mgr's end-to-end tests. They spin up a real
+// Package e2e contains gitstead's end-to-end tests. They spin up a real
 // Forgejo instance via testcontainers, seed it over the API, then drive the
-// compiled git-mgr binary as a subprocess and assert on its output, exit
-// code, and the state it writes. Nothing here imports git-mgr's internal
+// compiled gitstead binary as a subprocess and assert on its output, exit
+// code, and the state it writes. Nothing here imports gitstead's internal
 // packages — the binary is the contract under test, which is why this is a
 // separate module (keeping testcontainers/Docker out of the root module).
 //
@@ -32,15 +32,15 @@ import (
 
 // --- isolation ---
 
-// binHome is the home directory git-mgr runs with in these tests, so its
+// binHome is the home directory gitstead runs with in these tests, so its
 // caches and lock files never land in the real one. The test process keeps
 // its own HOME, where the Docker client finds its context.
 var binHome string
 
-// TestMain keeps git -- the tests' and git-mgr's -- from the developer's git
+// TestMain keeps git -- the tests' and gitstead's -- from the developer's git
 // config and from any repository the temporary directory sits inside.
 func TestMain(m *testing.M) {
-	home, err := os.MkdirTemp("", "git-mgr-e2e-home-")
+	home, err := os.MkdirTemp("", "gitstead-e2e-home-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -58,7 +58,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// binEnv is the environment git-mgr runs with: this process's, with
+// binEnv is the environment gitstead runs with: this process's, with
 // binHome as its home, then extra.
 func binEnv(extra ...string) []string {
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
@@ -70,7 +70,7 @@ func binEnv(extra ...string) []string {
 	return append(env, extra...)
 }
 
-// --- git-mgr binary (built once for the whole suite) ---
+// --- gitstead binary (built once for the whole suite) ---
 
 var (
 	binOnce sync.Once
@@ -78,32 +78,32 @@ var (
 	binErr  error
 )
 
-// gitMgrBin builds the git-mgr binary from the parent module once and returns
+// gitsteadBin builds the gitstead binary from the parent module once and returns
 // its path. Building (rather than `go run`) keeps each invocation cheap.
-func gitMgrBin(t *testing.T) string {
+func gitsteadBin(t *testing.T) string {
 	t.Helper()
 	binOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "git-mgr-bin")
+		dir, err := os.MkdirTemp("", "gitstead-bin")
 		if err != nil {
 			binErr = err
 			return
 		}
-		binPath = filepath.Join(dir, "git-mgr")
+		binPath = filepath.Join(dir, "gitstead")
 		// -C .. builds the root module; the e2e module has no code dependency on it.
 		cmd := exec.Command("go", "build", "-C", "..", "-o", binPath, ".")
 		if out, err := cmd.CombinedOutput(); err != nil {
-			binErr = fmt.Errorf("building git-mgr: %w\n%s", err, out)
+			binErr = fmt.Errorf("building gitstead: %w\n%s", err, out)
 		}
 	})
 	if binErr != nil {
-		t.Fatalf("git-mgr binary unavailable: %v", binErr)
+		t.Fatalf("gitstead binary unavailable: %v", binErr)
 	}
 	return binPath
 }
 
 // --- test environment ---
 
-// testEnv holds a running Forgejo instance and the paths git-mgr writes to.
+// testEnv holds a running Forgejo instance and the paths gitstead writes to.
 type testEnv struct {
 	httpURL    string
 	adminUser  string
@@ -112,7 +112,7 @@ type testEnv struct {
 	baseDir    string
 	stateFile  string
 	configFile string
-	// extraEnv is added to git-mgr's environment.
+	// extraEnv is added to gitstead's environment.
 	extraEnv []string
 }
 
@@ -136,19 +136,19 @@ func setupTestEnv(t *testing.T) *testEnv {
 		httpURL:    httpURL,
 		adminUser:  ctr.AdminUsername(),
 		adminPass:  ctr.AdminPassword(),
-		bin:        gitMgrBin(t),
+		bin:        gitsteadBin(t),
 		baseDir:    filepath.Join(tmp, "repos"),
 		stateFile:  filepath.Join(tmp, "state.yaml"),
 		configFile: filepath.Join(tmp, "config.yaml"),
 	}
 }
 
-// run executes git-mgr with the given args, pointing it at this env's config
+// run executes gitstead with the given args, pointing it at this env's config
 // and state files, and returns combined output plus the exit code.
 func (e *testEnv) run(t *testing.T, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(e.bin, args...)
-	cmd.Env = binEnv(append([]string{"GIT_MGR_CONFIG=" + e.configFile, "GIT_MGR_STATE=" + e.stateFile}, e.extraEnv...)...)
+	cmd.Env = binEnv(append([]string{"GITSTEAD_CONFIG=" + e.configFile, "GITSTEAD_STATE=" + e.stateFile}, e.extraEnv...)...)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -159,25 +159,25 @@ func (e *testEnv) run(t *testing.T, args ...string) (string, int) {
 		if errors.As(err, &ee) {
 			code = ee.ExitCode()
 		} else {
-			t.Fatalf("running git-mgr %v: %v", args, err)
+			t.Fatalf("running gitstead %v: %v", args, err)
 		}
 	}
 	return buf.String(), code
 }
 
-// runJSON runs git-mgr with --json and returns its stdout, which must be
+// runJSON runs gitstead with --json and returns its stdout, which must be
 // exactly one JSON document whatever the outcome, decoded into v; its
 // stderr; and its exit code.
 func (e *testEnv) runJSON(t *testing.T, v any, args ...string) (stderr string, code int) {
 	t.Helper()
 	cmd := exec.Command(e.bin, append([]string{"--json"}, args...)...)
-	cmd.Env = binEnv(append([]string{"GIT_MGR_CONFIG=" + e.configFile, "GIT_MGR_STATE=" + e.stateFile}, e.extraEnv...)...)
+	cmd.Env = binEnv(append([]string{"GITSTEAD_CONFIG=" + e.configFile, "GITSTEAD_STATE=" + e.stateFile}, e.extraEnv...)...)
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	if err := cmd.Run(); err != nil {
 		var ee *exec.ExitError
 		if !errors.As(err, &ee) {
-			t.Fatalf("running git-mgr %v: %v", args, err)
+			t.Fatalf("running gitstead %v: %v", args, err)
 		}
 		code = ee.ExitCode()
 	}
@@ -187,15 +187,15 @@ func (e *testEnv) runJSON(t *testing.T, v any, args ...string) (stderr string, c
 	text := out.String()
 	dec := json.NewDecoder(&out)
 	if err := dec.Decode(v); err != nil {
-		t.Fatalf("git-mgr %v --json: stdout isn't JSON: %v\nstdout: %s\nstderr: %s", args, err, text, errOut.String())
+		t.Fatalf("gitstead %v --json: stdout isn't JSON: %v\nstdout: %s\nstderr: %s", args, err, text, errOut.String())
 	}
 	if err := dec.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
-		t.Fatalf("git-mgr %v --json printed more than one document (%v):\n%s", args, err, text)
+		t.Fatalf("gitstead %v --json printed more than one document (%v):\n%s", args, err, text)
 	}
 	return errOut.String(), code
 }
 
-// statusJSON runs `git-mgr status --json` and decodes it into a map keyed by
+// statusJSON runs `gitstead status --json` and decodes it into a map keyed by
 // repo key. Asserting via the CLI's own JSON output keeps the tests decoupled
 // from the on-disk state format.
 func (e *testEnv) statusJSON(t *testing.T) map[string]map[string]any {
@@ -288,10 +288,10 @@ func (e *testEnv) api(t *testing.T, method, path string, body any, token string)
 }
 
 // httpClone clones a seeded repo over HTTP (basic auth) to destPath. The
-// Forgejo container only exposes HTTP conveniently; git-mgr's own clone path is
+// Forgejo container only exposes HTTP conveniently; gitstead's own clone path is
 // SSH, so adopt/backup/sync tests operate on these pre-cloned working trees.
 // httpClone clones a public repo over HTTP. The URL carries no credential:
-// git-mgr refuses one in an origin, and git's credential helper is where
+// gitstead refuses one in an origin, and git's credential helper is where
 // credentials belong.
 func (e *testEnv) httpClone(t *testing.T, owner, repo, destPath string) {
 	t.Helper()
@@ -305,7 +305,7 @@ func (e *testEnv) httpClone(t *testing.T, owner, repo, destPath string) {
 	}
 }
 
-// writeConfig writes a git-mgr config pointing a "gitea" provider at the
+// writeConfig writes a gitstead config pointing a "gitea" provider at the
 // Forgejo instance. rulesYAML is spliced under discovery:.
 func (e *testEnv) writeConfig(t *testing.T, token, rulesYAML string) {
 	t.Helper()
@@ -372,7 +372,7 @@ func TestE2E_DiscoverByUser(t *testing.T) {
 // TestE2E_DiscoverApplyHTTPS verifies clone_protocol: https drives discover
 // --apply to clone over HTTP (the Forgejo container's transport) -- exercising
 // HTTPURL capture, the https clone path, and the cloned URL stored in state, all
-// through the real binary. (git-mgr's default transport is SSH, which the
+// through the real binary. (gitstead's default transport is SSH, which the
 // container doesn't expose, so this also proves the protocol switch works.)
 // A private repo is cloned with what the user's git credential helper
 // supplies, and its origin keeps no credential.
@@ -405,7 +405,7 @@ discovery:
 		t.Fatal(err)
 	}
 	// The container advertises its internal URL, localhost:3000, in clone
-	// URLs; git -- not git-mgr -- is told where that is mapped to, and given
+	// URLs; git -- not gitstead -- is told where that is mapped to, and given
 	// a credential helper, as a user's git config would.
 	env.extraEnv = []string{
 		"GIT_CONFIG_COUNT=2",
@@ -706,7 +706,7 @@ func newLocalEnv(t *testing.T) *testEnv {
 	t.Helper()
 	tmp := t.TempDir()
 	return &testEnv{
-		bin:        gitMgrBin(t),
+		bin:        gitsteadBin(t),
 		baseDir:    filepath.Join(tmp, "repos"),
 		stateFile:  filepath.Join(tmp, "state.yaml"),
 		configFile: filepath.Join(tmp, "config.yaml"),
@@ -973,11 +973,11 @@ func TestE2E_Hooks(t *testing.T) {
 	root := filepath.Join(tmp, "workspaces")
 	cfg := fmt.Sprintf(`base_dir: %s
 hooks:
-  post_clone: ['printf "%%s" "$GIT_MGR_REPO" > .cloned']
+  post_clone: ['printf "%%s" "$GITSTEAD_REPO" > .cloned']
 workspace_defaults:
   root: %s
   hooks:
-    post_create: ['cp "$GIT_MGR_SOURCE/.env" .env', 'echo "$GIT_MGR_AGENT" >> ran']
+    post_create: ['cp "$GITSTEAD_SOURCE/.env" .env', 'echo "$GITSTEAD_AGENT" >> ran']
 repos:
   - url: %s
 `, env.baseDir, root, remote)
@@ -1094,7 +1094,7 @@ repos:
 		return vars
 	}
 	one, two := exports("agent-1"), exports("agent-2")
-	if one["PORT"] == two["PORT"] || one["PORT"] == "" || one["GIT_MGR_PORT"] != one["PORT"] {
+	if one["PORT"] == two["PORT"] || one["PORT"] == "" || one["GITSTEAD_PORT"] != one["PORT"] {
 		t.Errorf("each agent needs ports of its own: %v / %v", one, two)
 	}
 	if p, _ := strconv.Atoi(two["PORT"]); two["API_PORT"] != strconv.Itoa(p+1) || two["DB"] != "app_2" {
@@ -1156,7 +1156,7 @@ func TestE2E_SharedManifest(t *testing.T) {
 		return remote
 	}
 	app, notes, old := newRemote("app"), newRemote("notes"), newRemote("old")
-	manifest := filepath.Join(tmp, "dotfiles", "git-mgr", "repos.yaml")
+	manifest := filepath.Join(tmp, "dotfiles", "gitstead", "repos.yaml")
 	configure := func(e *testEnv, withManifest bool) {
 		cfg := "base_dir: " + e.baseDir + "\n"
 		if withManifest {
@@ -1359,7 +1359,7 @@ func TestE2E_JSON(t *testing.T) {
 		Path string
 		OK   bool
 	}
-	if _, code := env.runJSON(t, &ran, "ws", "exec", "app", "--", "sh", "-c", `test "$GIT_MGR_AGENT" = agent-1`); code != 3 || len(ran) != 2 {
+	if _, code := env.runJSON(t, &ran, "ws", "exec", "app", "--", "sh", "-c", `test "$GITSTEAD_AGENT" = agent-1`); code != 3 || len(ran) != 2 {
 		t.Errorf("ws exec: exit %d, %+v; want 3", code, ran)
 	}
 
@@ -1384,7 +1384,7 @@ func TestE2E_JSON(t *testing.T) {
 }
 
 // TestE2E_RemoteFleetJSON: a fleet on another host is planned, shown and
-// stopped by git-mgr there, over ssh -- here an ssh that runs the command on
+// stopped by gitstead there, over ssh -- here an ssh that runs the command on
 // this machine with the "remote" config -- and under --json its document
 // comes through as this command's, alone on stdout.
 func TestE2E_RemoteFleetJSON(t *testing.T) {
@@ -1566,7 +1566,7 @@ func TestE2E_RemoteSync(t *testing.T) {
 		t.Fatalf("sync exit %d:\n%s", code, out)
 	}
 
-	refs := gitCmd(t, remote, "for-each-ref", "--format=%(refname)", "refs/git-mgr/")
+	refs := gitCmd(t, remote, "for-each-ref", "--format=%(refname)", "refs/gitstead/")
 	if !strings.Contains(refs, "/wip/") || !strings.Contains(refs, "/heads/main") {
 		t.Errorf("remote refs after sync:\n%s\nwant a WIP ref and the unpushed main", refs)
 	}
@@ -1665,7 +1665,7 @@ func TestE2E_RemoteSyncSubmodules(t *testing.T) {
 	}
 
 	libRemote := filepath.Join(tmp, "lib.git")
-	refs := gitCmd(t, libRemote, "for-each-ref", "--format=%(refname)", "refs/git-mgr/")
+	refs := gitCmd(t, libRemote, "for-each-ref", "--format=%(refname)", "refs/gitstead/")
 	var wipRef, headRef string
 	for _, r := range strings.Split(refs, "\n") {
 		switch {
@@ -1678,7 +1678,7 @@ func TestE2E_RemoteSyncSubmodules(t *testing.T) {
 	if wipRef == "" || headRef == "" {
 		t.Fatalf("lib's remote after sync:\n%s\nwant a WIP ref and the unpushed detached HEAD", refs)
 	}
-	if appRefs := gitCmd(t, filepath.Join(tmp, "app.git"), "for-each-ref", "--format=%(refname)", "refs/git-mgr/"); strings.Contains(appRefs, "/heads/HEAD") {
+	if appRefs := gitCmd(t, filepath.Join(tmp, "app.git"), "for-each-ref", "--format=%(refname)", "refs/gitstead/"); strings.Contains(appRefs, "/heads/HEAD") {
 		t.Errorf("lib's commit went to app's remote:\n%s", appRefs)
 	}
 
@@ -1712,7 +1712,7 @@ func TestE2E_RemoteSyncSubmodules(t *testing.T) {
 	if out, code := env.run(t, "sync"); code != 0 {
 		t.Fatalf("sync exit %d:\n%s", code, out)
 	}
-	if refs := gitCmd(t, libRemote, "for-each-ref", "--format=%(refname)", "refs/git-mgr/"); strings.Contains(refs, "/heads/HEAD") {
+	if refs := gitCmd(t, libRemote, "for-each-ref", "--format=%(refname)", "refs/gitstead/"); strings.Contains(refs, "/heads/HEAD") {
 		t.Errorf("lib's saved commit should be deleted once pushed:\n%s", refs)
 	}
 }
@@ -1752,11 +1752,11 @@ exit $rc
 	return bin + string(os.PathListSeparator) + os.Getenv("PATH"), gate
 }
 
-// start runs git-mgr in the background with PATH set to path.
+// start runs gitstead in the background with PATH set to path.
 func (e *testEnv) start(t *testing.T, path string, args ...string) func() (string, int) {
 	t.Helper()
 	cmd := exec.Command(e.bin, args...)
-	cmd.Env = binEnv(append([]string{"GIT_MGR_CONFIG=" + e.configFile, "GIT_MGR_STATE=" + e.stateFile, "PATH=" + path}, e.extraEnv...)...)
+	cmd.Env = binEnv(append([]string{"GITSTEAD_CONFIG=" + e.configFile, "GITSTEAD_STATE=" + e.stateFile, "PATH=" + path}, e.extraEnv...)...)
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	if err := cmd.Start(); err != nil {
@@ -1882,11 +1882,11 @@ func adoptedApp(t *testing.T, lockTimeout string) (env *testEnv, src, root strin
 }
 
 // TestE2E_HeldRepoLockIsBusy: a command that gives up waiting for a repo
-// another git-mgr command holds, and so changes nothing, exits 75 (try again
+// another gitstead command holds, and so changes nothing, exits 75 (try again
 // later), not 1; one that makes other changes meanwhile exits 3.
 func TestE2E_HeldRepoLockIsBusy(t *testing.T) {
 	env, src, root := adoptedApp(t, "200ms")
-	lock, err := os.OpenFile(filepath.Join(src, ".git", "git-mgr.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := os.OpenFile(filepath.Join(src, ".git", "gitstead.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1984,13 +1984,13 @@ func TestE2E_ManifestKeepsAccounts(t *testing.T) {
 // missing; one named -- even at the default path -- must exist. config --edit
 // hands the editor the path as one argument, whatever it holds.
 func TestE2E_ConfigPath(t *testing.T) {
-	bin := gitMgrBin(t)
+	bin := gitsteadBin(t)
 	home := t.TempDir()
 	run := func(env []string, args ...string) (string, int) {
 		cmd := exec.Command(bin, args...)
 		cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
-			return strings.HasPrefix(kv, "GIT_MGR_CONFIG=") || strings.HasPrefix(kv, "HOME=")
-		}), append([]string{"HOME=" + home, "GIT_MGR_STATE=" + filepath.Join(home, "state.yaml")}, env...)...)
+			return strings.HasPrefix(kv, "GITSTEAD_CONFIG=") || strings.HasPrefix(kv, "HOME=")
+		}), append([]string{"HOME=" + home, "GITSTEAD_STATE=" + filepath.Join(home, "state.yaml")}, env...)...)
 		out, err := cmd.CombinedOutput()
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
@@ -2004,12 +2004,12 @@ func TestE2E_ConfigPath(t *testing.T) {
 	if out, code := run(nil, "config", "--validate"); code != 0 {
 		t.Errorf("no config named, none at the default path: exit %d\n%s", code, out)
 	}
-	defaultPath := filepath.Join(home, ".config", "git-mgr", "config.yaml")
+	defaultPath := filepath.Join(home, ".config", "gitstead", "config.yaml")
 	if out, code := run(nil, "--config", defaultPath, "config", "--validate"); code == 0 {
 		t.Errorf("a named config that's missing must fail, even at the default path:\n%s", out)
 	}
-	if out, code := run([]string{"GIT_MGR_CONFIG=" + defaultPath}, "config", "--validate"); code == 0 {
-		t.Errorf("$GIT_MGR_CONFIG naming a missing file must fail:\n%s", out)
+	if out, code := run([]string{"GITSTEAD_CONFIG=" + defaultPath}, "config", "--validate"); code == 0 {
+		t.Errorf("$GITSTEAD_CONFIG naming a missing file must fail:\n%s", out)
 	}
 
 	dir := filepath.Join(t.TempDir(), "my configs $(touch pwned)")
@@ -2055,7 +2055,7 @@ func TestE2E_JSONErrors(t *testing.T) {
 		var doc errorDoc
 		_, code := env.runJSON(t, &doc, args...)
 		if code != wantCode || doc.Error == "" || doc.ExitCode != code {
-			t.Errorf("git-mgr --json %v: exit %d, document %+v; want exit %d and the error", args, code, doc, wantCode)
+			t.Errorf("gitstead --json %v: exit %d, document %+v; want exit %d and the error", args, code, doc, wantCode)
 		}
 	}
 	t.Run("a failing command", func(t *testing.T) { check(t, 1, "restore", "nothing-matches") })
@@ -2065,8 +2065,8 @@ func TestE2E_JSONErrors(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
 		var doc struct{ Help string }
 		stderr, code := env.runJSON(t, &doc, "sync", "--help")
-		if code != 0 || !strings.HasPrefix(doc.Help, "Usage: git-mgr sync") || !strings.Contains(stderr, "Usage: git-mgr sync") {
-			t.Errorf("git-mgr --json sync --help: exit %d, document %+v; want the help in it, and on stderr", code, doc)
+		if code != 0 || !strings.HasPrefix(doc.Help, "Usage: gitstead sync") || !strings.Contains(stderr, "Usage: gitstead sync") {
+			t.Errorf("gitstead --json sync --help: exit %d, document %+v; want the help in it, and on stderr", code, doc)
 		}
 	})
 	t.Run("a config that doesn't load", func(t *testing.T) {
@@ -2140,7 +2140,7 @@ func TestE2E_SyncUpdate(t *testing.T) {
 
 // TestE2E_AccountsGitconfig: accounts gitconfig --install makes each
 // account's identity git's own for repos under its folders, through
-// includeIf, including repos git-mgr never touched. Account names that make
+// includeIf, including repos gitstead never touched. Account names that make
 // the same file name stay apart, and folders and files whose paths hold
 // characters git config quotes or git's wildcards match only themselves.
 func TestE2E_AccountsGitconfig(t *testing.T) {
@@ -2240,7 +2240,7 @@ clone: false
 		}
 	}
 	text := mustRead(t, rc)
-	if !strings.HasPrefix(text, "export EDITOR=vim\n") || strings.Count(text, "git-mgr shell-init zsh") != 1 {
+	if !strings.HasPrefix(text, "export EDITOR=vim\n") || strings.Count(text, "gitstead shell-init zsh") != 1 {
 		t.Errorf(".zshrc after two setups:\n%s", text)
 	}
 	if cfg := mustRead(t, env.configFile); !strings.Contains(cfg, "layout: owner/name") {

@@ -19,9 +19,9 @@ type Fleet struct {
 	// name; empty for launchers.default.
 	Launcher string `koanf:"launcher" yaml:"launcher,omitempty"`
 	// Host is the SSH destination the workspaces live on; empty for this
-	// machine. git-mgr there makes the launch plan.
+	// machine. gitstead there makes the launch plan.
 	Host string `koanf:"host" yaml:"host,omitempty"`
-	// RemoteCommand runs git-mgr on Host, with any flags it needs there.
+	// RemoteCommand runs gitstead on Host, with any flags it needs there.
 	RemoteCommand string `koanf:"remote_command" yaml:"remote_command,omitempty"`
 }
 
@@ -46,7 +46,7 @@ type LaunchersConfig struct {
 // TmuxConfig is the tmux launcher's: a session per fleet, a window per
 // workspace (or agent), a pane per agent.
 type TmuxConfig struct {
-	Session   string `koanf:"session"    yaml:"session"    default:"git-mgr-{{.Fleet}}"`
+	Session   string `koanf:"session"    yaml:"session"    default:"gitstead-{{.Fleet}}"`
 	WindowPer string `koanf:"window_per" yaml:"window_per" default:"workspace" validate:"oneof=workspace agent"`
 	Layout    string `koanf:"layout"     yaml:"layout"     default:"tiled" validate:"oneof=tiled even-horizontal even-vertical main-vertical main-horizontal"`
 	// MaxPanes caps a window's panes; more agents spill into another window.
@@ -107,7 +107,7 @@ type MuxyConfig struct {
 	Command string `koanf:"command" yaml:"command,omitempty"`
 }
 
-// BuiltinLaunchers are the launchers git-mgr has itself.
+// BuiltinLaunchers are the launchers gitstead has itself.
 var BuiltinLaunchers = []string{"auto", "tmux", "iterm", "muxy"}
 
 // FindFleet returns the named fleet, or nil.

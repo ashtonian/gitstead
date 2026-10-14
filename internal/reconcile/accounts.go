@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/pathtemplate"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/pathtemplate"
 )
 
 // AccountGitConfig is the git config account a gives every repo it covers:

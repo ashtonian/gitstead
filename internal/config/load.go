@@ -40,7 +40,7 @@ func WithOptionalFile() Option {
 	return func(o *loadOptions) { o.optionalFile = true }
 }
 
-// WithEnvPrefix sets the env var prefix (default: "GIT_MGR_").
+// WithEnvPrefix sets the env var prefix (default: "GITSTEAD_").
 func WithEnvPrefix(prefix string) Option {
 	return func(o *loadOptions) { o.envPrefix = prefix }
 }
@@ -61,14 +61,14 @@ func Defaults() *Config {
 	return cfg
 }
 
-// configValidator adapts git-mgr's domain Validate(*Config) to the
+// configValidator adapts gitstead's domain Validate(*Config) to the
 // pkgconfig.Validator seam (Struct(any) error) so cross-field validation
 // -- duplicate provider names, selector-vs-type, query exclusivity, workspace
 // rules, path-template parsing -- runs inside GetConfig's pipeline. These rules
 // are not expressible as struct tags, so go-playground/validator alone cannot
 // cover them. Validation is normalization-independent (it inspects raw config
 // values, not expanded paths), so running it before normalize() is equivalent
-// to git-mgr's previous validate-after-normalize order.
+// to gitstead's previous validate-after-normalize order.
 type configValidator struct{}
 
 func (configValidator) Struct(v any) error {
@@ -82,7 +82,7 @@ func (configValidator) Struct(v any) error {
 	return nil
 }
 
-// invalidError carries git-mgr's validation error through the loader's
+// invalidError carries gitstead's validation error through the loader's
 // wrapping, so Load can report it on its own.
 type invalidError struct{ err error }
 
@@ -97,13 +97,13 @@ func (e *invalidError) Unwrap() error { return e.err }
 //
 // Loading is delegated to github.com/ashtonian/pkg/config, which
 // supplies struct-tag + programmatic defaults, struct-aware env mapping (so
-// GIT_MGR_BASE_DIR maps to the koanf key "base_dir", not "base.dir"), and the
-// koanf decode pipeline. git-mgr layers its own path normalization and
+// GITSTEAD_BASE_DIR maps to the koanf key "base_dir", not "base.dir"), and the
+// koanf decode pipeline. gitstead layers its own path normalization and
 // cross-field validation (via configValidator) on top.
 func Load(path string, opts ...Option) (*Config, error) {
 	o := &loadOptions{
 		configPath: path,
-		envPrefix:  "GIT_MGR_",
+		envPrefix:  "GITSTEAD_",
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -169,7 +169,7 @@ func Load(path string, opts ...Option) (*Config, error) {
 	return cfg, nil
 }
 
-// normalize applies git-mgr's post-load fixups: ~ expansion, BaseDir cleaning,
+// normalize applies gitstead's post-load fixups: ~ expansion, BaseDir cleaning,
 // trailing-slash trimming on provider URLs, and the PatchDir default.
 func normalize(cfg *Config) {
 	if t, ok := Layouts[cfg.Layout]; ok {

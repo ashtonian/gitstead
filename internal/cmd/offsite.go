@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/workspace"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/state"
+	"github.com/ashtonian/gitstead/internal/workspace"
 )
 
 // offsiteSpec is how one copy goes offsite, and each of its checked-out
@@ -68,7 +68,7 @@ func (s offsiteSpec) resolve(id repourl.Identity, copyID string) (gitops.Offsite
 	}
 	return gitops.Offsite{
 		Remote: remote, Namespace: ns, WIP: s.policy.WIP, Unpushed: s.policy.Unpushed, Keep: s.policy.Keep,
-		Branch: "refs/heads/git-mgr/wip/" + s.machine + "/" + copyID,
+		Branch: "refs/heads/gitstead/wip/" + s.machine + "/" + copyID,
 		Bundle: filepath.Join(config.ExpandHome(s.archiveDir), "unpushed", copyID+".bundle"),
 		SSHKey: s.sshKey,
 	}, nil
@@ -553,7 +553,7 @@ func listOffsite(ctx *Context, cfg *config.Config, st *state.State, pass func(st
 		fmt.Println(`
 Restore from inside a clone of the repo (a submodule's, from inside it):
   uncommitted work:   git fetch <remote> <.../wip/<id>> && git stash apply --index FETCH_HEAD
-  a visible WIP ref:  git fetch <remote> <refs/heads/git-mgr/wip/...> && git cherry-pick --no-commit FETCH_HEAD
+  a visible WIP ref:  git fetch <remote> <refs/heads/gitstead/wip/...> && git cherry-pick --no-commit FETCH_HEAD
   unpushed commits:   git fetch <remote> <.../heads/<branch>>:refs/heads/<branch>-recovered`)
 	}
 	return ctx.finish(doc, outcome(failed, failed+listed, "repos' remotes could not be listed"))
@@ -608,7 +608,7 @@ func offsiteRefsAt(ctx context.Context, path, remoteTmpl string, id repourl.Iden
 	if err != nil {
 		return remoteRefs{}, err
 	}
-	out, err := gitops.GitWithSSHKey(ctx, path, sshKey, "ls-remote", remote, "refs/git-mgr/*", "refs/heads/git-mgr/wip/*")
+	out, err := gitops.GitWithSSHKey(ctx, path, sshKey, "ls-remote", remote, "refs/gitstead/*", "refs/heads/gitstead/wip/*")
 	if err != nil {
 		return remoteRefs{}, err
 	}

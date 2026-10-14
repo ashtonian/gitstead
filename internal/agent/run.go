@@ -15,8 +15,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/procutil"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/procutil"
 )
 
 // RunOptions is one agent run.

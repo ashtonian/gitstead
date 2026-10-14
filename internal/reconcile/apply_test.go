@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/discovery"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/hook"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/testenv"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/discovery"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/hook"
+	"github.com/ashtonian/gitstead/internal/reconcile"
+	"github.com/ashtonian/gitstead/internal/state"
+	"github.com/ashtonian/gitstead/internal/testenv"
 )
 
 func TestMain(m *testing.M) {
@@ -288,7 +288,7 @@ func TestApply_AdoptKeepsConfigSetByHand(t *testing.T) {
 		t.Errorf("core.sshCommand = %q, want the value set by hand", got)
 	}
 	if managed := w.st.Repos["local/remotes/app"].ManagedConfig; managed["core.sshcommand"] != "" {
-		t.Errorf("a value set by hand must not be recorded as git-mgr's: %v", managed)
+		t.Errorf("a value set by hand must not be recorded as gitstead's: %v", managed)
 	}
 	p := w.plan()
 	if len(p.Actions) != 0 || len(p.Drift) != 1 || p.Drift[0].Found != "ssh -i /keys/mine" || p.Drift[0].Recorded != "(unset)" {
@@ -479,13 +479,13 @@ func TestApply_CloneWithAnUnreachableSubmoduleIsRecorded(t *testing.T) {
 	}
 }
 
-// post_clone runs in a clone git-mgr makes, told which repo it is; a clone
+// post_clone runs in a clone gitstead makes, told which repo it is; a clone
 // adopted where it already was is left alone.
 func TestApply_PostCloneHooks(t *testing.T) {
 	root := t.TempDir()
 	app, lib := bareRemote(t, root, "app"), bareRemote(t, root, "lib")
 	w := newWorld(t, root)
-	w.cfg.Hooks.PostClone = []string{`printf '%s' "$GIT_MGR_REPO" > hooked`}
+	w.cfg.Hooks.PostClone = []string{`printf '%s' "$GITSTEAD_REPO" > hooked`}
 	w.cfg.Repos = []config.ManualRepo{{URL: app}, {URL: lib}}
 	// lib is already cloned where it belongs.
 	libPath := filepath.Join(w.cfg.BaseDir, "local", "remotes", "lib")

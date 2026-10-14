@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/gitops"
 )
 
 // A repo renamed since its mirror was made keeps the mirror, moved to the

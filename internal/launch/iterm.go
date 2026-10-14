@@ -8,14 +8,14 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/shellutil"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/shellutil"
 )
 
 // ITerm opens a fleet in iTerm2: a window, a tab per workspace (or agent),
 // a split per agent, spilling into another tab past MaxPanes. It drives
 // iTerm with AppleScript, so it needs macOS and the Automation permission
-// for the terminal git-mgr runs in.
+// for the terminal gitstead runs in.
 type ITerm struct {
 	Opts config.ITermConfig
 	Env  Env
@@ -35,7 +35,7 @@ func (t *ITerm) Open(ctx context.Context, p Plan) error {
 	}
 	out, err := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("osascript: %w: %s (does the terminal git-mgr runs in have Automation permission for iTerm?)", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("osascript: %w: %s (does the terminal gitstead runs in have Automation permission for iTerm?)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
 // selection narrows tracked repos by a glob over keys, a tag, and/or a named

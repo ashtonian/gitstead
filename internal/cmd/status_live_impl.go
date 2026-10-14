@@ -7,8 +7,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/state"
 	"golang.org/x/sync/errgroup"
 )
 

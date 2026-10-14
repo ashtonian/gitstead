@@ -11,17 +11,17 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/ctxutil"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/hook"
-	"github.com/ashtonian/git-mgr/internal/pathutil"
-	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/ctxutil"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/hook"
+	"github.com/ashtonian/gitstead/internal/pathutil"
+	"github.com/ashtonian/gitstead/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
 // PlanRepos compares what config wants for each repo with what state
-// records and what seen found on disk. overwrite puts git-mgr's values back
+// records and what seen found on disk. overwrite puts gitstead's values back
 // over values changed by hand instead of reporting them as drift.
 func PlanRepos(desired map[string]Repo, st *state.State, seen Seen, overwrite bool) *Plan {
 	p := &Plan{}
@@ -174,7 +174,7 @@ func planURL(p *Plan, d Repo, a *state.RepoState, here Copy, overwrite bool) []A
 type ConfigSetter func(key, value string, unset, recordOnly bool) RunFunc
 
 // PlanConfig plans one copy's managed git config: want is what config asks
-// for, recorded what git-mgr set, have what is set now. A key set by hand is
+// for, recorded what gitstead set, have what is set now. A key set by hand is
 // taken over when it already holds the wanted value, reported as drift when
 // it doesn't, and dropped from management when config stops wanting it. The
 // actions are serial when serial is set.
@@ -323,7 +323,7 @@ func cloneRepo(d Repo, adopt bool) RunFunc {
 		if !adopt && len(d.PostClone) > 0 {
 			info = "ran post_clone hooks"
 			if err := env.Hooks.Run(ctx, PostCloneHook(d.Key, d.Path, d.PostClone)); err != nil {
-				partly = errors.Join(partly, fmt.Errorf("cloned, but %w\n(`git-mgr hooks post-clone %s` runs them again)", err, d.Key))
+				partly = errors.Join(partly, fmt.Errorf("cloned, but %w\n(`gitstead hooks post-clone %s` runs them again)", err, d.Key))
 			}
 		}
 
@@ -363,7 +363,7 @@ func PostCloneHook(key, path string, commands []string) hook.Hook {
 	return hook.Hook{Event: hook.PostClone, Commands: commands, Dir: path, Name: key, Env: hook.Env{Repo: key, Source: path}}
 }
 
-// CloneOptions is how git-mgr clones a repo with clone config c, fetching
+// CloneOptions is how gitstead clones a repo with clone config c, fetching
 // with sshKey ("" for ssh's own choice), and shapes each checkout of it.
 func CloneOptions(sshKey string, c config.CloneConfig) gitops.CloneOptions {
 	return gitops.CloneOptions{
@@ -526,7 +526,7 @@ func moveRepo(key, from, to string) RunFunc {
 					case errors.Is(err, fs.ErrExist):
 						return fmt.Errorf("cannot move to %s: it already exists", to)
 					case errors.Is(err, syscall.EXDEV):
-						return fmt.Errorf("%s and %s are on different filesystems; move it yourself and run git-mgr apply to record it", from, to)
+						return fmt.Errorf("%s and %s are on different filesystems; move it yourself and run gitstead apply to record it", from, to)
 					}
 					return err
 				}

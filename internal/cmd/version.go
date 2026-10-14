@@ -8,6 +8,6 @@ type VersionCmd struct {
 }
 
 func (v *VersionCmd) Run(ctx *Context) error {
-	fmt.Println("git-mgr " + ctx.VersionStr)
+	fmt.Println("gitstead " + ctx.VersionStr)
 	return ctx.finish(map[string]string{"version": ctx.VersionStr}, nil)
 }

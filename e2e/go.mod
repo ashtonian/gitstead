@@ -1,10 +1,10 @@
-// Module git-mgr-e2e holds git-mgr's end-to-end tests. It is deliberately a
+// Module gitstead-e2e holds gitstead's end-to-end tests. It is deliberately a
 // SEPARATE module so that heavy test-only dependencies (testcontainers, the
-// Docker client, Forgejo image plumbing) stay out of the root git-mgr module's
-// dependency graph. The tests drive the compiled git-mgr binary as a
-// subprocess rather than importing git-mgr's internal packages, so there is no
+// Docker client, Forgejo image plumbing) stay out of the root gitstead module's
+// dependency graph. The tests drive the compiled gitstead binary as a
+// subprocess rather than importing gitstead's internal packages, so there is no
 // code coupling between the two modules.
-module github.com/ashtonian/git-mgr-e2e
+module github.com/ashtonian/gitstead-e2e
 
 go 1.26.2
 

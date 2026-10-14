@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitstead/internal/config"
 )
 
 func TestRun(t *testing.T) {
@@ -21,7 +21,7 @@ func TestRun(t *testing.T) {
 	h := Hook{
 		Event: PostCreate, Dir: dir, Name: "app/agent-1",
 		Commands: []string{
-			`printf '%s|%s|%s|%s|%s' "$GIT_MGR_EVENT" "$GIT_MGR_REPO" "$GIT_MGR_SOURCE" "$GIT_MGR_AGENT" "$PWD" > env.txt`,
+			`printf '%s|%s|%s|%s|%s' "$GITSTEAD_EVENT" "$GITSTEAD_REPO" "$GITSTEAD_SOURCE" "$GITSTEAD_AGENT" "$PWD" > env.txt`,
 			`echo second`,
 		},
 		Env: Env{Repo: "github.com/acme/app", Source: "/src/app", Agent: "agent-1"},
@@ -103,11 +103,11 @@ func TestTailBuffer(t *testing.T) {
 // A hook started from inside an agent's run gets its own context, not the
 // agent's.
 func TestRun_LeavesTheCallersContext(t *testing.T) {
-	t.Setenv("GIT_MGR_PORT", "41000")
-	t.Setenv("GIT_MGR_WORKSPACE", "caller")
+	t.Setenv("GITSTEAD_PORT", "41000")
+	t.Setenv("GITSTEAD_WORKSPACE", "caller")
 	dir := t.TempDir()
 	h := Hook{Event: PostClone, Dir: dir, Name: "x", Env: Env{Repo: "github.com/a/b"},
-		Commands: []string{`printf '%s|%s|%s' "$GIT_MGR_PORT" "$GIT_MGR_WORKSPACE" "$GIT_MGR_REPO" > env.txt`}}
+		Commands: []string{`printf '%s|%s|%s' "$GITSTEAD_PORT" "$GITSTEAD_WORKSPACE" "$GITSTEAD_REPO" > env.txt`}}
 	if err := (Runner{LogDir: t.TempDir()}).Run(context.Background(), h); err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,7 @@ package repourl_test
 import (
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/repourl"
 )
 
 func TestMatchKey(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/gitops"
 )
 
 // remoteAndClone returns a bare remote with one pushed commit and a clone of it.
@@ -69,8 +69,8 @@ func TestInspectUniqueWork(t *testing.T) {
 		}, func(u gitops.UniqueWork) bool {
 			return u.OtherRefCommits == 1 && u.UnpushedCommits == 0 && !u.LostWithWorktree()
 		}, true},
-		{"git-mgr's own backup refs aren't work", func(t *testing.T, c string) {
-			mustGit(t, c, "update-ref", "refs/git-mgr/backups/x", mustGit(t, c, "commit-tree", "-m", "wip", "HEAD^{tree}"))
+		{"gitstead's own backup refs aren't work", func(t *testing.T, c string) {
+			mustGit(t, c, "update-ref", "refs/gitstead/backups/x", mustGit(t, c, "commit-tree", "-m", "wip", "HEAD^{tree}"))
 		}, func(u gitops.UniqueWork) bool { return reflect.DeepEqual(u, gitops.UniqueWork{}) }, false},
 		{"detached HEAD commit", func(t *testing.T, c string) {
 			mustGit(t, c, "switch", "-q", "--detach")
@@ -160,7 +160,7 @@ func TestRemoveClone_ArchiveRestoresWithoutTheUpstream(t *testing.T) {
 	if got := mustGit(t, restored, "remote", "get-url", "origin"); got != remote {
 		t.Errorf("origin = %s, want %s", got, remote)
 	}
-	if refs := mustGit(t, restored, "for-each-ref", "refs/git-mgr/archive/"); refs != "" {
+	if refs := mustGit(t, restored, "for-each-ref", "refs/gitstead/archive/"); refs != "" {
 		t.Errorf("the archive's own refs are left in the restore:\n%s", refs)
 	}
 }
@@ -377,7 +377,7 @@ func TestRemoveWorktree_KeepsBranchAndArchivesWorkingTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RemoveWorktree: %v", err)
 	}
-	if refs := mustGit(t, source, "for-each-ref", "refs/git-mgr/backups/"); refs != "" {
+	if refs := mustGit(t, source, "for-each-ref", "refs/gitstead/backups/"); refs != "" {
 		t.Errorf("a removed worktree's backup refs must go with it:\n%s", refs)
 	}
 	if _, err := os.Stat(wt); !os.IsNotExist(err) {
@@ -389,7 +389,7 @@ func TestRemoveWorktree_KeepsBranchAndArchivesWorkingTree(t *testing.T) {
 	if bundle == "" {
 		t.Fatal("uncommitted worktree changes must be archived")
 	}
-	mustGit(t, source, "fetch", "-q", bundle, "+refs/git-mgr/archive/*:refs/restored/*")
+	mustGit(t, source, "fetch", "-q", bundle, "+refs/gitstead/archive/*:refs/restored/*")
 	refs := mustGit(t, source, "for-each-ref", "--format=%(refname)", "refs/restored/")
 	var worktreeRef string
 	for _, r := range strings.Split(refs, "\n") {
@@ -509,7 +509,7 @@ func TestRemoveClone_KeepsLFSObjects(t *testing.T) {
 }
 
 // A token someone put in a remote's URL never reaches an archive's
-// description, which git-mgr prints and serves as JSON.
+// description, which gitstead prints and serves as JSON.
 func TestRemoveClone_ArchiveKeepsNoCredentials(t *testing.T) {
 	ctx := context.Background()
 	_, clone := remoteAndClone(t)

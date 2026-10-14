@@ -15,17 +15,17 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/ashtonian/git-mgr/internal/activity"
-	agents "github.com/ashtonian/git-mgr/internal/agent"
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/notify"
-	"github.com/ashtonian/git-mgr/internal/shellutil"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/activity"
+	agents "github.com/ashtonian/gitstead/internal/agent"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/notify"
+	"github.com/ashtonian/gitstead/internal/shellutil"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
-// WSEnvCmd prints an agent's environment -- its GIT_MGR_* variables, ports
+// WSEnvCmd prints an agent's environment -- its GITSTEAD_* variables, ports
 // included, and its workspace's env -- for a shell or editor of your own in
-// its replica: eval "$(git-mgr ws env)".
+// its replica: eval "$(gitstead ws env)".
 type WSEnvCmd struct {
 	Name  string `arg:"" optional:"" help:"Workspace name; default the one this directory is in." predictor:"workspace"`
 	Agent string `arg:"" optional:"" help:"The agent; default the one whose folder this directory is in."`
@@ -97,26 +97,26 @@ func resolvedPath(p string) string {
 	return filepath.Clean(p)
 }
 
-// WSWaitingCmd tells git-mgr an agent is waiting for you: what an agent's own
-// notification hook runs. It records it, for `git-mgr top`, and notifies
+// WSWaitingCmd tells gitstead an agent is waiting for you: what an agent's own
+// notification hook runs. It records it, for `gitstead top`, and notifies
 // under notify.on_waiting. It never fails the agent's hook: problems are
 // only printed.
 type WSWaitingCmd struct {
-	Workspace string `help:"The agent's workspace; default $GIT_MGR_WORKSPACE, which 'ws run' sets." predictor:"workspace"`
-	Agent     string `help:"The agent; default $GIT_MGR_AGENT."`
+	Workspace string `help:"The agent's workspace; default $GITSTEAD_WORKSPACE, which 'ws run' sets." predictor:"workspace"`
+	Agent     string `help:"The agent; default $GITSTEAD_AGENT."`
 	Message   string `help:"What it is waiting for."`
 	Clear     bool   `help:"It is working again: for a hook run when you answer it."`
 	Payload   string `arg:"" optional:"" help:"The agent's notification as JSON, as Codex passes it; Claude Code's comes on stdin."`
 }
 
 func (c *WSWaitingCmd) Run(ctx *Context) error {
-	ws, agent := orDefault(c.Workspace, os.Getenv("GIT_MGR_WORKSPACE")), orDefault(c.Agent, os.Getenv("GIT_MGR_AGENT"))
+	ws, agent := orDefault(c.Workspace, os.Getenv("GITSTEAD_WORKSPACE")), orDefault(c.Agent, os.Getenv("GITSTEAD_AGENT"))
 	doc := map[string]any{"workspace": ws, "agent": agent, "recorded": false}
 	if ws == "" || agent == "" {
-		return ctx.finish(doc, nil) // not an agent git-mgr runs
+		return ctx.finish(doc, nil) // not an agent gitstead runs
 	}
 	if err := c.note(ctx, ws, agent); err != nil {
-		fmt.Fprintf(os.Stderr, "git-mgr: %s/%s waiting: %v\n", ws, agent, err)
+		fmt.Fprintf(os.Stderr, "gitstead: %s/%s waiting: %v\n", ws, agent, err)
 		return ctx.finish(doc, nil)
 	}
 	doc["recorded"] = true
@@ -217,7 +217,7 @@ func noteWaiting(cfg *config.Config, st *state.State, ws, agent, what string, wa
 		return nil
 	})
 	if err == nil && notifyNow && cfg.Notify.Enabled && cfg.Notify.OnWaiting {
-		notify.Send(context.Background(), cfg.Notify.Timeout, "git-mgr", fmt.Sprintf("%s/%s is waiting: %s", ws, agent, what))
+		notify.Send(context.Background(), cfg.Notify.Timeout, "gitstead", fmt.Sprintf("%s/%s is waiting: %s", ws, agent, what))
 	}
 	return err
 }

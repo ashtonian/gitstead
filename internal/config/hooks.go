@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// HooksConfig holds the commands git-mgr runs, each with /bin/sh -c, in a
+// HooksConfig holds the commands gitstead runs, each with /bin/sh -c, in a
 // checkout it has just made: post_clone in a repo's new clone, post_create
 // in a new workspace copy of it. They come only from config, never from a
 // repository.

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitstead/internal/config"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 

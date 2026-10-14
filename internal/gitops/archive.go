@@ -17,13 +17,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/pathutil"
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/pathutil"
+	"github.com/ashtonian/gitstead/internal/repourl"
 )
 
 // archiveRefPrefix holds the temporary refs a bundle is built from. Each
 // archive gets its own sub-namespace because linked worktrees share refs.
-const archiveRefPrefix = "refs/git-mgr/archive/"
+const archiveRefPrefix = "refs/gitstead/archive/"
 
 // ArchiveMeta describes an archive bundle and is written beside it as JSON.
 type ArchiveMeta struct {
@@ -532,7 +532,7 @@ func ArchiveClone(ctx context.Context, repoPath, dir, name string) (string, erro
 		Work:    "the whole clone",
 		Created: time.Now().UTC(),
 		Clone:   dest,
-		Restore: "git-mgr archives restore " + id,
+		Restore: "gitstead archives restore " + id,
 	}
 	meta.Branch, _ = Git(ctx, repoPath, "symbolic-ref", "-q", "--short", "HEAD")
 	switch work, err := InspectUniqueWork(ctx, repoPath); {
@@ -594,7 +594,7 @@ func deleteRefs(ctx context.Context, repoPath, prefix string) {
 }
 
 // remoteURLs maps the repository's remotes to their URLs, without any
-// credential a URL embeds: they are written where anyone reading git-mgr's
+// credential a URL embeds: they are written where anyone reading gitstead's
 // output or files can see them.
 func remoteURLs(ctx context.Context, repoPath string) map[string]string {
 	out, err := Git(ctx, repoPath, "config", "--get-regexp", `^remote\..*\.url$`)

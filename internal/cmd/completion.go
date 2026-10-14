@@ -3,9 +3,9 @@ package cmd
 import (
 	"os"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/jump"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/jump"
+	"github.com/ashtonian/gitstead/internal/state"
 	"github.com/posener/complete"
 	"github.com/willabides/kongplete"
 )
@@ -28,7 +28,7 @@ func CompletionPredictors() []kongplete.Option {
 }
 
 func completionState() *state.State {
-	path := os.Getenv("GIT_MGR_STATE")
+	path := os.Getenv("GITSTEAD_STATE")
 	if path == "" {
 		path = config.DefaultStatePath()
 	}
@@ -40,7 +40,7 @@ func completionState() *state.State {
 }
 
 func completionConfig() *config.Config {
-	path := os.Getenv("GIT_MGR_CONFIG")
+	path := os.Getenv("GITSTEAD_CONFIG")
 	var opts []config.Option
 	if path == "" {
 		path, opts = config.DefaultConfigPath(), append(opts, config.WithOptionalFile())

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/pathtemplate"
-	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/scheduler"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/pathtemplate"
+	"github.com/ashtonian/gitstead/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/scheduler"
 )
 
 // Answers are every choice setup makes. They double as the --answers file,
@@ -41,16 +41,16 @@ type Answers struct {
 	// Workspaces sets up agents' workspaces; nil leaves them as they are.
 	Workspaces *Workspaces `yaml:"workspaces,omitempty"`
 
-	// Shell adds `git-mgr cd` and tab completion to your shell's startup
+	// Shell adds `gitstead cd` and tab completion to your shell's startup
 	// file (see ShellRC).
 	Shell bool `yaml:"shell"`
 	// GitIncludes makes each account's identity your git's own for repos you
-	// clone yourself under its folders: `git-mgr accounts gitconfig
+	// clone yourself under its folders: `gitstead accounts gitconfig
 	// --install`, which adds one include.path to your global git config.
 	GitIncludes bool `yaml:"git_includes"`
 	// Clone clones what the accounts track, and makes the config's other
 	// changes that move and delete nothing, once the config is written:
-	// `git-mgr discover --apply`.
+	// `gitstead discover --apply`.
 	Clone bool `yaml:"clone"`
 }
 

@@ -12,13 +12,13 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/ashtonian/git-mgr/internal/pathutil"
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/pathutil"
+	"github.com/ashtonian/gitstead/internal/repourl"
 )
 
 // stagingPrefix names the directory a clone is made in, beside its
 // destination, until it is complete.
-const stagingPrefix = ".git-mgr-clone-"
+const stagingPrefix = ".gitstead-clone-"
 
 // IsStaging reports whether a directory name is a clone in progress, which
 // scans for repositories skip.

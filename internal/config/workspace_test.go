@@ -179,7 +179,7 @@ func TestHooksFor(t *testing.T) {
 }
 
 func TestWorkspacePostCreate(t *testing.T) {
-	envCopy, none := []string{`cp "$GIT_MGR_SOURCE/.env" .env`}, []string{}
+	envCopy, none := []string{`cp "$GITSTEAD_SOURCE/.env" .env`}, []string{}
 	cfg := &Config{WorkspaceDefaults: WorkspaceDefaults{Hooks: WorkspaceHooks{PostCreate: &envCopy}}}
 	if got := cfg.WithDefaults(Workspace{Name: "a"}).PostCreate(); !reflect.DeepEqual(got, envCopy) {
 		t.Errorf("a workspace without hooks takes the defaults', got %v", got)

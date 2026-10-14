@@ -11,9 +11,9 @@ ARG VERSION=dev
 ARG COMMIT=none
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build \
     -ldflags="-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    -o git-mgr .
+    -o gitstead .
 
-FROM alpine:3.21
+FROM alpine:3.24
 RUN apk add --no-cache git openssh-client
-COPY --from=builder /app/git-mgr /usr/local/bin/git-mgr
-ENTRYPOINT ["git-mgr"]
+COPY --from=builder /app/gitstead /usr/local/bin/gitstead
+ENTRYPOINT ["gitstead"]

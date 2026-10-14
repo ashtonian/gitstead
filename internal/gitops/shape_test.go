@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/gitops"
 )
 
 // shaped is a remote whose repo has files at the top and in a/ and b/, a

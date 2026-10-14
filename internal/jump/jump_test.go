@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
 func fixture() *state.State {

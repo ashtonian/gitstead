@@ -15,18 +15,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/launch"
-	"github.com/ashtonian/git-mgr/internal/scheduler"
-	"github.com/ashtonian/git-mgr/internal/setup"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/launch"
+	"github.com/ashtonian/gitstead/internal/scheduler"
+	"github.com/ashtonian/gitstead/internal/setup"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
-// DoctorCmd diagnoses the health of the git-mgr setup: tooling, auth, config,
+// DoctorCmd diagnoses the health of the gitstead setup: tooling, auth, config,
 // and whether tracked repos still exist on disk and point where state says.
 // It is offline (no provider API calls), changes nothing, and exits non-zero
-// if any check fails. `git-mgr plan` and `apply` fix what config can.
+// if any check fails. `gitstead plan` and `apply` fix what config can.
 type DoctorCmd struct {
 	// Scheduled is set when doctor checks a schedule's environment from
 	// inside it; the schedules aren't checked again from there.
@@ -145,7 +145,7 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 	// A write holds the state lock for milliseconds; held longer, a run is
 	// stuck and every command will wait lock_timeout and fail.
 	if lerr := st.Lock(stuckLockAfter); lerr != nil {
-		d.warn(fmt.Sprintf("state lock: %v -- a git-mgr process may be stuck; find it with lsof", lerr))
+		d.warn(fmt.Sprintf("state lock: %v -- a gitstead process may be stuck; find it with lsof", lerr))
 	} else {
 		st.ReleaseLock()
 		d.ok("state lock free")
@@ -164,7 +164,7 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 		cloned++
 		if !gitops.HasGitDir(repo.LocalPath) {
 			missing++
-			d.fail(fmt.Sprintf("repo %s: not on disk (%s); `git-mgr apply` clones it again, `git-mgr remove %s` stops tracking it", key, repo.LocalPath, key))
+			d.fail(fmt.Sprintf("repo %s: not on disk (%s); `gitstead apply` clones it again, `gitstead remove %s` stops tracking it", key, repo.LocalPath, key))
 			continue
 		}
 		if id, perr := gitops.ParseRemoteURL(ctx.GoCtx(), repo.LocalPath); perr == nil {
@@ -181,7 +181,7 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 	checkManifest(cfg, st, d)
 	checkMirrors(cfg, st, d)
 	if n := uncatalogued(cfg, st); n > 0 {
-		d.warn(fmt.Sprintf("%d archives in %s aren't on record, made by a run interrupted before recording them; `git-mgr archives ls` lists them", n, cfg.Backup.ArchiveDir))
+		d.warn(fmt.Sprintf("%d archives in %s aren't on record, made by a run interrupted before recording them; `gitstead archives ls` lists them", n, cfg.Backup.ArchiveDir))
 	}
 
 	fmt.Printf("\n%d problem(s), %d warning(s)\n", d.fails, d.warns)
@@ -217,7 +217,7 @@ func checkManifest(cfg *config.Config, st *state.State, d *doctorReport) {
 		d.ok("manifest: " + cfg.Manifest)
 	}
 	if len(local) > 0 {
-		d.warn(fmt.Sprintf("%d repos tracked by hand aren't in the manifest (%s); `git-mgr manifest save` adds them", len(local), strings.Join(local, ", ")))
+		d.warn(fmt.Sprintf("%d repos tracked by hand aren't in the manifest (%s); `gitstead manifest save` adds them", len(local), strings.Join(local, ", ")))
 	}
 }
 
@@ -258,7 +258,7 @@ func firstLineOf(s string) string {
 
 // dirWritable reports whether a directory accepts new files.
 func dirWritable(dir string) bool {
-	f, err := os.CreateTemp(dir, ".git-mgr-doctor-*")
+	f, err := os.CreateTemp(dir, ".gitstead-doctor-*")
 	if err != nil {
 		return false
 	}
@@ -280,7 +280,7 @@ func orInherited(v string) string {
 // what a sync needs, by running doctor there.
 func checkSchedules(ctx *Context, st *state.State, d *doctorReport) {
 	if len(st.Schedules) == 0 {
-		d.info("no background schedule installed (`git-mgr install-agent`)")
+		d.info("no background schedule installed (`gitstead install-agent`)")
 		return
 	}
 	host, err := newHost(ctx)
@@ -297,11 +297,11 @@ func checkSchedules(ctx *Context, st *state.State, d *doctorReport) {
 			d.warn(fmt.Sprintf("%s: %v", where, err))
 			continue
 		case !installed:
-			d.fail(fmt.Sprintf("%s is recorded but no longer installed; `git-mgr install-agent --name %s` puts it back", where, s.Name))
+			d.fail(fmt.Sprintf("%s is recorded but no longer installed; `gitstead install-agent --name %s` puts it back", where, s.Name))
 			continue
 		}
 		if info, err := os.Stat(s.Bin); err != nil || info.Mode()&0o111 == 0 {
-			d.fail(fmt.Sprintf("%s runs %s, which is missing; `git-mgr install-agent --name %s` again from the git-mgr you use", where, s.Bin, s.Name))
+			d.fail(fmt.Sprintf("%s runs %s, which is missing; `gitstead install-agent --name %s` again from the gitstead you use", where, s.Bin, s.Name))
 			continue
 		}
 		if s.Kind == scheduler.Systemd {
@@ -379,7 +379,7 @@ func checkLaunchers(cfg *config.Config, d *doctorReport) {
 			used[f.Launcher] = true
 		}
 		if f.Host != "" {
-			d.info(fmt.Sprintf("fleet %q opens on %s: git-mgr there plans it, so it needs this version and the same workspaces", f.Name, f.Host))
+			d.info(fmt.Sprintf("fleet %q opens on %s: gitstead there plans it, so it needs this version and the same workspaces", f.Name, f.Host))
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(used)) {
@@ -435,7 +435,7 @@ func checkWorkspaces(ctx *Context, st *state.State, d *doctorReport) {
 					if c.Pending {
 						what = "copy not made yet"
 					}
-					d.fail(fmt.Sprintf("workspace %s/%s: %s (%s); `git-mgr ws ensure %s` makes it", name, r.Agent, what, c.Path, name))
+					d.fail(fmt.Sprintf("workspace %s/%s: %s (%s); `gitstead ws ensure %s` makes it", name, r.Agent, what, c.Path, name))
 					continue
 				}
 				if ws.Isolation == config.IsolationReferenceClone {

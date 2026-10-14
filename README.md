@@ -1,20 +1,24 @@
-# git-mgr
+# gitstead
 
-Discover, clone, sync, and back up git repositories across multiple GitHub,
-GitLab, and Gitea/Forgejo instances — into one structured local layout.
+**Every git repo you work on, cloned, in sync and backed up** — across GitHub,
+GitLab and Gitea/Forgejo, several accounts, and several machines.
 
-git-mgr is built to run two ways: **interactively** when bootstrapping a new
-machine, and as a **cron job** that fetches everything and transparently backs
-up uncommitted work without ever touching your branches or working tree. It also
-manages **workspaces** — a repo, or several related ones, worked on by several
-agents at once, each in a copy of its own — keeping their WIP safe.
+`gitstead setup` asks a few questions, then clones what your accounts own into
+one tidy layout, each repo with the right identity and SSH key, and installs a
+background sync. From then on every repo is fetched, kept in line with your
+config, and has its uncommitted work backed up -- without gitstead ever touching
+your branches, working tree or index. A new machine is one command away.
+
+It also gives coding agents **workspaces**: a repo, or several related ones,
+worked on by several agents at once, each in a copy of its own, with their
+work backed up and never deleted until it's archived.
 
 ## Highlights
 
 - **Multi-provider discovery** — GitHub, GitHub Enterprise, GitLab (incl.
   self-hosted), and Gitea/Forgejo, by user, org, group, or raw search query.
   SSH or HTTPS/PAT transport (`clone_protocol`).
-- **One-command bootstrap** — `git-mgr bootstrap` (init → doctor → discover →
+- **One-command bootstrap** — `gitstead bootstrap` (init → doctor → discover →
   sync → agent) plus a shared manifest, so repos added by hand on one machine
   reach the others ([Several machines](#several-machines)); `doctor` diagnoses tooling/auth/state before things break.
 - **Structured layout** — repos land at `{{.Host}}/{{.Owner}}/{{.Name}}` (fully
@@ -40,7 +44,7 @@ agents at once, each in a copy of its own — keeping their WIP safe.
 
 ## What it does, and what it doesn't
 
-git-mgr **does**:
+gitstead **does**:
 
 - find your repositories on GitHub, GitHub Enterprise, GitLab and
   Gitea/Forgejo, by owner, organization, group or search, for any number of
@@ -61,13 +65,13 @@ It **doesn't**:
   copies go to hidden refs; `ws publish` pushes agents' branches when you ask);
 - create, change or delete anything on a forge, beyond the pull requests `ws
   publish --pr` opens;
-- run as a server or daemon: the host's scheduler runs `git-mgr sync`;
+- run as a server or daemon: the host's scheduler runs `gitstead sync`;
 - support Bitbucket or Windows: it runs on macOS and Linux.
 
 ## Contents
 
 - [Install](#install) and [Quick start](#quick-start)
-- [Commands](#commands), [JSON output](#json-output), [Live view](#live-view-git-mgr-top), [Jump and open](#jump-and-open), [Shell completions](#shell-completions)
+- [Commands](#commands), [JSON output](#json-output), [Live view](#live-view-gitstead-top), [Jump and open](#jump-and-open), [Shell completions](#shell-completions)
 - [Configuration](#configuration): [providers](#providers), [discovery](#discovery-rules), [authentication](#authentication), [accounts](#accounts), [clone options](#clone-options), [hooks](#hooks), [several machines](#several-machines)
 - [Config changes: plan and apply](#config-changes-plan-and-apply)
 - [Transparent backups](#transparent-backups), [offsite](#offsite-surviving-a-lost-disk), [mirrors](#mirrors-surviving-the-host), [deleting](#deleting-without-losing-work) and [archiving](#archiving-instead-of-deleting)
@@ -81,7 +85,7 @@ How it works inside -- components, data flow, locks, failure modes -- is in
 
 ## Install
 
-There is no release yet. git-mgr's config loader is
+There is no release yet. gitstead's config loader is
 [pkg](https://github.com/ashtonian/pkg)'s, which `go.mod` takes from a
 checkout beside this one (`replace => ../pkg/config`) until it is published as a
 module of its own; `go install`, the release archives, the Homebrew cask and
@@ -90,26 +94,26 @@ build it from source:
 
 ```bash
 git clone https://github.com/ashtonian/pkg
-git clone https://github.com/ashtonian/git-mgr
-cd git-mgr && go install .        # Go version: see go.mod
+git clone https://github.com/ashtonian/gitstead
+cd gitstead && go install .        # Go version: see go.mod
 ```
 
 Once released:
 
 ```bash
-brew install --cask ashtonian/tap/git-mgr
-go install github.com/ashtonian/git-mgr@latest
-docker pull ashtonian/git-mgr     # linux/amd64, linux/arm64
+brew install --cask ashtonian/tap/gitstead
+go install github.com/ashtonian/gitstead@latest
+docker pull ashtonian/gitstead     # linux/amd64, linux/arm64
 ```
 
-git-mgr shells out to `git`, so git must be on `PATH`.
+gitstead shells out to `git`, so git must be on `PATH`.
 
 ## Quick start
 
 ```bash
-git-mgr setup     # a few questions, a review, then it writes the config, clones and installs the background sync
-git-mgr status    # what it tracks
-git-mgr cd api    # jump to a repo (a new terminal picks up the shell integration)
+gitstead setup     # a few questions, a review, then it writes the config, clones and installs the background sync
+gitstead status    # what it tracks
+gitstead cd api    # jump to a repo (a new terminal picks up the shell integration)
 ```
 
 `setup` starts every answer at what it finds on your machine, so on a typical
@@ -135,10 +139,10 @@ machine you mostly press Enter:
    workspaces live, and the [launcher](#fleets-and-launchers) that opens them
    (`auto`, or tmux, iTerm or Muxy when installed). It writes `agents:`,
    `workspace_defaults:` and `launchers.default`; workspaces themselves are made
-   afterwards with `git-mgr ws create … --save`, once their repos are tracked.
+   afterwards with `gitstead ws create … --save`, once their repos are tracked.
 5. **Existing clones** — those discovery won't find where they are can be
    tracked in place.
-6. **Finishing touches** — add `git-mgr cd` and tab completion to your shell's
+6. **Finishing touches** — add `gitstead cd` and tab completion to your shell's
    startup file (on, unless it has them: one line in `~/.zshrc`,
    `~/.bashrc` -- `~/.bash_profile` on macOS -- or fish's `config.fish`);
    give each account's identity to repos you clone yourself under its folders
@@ -174,58 +178,58 @@ repeated. Scripted:
 | `--offline` | Skip `ssh -T` probes and provider API calls. |
 
 No config is needed for the basics either — if git and your auth already work,
-git-mgr does too, with `~/repos` as the base dir:
+gitstead does too, with `~/repos` as the base dir:
 
 ```bash
-git-mgr adopt ~/code/myrepo            # track a clone you already have
-git-mgr clone git@github.com:me/app    # clone + track by URL (your SSH/HTTPS auth)
-git-mgr sync                           # fetch all tracked repos + back up WIP
-git-mgr status                         # table of what you're managing
-git-mgr ws create app --repo ~/code/myrepo --agents 4 --open --cmd claude
+gitstead adopt ~/code/myrepo            # track a clone you already have
+gitstead clone git@github.com:me/app    # clone + track by URL (your SSH/HTTPS auth)
+gitstead sync                           # fetch all tracked repos + back up WIP
+gitstead status                         # table of what you're managing
+gitstead ws create app --repo ~/code/myrepo --agents 4 --open --cmd claude
 ```
 
-`git-mgr bootstrap` is for a machine that gets its config another way --
+`gitstead bootstrap` is for a machine that gets its config another way --
 your dotfiles, a home-manager module, `setup --save-answers` from another
 machine: it runs `setup --yes` only if there's no config yet, then `doctor`,
 `discover --apply`, `sync`, and installs the background sync (`--profile`
-scopes all of it to a tag). `git-mgr init` writes a starter config without
+scopes all of it to a tag). `gitstead init` writes a starter config without
 asking anything or touching anything else.
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `git-mgr setup` | Set up git-mgr, or change your setup: layout, accounts, what to track, features. `--yes`, `--answers`, `--save-answers`, `--dry-run`, `--offline`. |
-| `git-mgr init` | Write a config with sensible defaults, without asking. |
-| `git-mgr bootstrap` | Set up a fresh machine in one command: setup → doctor → discover --apply → sync → install agent. `--profile`, `--no-agent`, `--dry-run`. |
-| `git-mgr discover` | Discover repos from providers and show the plan; `--apply` makes the changes that move and delete nothing (clone new repos, update URLs, managed git config, tags). `--rule`, `--tag` to scope. |
-| `git-mgr sync` | Discover, apply config changes as far as `reconcile.auto` allows, fetch all repos, back up uncommitted changes and, with `remote_sync.enabled`, take them offsite (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`. |
-| `git-mgr plan` | Show what config would change on disk and in state, without changing anything. `--json`. See [Config changes](#config-changes-plan-and-apply). |
-| `git-mgr apply` | Make repos and workspaces match config, including the moves and removals sync leaves for you. Asks first; `--yes`. |
-| `git-mgr backup` | Back up only (no fetch). `--list` to see backups, `--restore <id>` for instructions. |
-| `git-mgr restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` to clone+apply into a scratch dir, or `--apply` onto the tree (dirty-guarded). |
-| `git-mgr top` | A live view of every workspace copy (agent state, terminal activity, branch, dirty, ahead/behind, last backup, PR) and every repo needing attention. See [Live view](#live-view-git-mgr-top). |
-| `git-mgr status` | Table of managed repos. `--live` inspects working trees now (dirty + ahead/behind, no network); `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
-| `git-mgr doctor` | Diagnose tooling, auth (tokens/SSH keys), config, and repo-on-disk health. Read-only; `plan`/`apply` fix what config can. |
-| `git-mgr clone <url>` | Clone and track one repo by hand, at its templated path or `--path`. `--tag`. A repo added by hand keeps the path and URL it was given. |
-| `git-mgr adopt <path>` | Track an existing clone where it is. `--scan` for batch, `--dry-run`, `--tag`. |
-| `git-mgr remove <pattern>` | Stop tracking repos. `--tag`/`--set`, `--yes`. `--delete` also removes the clone from disk after archiving its unique work (see [Deleting without losing work](#deleting-without-losing-work)); `--archive` moves the clone, whole, into the archive instead (see [Archiving instead of deleting](#archiving-instead-of-deleting)). |
-| `git-mgr run -- <cmd>` | Run a command in each matching repo (parallel). `--repos`/`--tag`/`--set`, `--fail-fast`. |
-| `git-mgr manifest export\|import\|save` | Portable `{url,tags,path}` manifest: export and import to rehydrate a new machine, `save` to put the repos tracked by hand here into the shared manifest. See [Several machines](#several-machines). |
-| `git-mgr remote-sync` | Back up and take WIP and unpushed commits offsite now, under `remote_sync`. `--repos`, `--tag`, `--set`, `--dry-run`; `--list` shows what every machine left offsite and how to restore it. |
-| `git-mgr config` | Print resolved config. `--validate`, `--edit`, `--path`, `--for-repo <key>`, `--redact`. |
-| `git-mgr report` / `log` | Summarize / list recent activity (clones, backups, syncs…) from the operation log. `--since`, `-n`. |
-| `git-mgr workspace` (`ws`, `wg`) | Manage workspaces: repos × agents, each agent in a copy of its own. See [Workspaces](#workspaces). |
-| `git-mgr fleet` | Open several workspaces' agents side by side with tmux, iTerm, Muxy or a plugin; `open`, `plan`, `ls`, `status`, `stop`. See [Fleets](#fleets-and-launchers). |
-| `git-mgr mirror` | Make or update full mirrors of repos' upstreams now; `sync` does it every `mirror.interval`. `--repos`/`--tag`/`--set`, `--force`. See [Mirrors](#mirrors-surviving-the-host). |
-| `git-mgr hooks post-clone\|post-create` | Run repos' `post_clone` or a workspace's `post_create` hooks again, output on the terminal. See [Hooks](#hooks). |
-| `git-mgr accounts ls\|gitconfig` | List accounts and their folders; make each account's identity your git's own under its folders with `includeIf` (`--write`, `--install`). See [Accounts](#accounts). |
-| `git-mgr archives ls\|show\|restore\|rm` | The catalog of what was saved before copies and repos were taken away -- bundles of unique work, and whole clones -- and how to restore each; `restore` moves an archived clone back or rebuilds a clone from a bundle, `rm` deletes archives for good. |
-| `git-mgr cd\|path\|open <query>` | Jump to, print, or open in your editor (`--web`: the repo's page) a repo, workspace or agent's folder from part of its name. See [Jump and open](#jump-and-open). |
-| `git-mgr shell-init bash\|zsh\|fish` | Print the shell integration: the function that makes `git-mgr cd` change directory, and tab completion. `setup` adds it to your shell. |
-| `git-mgr install-agent` | Install, list (`--list`) or remove (`--uninstall`) background syncs (launchd/systemd/cron); `--name` and `--repos`/`--tag`/`--set` for several. |
-| `git-mgr install-completions` | Print tab completion alone, for your login shell. See [Shell completions](#shell-completions). |
-| `git-mgr version` | Print version, commit, build date. |
+| `gitstead setup` | Set up gitstead, or change your setup: layout, accounts, what to track, features. `--yes`, `--answers`, `--save-answers`, `--dry-run`, `--offline`. |
+| `gitstead init` | Write a config with sensible defaults, without asking. |
+| `gitstead bootstrap` | Set up a fresh machine in one command: setup → doctor → discover --apply → sync → install agent. `--profile`, `--no-agent`, `--dry-run`. |
+| `gitstead discover` | Discover repos from providers and show the plan; `--apply` makes the changes that move and delete nothing (clone new repos, update URLs, managed git config, tags). `--rule`, `--tag` to scope. |
+| `gitstead sync` | Discover, apply config changes as far as `reconcile.auto` allows, fetch all repos, back up uncommitted changes and, with `remote_sync.enabled`, take them offsite (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`. |
+| `gitstead plan` | Show what config would change on disk and in state, without changing anything. `--json`. See [Config changes](#config-changes-plan-and-apply). |
+| `gitstead apply` | Make repos and workspaces match config, including the moves and removals sync leaves for you. Asks first; `--yes`. |
+| `gitstead backup` | Back up only (no fetch). `--list` to see backups, `--restore <id>` for instructions. |
+| `gitstead restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` to clone+apply into a scratch dir, or `--apply` onto the tree (dirty-guarded). |
+| `gitstead top` | A live view of every workspace copy (agent state, terminal activity, branch, dirty, ahead/behind, last backup, PR) and every repo needing attention. See [Live view](#live-view-gitstead-top). |
+| `gitstead status` | Table of managed repos. `--live` inspects working trees now (dirty + ahead/behind, no network); `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
+| `gitstead doctor` | Diagnose tooling, auth (tokens/SSH keys), config, and repo-on-disk health. Read-only; `plan`/`apply` fix what config can. |
+| `gitstead clone <url>` | Clone and track one repo by hand, at its templated path or `--path`. `--tag`. A repo added by hand keeps the path and URL it was given. |
+| `gitstead adopt <path>` | Track an existing clone where it is. `--scan` for batch, `--dry-run`, `--tag`. |
+| `gitstead remove <pattern>` | Stop tracking repos. `--tag`/`--set`, `--yes`. `--delete` also removes the clone from disk after archiving its unique work (see [Deleting without losing work](#deleting-without-losing-work)); `--archive` moves the clone, whole, into the archive instead (see [Archiving instead of deleting](#archiving-instead-of-deleting)). |
+| `gitstead run -- <cmd>` | Run a command in each matching repo (parallel). `--repos`/`--tag`/`--set`, `--fail-fast`. |
+| `gitstead manifest export\|import\|save` | Portable `{url,tags,path}` manifest: export and import to rehydrate a new machine, `save` to put the repos tracked by hand here into the shared manifest. See [Several machines](#several-machines). |
+| `gitstead remote-sync` | Back up and take WIP and unpushed commits offsite now, under `remote_sync`. `--repos`, `--tag`, `--set`, `--dry-run`; `--list` shows what every machine left offsite and how to restore it. |
+| `gitstead config` | Print resolved config. `--validate`, `--edit`, `--path`, `--for-repo <key>`, `--redact`. |
+| `gitstead report` / `log` | Summarize / list recent activity (clones, backups, syncs…) from the operation log. `--since`, `-n`. |
+| `gitstead workspace` (`ws`, `wg`) | Manage workspaces: repos × agents, each agent in a copy of its own. See [Workspaces](#workspaces). |
+| `gitstead fleet` | Open several workspaces' agents side by side with tmux, iTerm, Muxy or a plugin; `open`, `plan`, `ls`, `status`, `stop`. See [Fleets](#fleets-and-launchers). |
+| `gitstead mirror` | Make or update full mirrors of repos' upstreams now; `sync` does it every `mirror.interval`. `--repos`/`--tag`/`--set`, `--force`. See [Mirrors](#mirrors-surviving-the-host). |
+| `gitstead hooks post-clone\|post-create` | Run repos' `post_clone` or a workspace's `post_create` hooks again, output on the terminal. See [Hooks](#hooks). |
+| `gitstead accounts ls\|gitconfig` | List accounts and their folders; make each account's identity your git's own under its folders with `includeIf` (`--write`, `--install`). See [Accounts](#accounts). |
+| `gitstead archives ls\|show\|restore\|rm` | The catalog of what was saved before copies and repos were taken away -- bundles of unique work, and whole clones -- and how to restore each; `restore` moves an archived clone back or rebuilds a clone from a bundle, `rm` deletes archives for good. |
+| `gitstead cd\|path\|open <query>` | Jump to, print, or open in your editor (`--web`: the repo's page) a repo, workspace or agent's folder from part of its name. See [Jump and open](#jump-and-open). |
+| `gitstead shell-init bash\|zsh\|fish` | Print the shell integration: the function that makes `gitstead cd` change directory, and tab completion. `setup` adds it to your shell. |
+| `gitstead install-agent` | Install, list (`--list`) or remove (`--uninstall`) background syncs (launchd/systemd/cron); `--name` and `--repos`/`--tag`/`--set` for several. |
+| `gitstead install-completions` | Print tab completion alone, for your login shell. See [Shell completions](#shell-completions). |
+| `gitstead version` | Print version, commit, build date. |
 
 Global flags: `--config`, `--state`, `--verbose`/`-v`, `--quiet`/`-q`,
 `--concurrency`/`-j`, `--json`.
@@ -239,9 +243,9 @@ says what happened (see [Exit codes](#exit-codes)), so a script reads stdout
 only when it wants the detail:
 
 ```bash
-git-mgr sync --json | jq '.copies[] | select(.ok | not)'
-git-mgr ws status app --json | jq -r '.[] | select(.agent_state == "running") | .label'
-git-mgr doctor --json > /dev/null || echo "doctor found problems (exit $?)"
+gitstead sync --json | jq '.copies[] | select(.ok | not)'
+gitstead ws status app --json | jq -r '.[] | select(.agent_state == "running") | .label'
+gitstead doctor --json > /dev/null || echo "doctor found problems (exit $?)"
 ```
 
 Commands that apply changes -- `apply`, `clone`, `adopt`, `discover --apply`,
@@ -266,12 +270,12 @@ so does a command line that doesn't parse (exit 80), whose usage goes to
 stderr. `--help` under `--json` prints `{"help": "..."}`, the text it prints
 on stderr. A command with nothing to report prints `{}`.
 
-## Live view: git-mgr top
+## Live view: gitstead top
 
-`git-mgr top` is a full-screen view that looks again every `--every` (10s):
+`gitstead top` is a full-screen view that looks again every `--every` (10s):
 
 ```
-git-mgr top  14:03:22  ·  12 copies, 5 agents running  ·  140 repos, 3 need attention
+gitstead top  14:03:22  ·  12 copies, 5 agents running  ·  140 repos, 3 need attention
 
 COPY           AGENT    ACTIVITY         BRANCH              STATE  AHEAD/BEHIND  BACKUP  NOTES
 app/agent-1    running  printed 8s ago   agents/app/agent-1  dirty  3/0           2m ago
@@ -298,13 +302,13 @@ snapshot.
 ## Jump and open
 
 ```bash
-eval "$(git-mgr shell-init zsh)"     # setup adds this to ~/.zshrc (or bash; fish: git-mgr shell-init fish | source)
-git-mgr cd app                        # the repo app
-git-mgr cd acme/api                   # by owner/name, when two repos share a name
-git-mgr cd app 2                      # workspace app, agent-2's folder
-git-mgr open platform worker          # agent-1's worker copy in platform, in your editor
-git-mgr open app --web                # the repo's page on its host
-vim "$(git-mgr path app)/go.mod"
+eval "$(gitstead shell-init zsh)"     # setup adds this to ~/.zshrc (or bash; fish: gitstead shell-init fish | source)
+gitstead cd app                        # the repo app
+gitstead cd acme/api                   # by owner/name, when two repos share a name
+gitstead cd app 2                      # workspace app, agent-2's folder
+gitstead open platform worker          # agent-1's worker copy in platform, in your editor
+gitstead open app --web                # the repo's page on its host
+vim "$(gitstead path app)/go.mod"
 ```
 
 A query is part of a name. It is matched against every tracked repo (by key,
@@ -312,16 +316,16 @@ A query is part of a name. It is matched against every tracked repo (by key,
 name fits best, then a path suffix (`acme/api`), a prefix, a substring, and last
 the letters in order (`wkr` for `worker`). Several words must all fit. When a
 repo and a workspace fit equally, the repo wins (`--kind workspace` picks the
-workspace); when two things of one kind do, git-mgr asks which on a terminal,
+workspace); when two things of one kind do, gitstead asks which on a terminal,
 and otherwise lists them and exits 1. A program can't change its shell's
 directory, so `cd` comes from the function `shell-init` prints; without it,
-`git-mgr cd` prints the path. `open` runs `editor` from config, else `$VISUAL`,
+`gitstead cd` prints the path. `open` runs `editor` from config, else `$VISUAL`,
 else `$EDITOR`, with the path as its last argument (so `editor: code -n`
 works), in the target's directory.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `editor` | `$VISUAL`, then `$EDITOR` | The command `git-mgr open` runs, a shell command with the path added as its last argument. |
+| `editor` | `$VISUAL`, then `$EDITOR` | The command `gitstead open` runs, a shell command with the path added as its last argument. |
 
 ## Shell completions
 
@@ -333,31 +337,31 @@ system (`compinit`) first if your configuration hasn't. For completion alone:
 
 ```bash
 # zsh / bash — add to your rc file
-eval "$(git-mgr install-completions)"
+eval "$(gitstead install-completions)"
 
 # fish
-git-mgr install-completions | source
+gitstead install-completions | source
 ```
 
-The dynamic value predictors honor `GIT_MGR_CONFIG` / `GIT_MGR_STATE`, so
+The dynamic value predictors honor `GITSTEAD_CONFIG` / `GITSTEAD_STATE`, so
 completion reflects the same state your commands use. Note: to complete workspace
-subcommands, spell out `git-mgr workspace …` — the `ws` and `wg` aliases don't
+subcommands, spell out `gitstead workspace …` — the `ws` and `wg` aliases don't
 expand their subcommands during completion.
 
 ## Configuration
 
-Config lives at `~/.config/git-mgr/config.yaml`. See
+Config lives at `~/.config/gitstead/config.yaml`. See
 [`config.example.yaml`](config.example.yaml) for a fully annotated reference.
 
-git-mgr follows the XDG base directories: its config in
-`$XDG_CONFIG_HOME/git-mgr`, its state, operation log, backups, archives,
-mirrors and scheduled-sync log in `$XDG_DATA_HOME/git-mgr`, and workspaces'
-shared caches and the shared manifest's lock file in `$XDG_CACHE_HOME/git-mgr`,
+gitstead follows the XDG base directories: its config in
+`$XDG_CONFIG_HOME/gitstead`, its state, operation log, backups, archives,
+mirrors and scheduled-sync log in `$XDG_DATA_HOME/gitstead`, and workspaces'
+shared caches and the shared manifest's lock file in `$XDG_CACHE_HOME/gitstead`,
 each when the variable is set to
-an absolute path, else in `~/.config/git-mgr`, `~/.local/share/git-mgr` and
-`~/.cache/git-mgr` -- the defaults shown throughout this README.
+an absolute path, else in `~/.config/gitstead`, `~/.local/share/gitstead` and
+`~/.cache/gitstead` -- the defaults shown throughout this README.
 
-If that default file doesn't exist, git-mgr runs on defaults and `GIT_MGR_*`
+If that default file doesn't exist, gitstead runs on defaults and `GITSTEAD_*`
 environment variables. Only what's switched on runs: discovery needs providers
 and rules, workspaces exist once declared, background sync once the agent is
 installed, offsite backup refs once `remote_sync` is enabled. Backups of
@@ -373,8 +377,8 @@ accounts:
 ```
 
 `layout` names a common `path_template`; set one or the other. With `name`,
-two repos with the same name can't both be placed and are reported as blocked. A path you choose with `--config` or `GIT_MGR_CONFIG`
--- even `~/.config/git-mgr/config.yaml` itself -- must exist and parse; only
+two repos with the same name can't both be placed and are reported as blocked. A path you choose with `--config` or `GITSTEAD_CONFIG`
+-- even `~/.config/gitstead/config.yaml` itself -- must exist and parse; only
 with neither may the default file be missing, meaning the defaults: a missing, unreadable or malformed file is an error rather
 than a silent fall back to defaults, which would otherwise run with no discovery
 rules and mark every discovered repo stale. A key that isn't a setting -- a typo,
@@ -473,7 +477,7 @@ search.
 
 ### Authentication
 
-git-mgr separates two auth surfaces and **does not store credentials** itself:
+gitstead separates two auth surfaces and **does not store credentials** itself:
 
 - **Provider APIs** (discovery) use a PAT from the provider's one token source
   (e.g. `token_command: "gh auth token"`).
@@ -490,14 +494,14 @@ overrides:
     ssh_key: "~/.ssh/id_work"
 ```
 
-`git-mgr clone <url>` honors the scheme you pass (an `https://` URL clones over
+`gitstead clone <url>` honors the scheme you pass (an `https://` URL clones over
 HTTPS, `git@…`/`ssh://` over SSH). A URL embedding a credential
 (`https://user:token@…`) is refused everywhere — clone, `repos:`, manifests,
 workspaces, adopt — so none lands in state or logs; use a credential helper.
 One put into a clone's remote by hand afterwards is kept out too: remote URLs
-git-mgr writes down (archive and backup descriptions) are stored without it,
+gitstead writes down (archive and backup descriptions) are stored without it,
 plans show it redacted, and `--json` output redacts any URL credential.
-`git-mgr doctor` reports whether each provider's token resolves and whether
+`gitstead doctor` reports whether each provider's token resolves and whether
 configured SSH keys exist.
 
 ### Accounts
@@ -533,9 +537,9 @@ override's `account:`, its `repos:` entry, its discovery rule, that rule's
 provider; otherwise the account whose `hosts` and `owners` match the repo (an
 account listing the owner beats one covering the whole host). Its SSH key
 follows the same order, where an `ssh_key:` set directly at any of those places
-counts too. `git-mgr config --for-repo <key>` shows what a repo resolves to.
+counts too. `gitstead config --for-repo <key>` shows what a repo resolves to.
 
-git-mgr uses the key for its own clones and fetches, and writes the account
+gitstead uses the key for its own clones and fetches, and writes the account
 into the repo's own git config, so your own git commands there behave the same:
 
 | Key | Written when |
@@ -553,35 +557,35 @@ into the repo's own git config, so your own git commands there behave the same:
 | `accounts[].signing.program` | | A signer in place of `ssh-keygen`, `gpg` or `gpgsm`, such as 1Password's `op-ssh-sign`. |
 | `accounts[].signing.allowed_signers` | | `gpg.ssh.allowedSignersFile`, for verifying SSH signatures. |
 
-With `signing.mode: required`, `git-mgr doctor` makes a test signature the way
+With `signing.mode: required`, `gitstead doctor` makes a test signature the way
 an agent would — no terminal, 20-second limit — and fails if it can't: SSH
 signing through an agent or a passphrase-less key works unattended; GPG needs
 a gpg-agent holding the passphrase.
 
 Workspace clones get the same keys as the repo they come from, so agents
-commit as the right account; worktrees share their repo's config. If you set one of these keys in a repo yourself, git-mgr leaves it and
+commit as the right account; worktrees share their repo's config. If you set one of these keys in a repo yourself, gitstead leaves it and
 reports the difference (see [Config changes](#config-changes-plan-and-apply)).
 Changing an account updates every repo it covers on the next `sync` or `apply`.
 
-git-mgr writes those keys into the repos it tracks. For repos you clone
-yourself into an account's folders, `git-mgr accounts gitconfig` makes the
+gitstead writes those keys into the repos it tracks. For repos you clone
+yourself into an account's folders, `gitstead accounts gitconfig` makes the
 same settings your git's own, with
 [`includeIf`](https://git-scm.com/docs/git-config#_conditional_includes):
 
 ```bash
-git-mgr accounts ls                    # accounts, what they cover, their folders
-git-mgr accounts gitconfig             # print what it would write
-git-mgr accounts gitconfig --write     # write it to ~/.config/git-mgr/
-git-mgr accounts gitconfig --install   # and include it from your global git config
+gitstead accounts ls                    # accounts, what they cover, their folders
+gitstead accounts gitconfig             # print what it would write
+gitstead accounts gitconfig --write     # write it to ~/.config/gitstead/
+gitstead accounts gitconfig --install   # and include it from your global git config
 ```
 
 An account's folders are where config puts its repos: for each of its hosts
 and owners, the leading part of their path that doesn't depend on the repo's
 name (`~/repos/github.com/acme` under the default layout, `~/work/acme` with
 a `base_dir` of its own). Each account with something to set gets
-`~/.config/git-mgr/accounts/<name>-<digest>.gitconfig` (the name made a file
+`~/.config/gitstead/accounts/<name>-<digest>.gitconfig` (the name made a file
 name; the digest of the name keeps apart names that make the same one), and
-`~/.config/git-mgr/accounts.gitconfig` holds an `[includeIf "gitdir:<folder>/"]`
+`~/.config/gitstead/accounts.gitconfig` holds an `[includeIf "gitdir:<folder>/"]`
 for each folder, deeper folders last so an owner's account wins over its
 host's. git writes both files, quoting what it must, and a folder's wildcard
 characters (`*`, `?`, `[`) are escaped so it matches only itself. A folder two accounts share is left out with a warning, and under
@@ -592,7 +596,7 @@ changing accounts.
 
 ### Clone options
 
-`clone` shapes how much of a repo git-mgr fetches and checks out: its history
+`clone` shapes how much of a repo gitstead fetches and checks out: its history
 (`filter`, `depth`), which directories (`sparse`), its submodules and its Git
 LFS content. Set it at the top, per account (`accounts[].clone`) or per repo
 (`overrides[].clone`); each level overrides the one before, field by field.
@@ -625,7 +629,7 @@ so it reaches existing clones too: `plan` shows it and the next sync or
 
 A sparse checkout is made empty and filled only once its directories are set,
 so nothing outside them is ever checked out -- or, in a partial clone,
-downloaded. git's own `submodule update` ignores the sparse cone, so git-mgr
+downloaded. git's own `submodule update` ignores the sparse cone, so gitstead
 names it the submodules inside. A clone or copy whose submodules can't all be
 fetched (one you can't reach, say) is kept and recorded, and the failure
 reported once, rather than cloned again on every sync; `git submodule update
@@ -638,7 +642,7 @@ Workspace clones can't be made from a partial clone, so `plan` blocks them.
 
 ### Hooks
 
-Hooks are commands git-mgr runs in a checkout it has just made: `post_clone`
+Hooks are commands gitstead runs in a checkout it has just made: `post_clone`
 in a repo's new clone, `post_create` in a new workspace copy -- install
 dependencies, `direnv allow`, copy a `.env` the repo doesn't track.
 
@@ -652,7 +656,7 @@ overrides:
       post_create: ["npm ci"]          # in every copy of web, in any workspace
 workspace_defaults:
   hooks:
-    post_create: ['cp "$GIT_MGR_SOURCE/.env" .env', "direnv allow"]
+    post_create: ['cp "$GITSTEAD_SOURCE/.env" .env', "direnv allow"]
 ```
 
 | Key | Default | Meaning |
@@ -671,17 +675,17 @@ is told where it is:
 
 | Variable | Value |
 | --- | --- |
-| `GIT_MGR_EVENT` | `post_clone` or `post_create` |
-| `GIT_MGR_PATH` | The checkout (also the working directory) |
-| `GIT_MGR_REPO` | The tracked repo's key |
-| `GIT_MGR_SOURCE` | The repo's clone -- where a copy's untracked files can come from |
-| `GIT_MGR_WORKSPACE`, `GIT_MGR_AGENT`, `GIT_MGR_BRANCH` | The copy's workspace, agent and branch (`post_create`) |
+| `GITSTEAD_EVENT` | `post_clone` or `post_create` |
+| `GITSTEAD_PATH` | The checkout (also the working directory) |
+| `GITSTEAD_REPO` | The tracked repo's key |
+| `GITSTEAD_SOURCE` | The repo's clone -- where a copy's untracked files can come from |
+| `GITSTEAD_WORKSPACE`, `GITSTEAD_AGENT`, `GITSTEAD_BRANCH` | The copy's workspace, agent and branch (`post_create`) |
 
 The first command that fails stops the rest. The checkout is kept and
 recorded either way -- a failed `npm ci` doesn't cost the clone -- and the
 failure is reported with the end of its output; the whole run is in
 `<state dir>/hooks/<checkout>.<event>.log` (the last run of each). Fix it and
-run the hooks again with `git-mgr hooks post-clone <repos>` or `git-mgr hooks
+run the hooks again with `gitstead hooks post-clone <repos>` or `gitstead hooks
 post-create <workspace> [agents]`. Moving a copy or a repo runs nothing.
 Hooks come only from your config, never from a repository, so cloning
 someone else's repo never runs their code.
@@ -749,22 +753,22 @@ sets:
 ```
 
 ```bash
-git-mgr status --tag work
-git-mgr sync   --set core
-git-mgr run    --set active-backend -- go test ./...
+gitstead status --tag work
+gitstead sync   --set core
+gitstead run    --set active-backend -- go test ./...
 ```
 
 ### Several machines
 
 One config, kept in your dotfiles, gives every machine the same discovery
 rules, `repos:`, overrides and declared workspaces. What it can't hold is
-what you add by hand -- `git-mgr clone`, `adopt`, `manifest import` -- which
+what you add by hand -- `gitstead clone`, `adopt`, `manifest import` -- which
 lives in one machine's state. Point `manifest:` at a file every machine can
 read and write -- beside the config in a dotfiles repo, or in a synced folder
--- and git-mgr keeps it as the list of repos tracked by hand:
+-- and gitstead keeps it as the list of repos tracked by hand:
 
 ```yaml
-manifest: ~/dotfiles/git-mgr/repos.yaml
+manifest: ~/dotfiles/gitstead/repos.yaml
 ```
 
 - `clone`, `adopt` (and `adopt --scan`) and `manifest import` add an entry:
@@ -775,12 +779,12 @@ manifest: ~/dotfiles/git-mgr/repos.yaml
   to.
 - Every machine reads the manifest as more `repos:` entries, so its next
   `sync` clones what another machine added.
-- `git-mgr remove` takes the entry out, so no other machine clones it again;
+- `gitstead remove` takes the entry out, so no other machine clones it again;
   machines that already have it keep tracking it, as with a `repos:` entry you
   delete, until you remove it there too.
-- `git-mgr manifest save` adds the repos this machine tracked by hand before
+- `gitstead manifest save` adds the repos this machine tracked by hand before
   the manifest existed; without `manifest:` it prints them as `repos:`
-  entries to paste into config. `git-mgr doctor` names repos tracked by hand
+  entries to paste into config. `gitstead doctor` names repos tracked by hand
   here that neither lists.
 
 The config file itself is never written, so this works when it is
@@ -795,34 +799,34 @@ next `manifest save` puts back an entry a conflict lost.
 
 ## Config changes: plan and apply
 
-git-mgr keeps a state file (`~/.local/share/git-mgr/state.yaml`) recording what
+gitstead keeps a state file (`~/.local/share/gitstead/state.yaml`) recording what
 it last set for every repo and workspace: path, origin URL, tags, the
 discovering rule, the provider's repo ID, the copy ID, the repo-local git config
 it wrote, and each workspace's agents and their copies. It also keeps what the last run found --
 status, branch, the last fetch, backup and offsite push and their errors --
-which is what `git-mgr status` shows. On every run it compares three things:
+which is what `gitstead status` shows. On every run it compares three things:
 
 - **desired** — what config and this run's discovery ask for;
-- **recorded** — what git-mgr set, from state;
+- **recorded** — what gitstead set, from state;
 - **on disk** — the directory, its origin URL and its git config.
 
 Desired against recorded gives the changes. On disk against recorded gives
-*drift*: something git-mgr set was changed by hand. Drift is reported and left
+*drift*: something gitstead set was changed by hand. Drift is reported and left
 alone unless `reconcile.drift: overwrite`.
 
 ```console
-$ git-mgr plan
+$ gitstead plan
 Changes:
   ~ url              github.com/acme/api: git@github.com:acme/api.git -> https://github.com/acme/api.git
   ~ config           github.com/acme/api core.sshcommand: (unset) -> ssh -i '~/.ssh/id_work' -o IdentitiesOnly=yes
   ~ rename           github.com/acme/api-v2: github.com/acme/api -> github.com/acme/api-v2 (same repository (provider ID 4242))
-  > move             github.com/acme/web: ~/repos/github.com/acme/web -> ~/repos/acme/web   [needs git-mgr apply]
-  - remove-copy      app/agent-3: ~/workspaces/app/agent-3 (no longer wanted; unique work archived first)   [needs git-mgr apply]
-  + create-copy      app/agent-4: ~/workspaces/app/agent-4   [git-mgr apply or ws ensure]
+  > move             github.com/acme/web: ~/repos/github.com/acme/web -> ~/repos/acme/web   [needs gitstead apply]
+  - remove-copy      app/agent-3: ~/workspaces/app/agent-3 (no longer wanted; unique work archived first)   [needs gitstead apply]
+  + create-copy      app/agent-4: ~/workspaces/app/agent-4   [gitstead apply or ws ensure]
 Changed by hand, left alone (reconcile.drift: overwrite restores them):
-  ! github.com/acme/tools origin URL: git-mgr set git@github.com:acme/tools.git, now git@work:acme/tools.git; config wants git@github.com:acme/tools.git
+  ! github.com/acme/tools origin URL: gitstead set git@github.com:acme/tools.git, now git@work:acme/tools.git; config wants git@github.com:acme/tools.git
 
-sync applies 3 of 6 on its own (reconcile.auto: safe); `git-mgr apply` makes them all.
+sync applies 3 of 6 on its own (reconcile.auto: safe); `gitstead apply` makes them all.
 ```
 
 | Config change | What happens |
@@ -840,7 +844,7 @@ sync applies 3 of 6 on its own (reconcile.auto: safe); `git-mgr apply` makes the
 | A workspace's `isolation` | Not changed in place (`x`): remove the workspace and apply again to make it the new way. |
 
 Changes marked `>` and `-` move or delete directories that a shell, editor or
-agent may be using, so they wait for `git-mgr apply`, which lists them and asks
+agent may be using, so they wait for `gitstead apply`, which lists them and asks
 first. Everything else is applied by `sync` and `discover --apply` as it comes
 up. `sync` and `discover` handle repos only; workspaces change through `apply`
 and `ws ensure`.
@@ -867,7 +871,7 @@ recorded, a copy that was made is recorded.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `reconcile.auto` | `safe` | What `sync` and `discover --apply` change on their own: `safe` (everything except moves and removals), `all`, or `none` (only report). |
-| `reconcile.drift` | `report` | `report` leaves values changed by hand; `overwrite` puts git-mgr's back. |
+| `reconcile.drift` | `report` | `report` leaves values changed by hand; `overwrite` puts gitstead's back. |
 
 ## Transparent backups
 
@@ -880,12 +884,12 @@ stash, and never takes `index.lock`: a backup taken while an agent's
 `backup.strategy` picks where snapshots are kept:
 
 - **Snapshot refs** (`stash-ref`) — a commit in `git stash`'s own layout at
-  `refs/git-mgr/backups/<copy-id>/<backup-id>`, invisible to `git branch`,
+  `refs/gitstead/backups/<copy-id>/<backup-id>`, invisible to `git branch`,
   `git stash list`, `git log` and IDEs. Restores with
   `git stash apply --index <ref>`.
 - **Patch backups** (`patch`) — the same snapshot as `staged.patch`,
   `unstaged.patch` and `untracked.tar.gz` under
-  `~/.local/share/git-mgr/patches/<copy-id>/<backup-id>/`. They outlive the repo:
+  `~/.local/share/gitstead/patches/<copy-id>/<backup-id>/`. They outlive the repo:
   a fresh clone at the same path finds the old copy's patch backups.
 - **`both`** (default).
 
@@ -928,16 +932,16 @@ Guarantees:
 | `backup.keep_all` | `24h` | Keep every backup younger than this. |
 | `backup.keep_daily` | `336h` | Then the newest backup of each day younger than this. |
 | `backup.max_per_copy` | `100` | And at most this many per working copy. |
-| `backup.patch_dir` | `~/.local/share/git-mgr/patches` | Where patch backups go. |
-| `backup.archive_dir` | `~/.local/share/git-mgr/archive` | Where what is saved before deleting goes (see [Deleting without losing work](#deleting-without-losing-work)). |
+| `backup.patch_dir` | `~/.local/share/gitstead/patches` | Where patch backups go. |
+| `backup.archive_dir` | `~/.local/share/gitstead/archive` | Where what is saved before deleting goes (see [Deleting without losing work](#deleting-without-losing-work)). |
 
 Each can be set per repo in `overrides[].backup`, except `archive_dir`.
 
 ```bash
-git-mgr backup --list --repos "*/my-repo"
-git-mgr restore github.com/me/my-repo                    # prints the restore commands
-git-mgr restore github.com/me/my-repo --into /tmp/look   # clone + restore into a scratch dir
-git-mgr restore github.com/me/my-repo --apply            # onto the clean working tree
+gitstead backup --list --repos "*/my-repo"
+gitstead restore github.com/me/my-repo                    # prints the restore commands
+gitstead restore github.com/me/my-repo --into /tmp/look   # clone + restore into a scratch dir
+gitstead restore github.com/me/my-repo --apply            # onto the clean working tree
 ```
 
 ### Offsite: surviving a lost disk
@@ -964,20 +968,20 @@ its commits no remote has -- a commit on its detached HEAD is saved as
 under its own copy's namespace. `remote-sync --list` lists them under the
 repo, by submodule; restore from inside a clone of the submodule's remote.
 
-`<namespace>` is `refs/git-mgr/<machine>/<copy>`: every machine and every copy
+`<namespace>` is `refs/gitstead/<machine>/<copy>`: every machine and every copy
 -- each agent's clone or worktree -- owns its refs, so copies on one branch
-never overwrite each other, and git-mgr force-pushes nowhere else. Refs
+never overwrite each other, and gitstead force-pushes nowhere else. Refs
 outside `refs/heads` and `refs/tags` don't show in the host's branch lists and
 don't trigger CI, but anyone who can read the remote can fetch them; point
 `remote` at a private backup remote to keep WIP off a shared one.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `remote_sync.enabled` | `false` | Sync takes copies offsite on its own. `git-mgr remote-sync` does it on demand either way. |
+| `remote_sync.enabled` | `false` | Sync takes copies offsite on its own. `gitstead remote-sync` does it on demand either way. |
 | `remote_sync.remote` | `origin` | A remote name, or a URL template (`git@backup:{{.Host}}/{{.FullName}}.git`) for a separate backup remote. A submodule uses its own remote of that name, or the template filled in from its origin. |
-| `remote_sync.wip` | `ref` | `ref` (hidden refs), `branch` (a visible branch per copy, `git-mgr/wip/<machine>/<copy>`: tracked changes only, on top of HEAD) or `off`. |
+| `remote_sync.wip` | `ref` | `ref` (hidden refs), `branch` (a visible branch per copy, `gitstead/wip/<machine>/<copy>`: tracked changes only, on top of HEAD) or `off`. |
 | `remote_sync.unpushed` | `push` | `push` (hidden refs), `bundle` (a local bundle in `backup.archive_dir/unpushed/`, which protects against a deleted branch but not a lost disk) or `off`. |
-| `remote_sync.namespace` | `refs/git-mgr/{{.Machine}}/{{.Copy}}` | Must stay under `refs/`, outside branches and tags, and include `{{.Copy}}`. |
+| `remote_sync.namespace` | `refs/gitstead/{{.Machine}}/{{.Copy}}` | Must stay under `refs/`, outside branches and tags, and include `{{.Copy}}`. |
 | `remote_sync.keep` | `720h` | How long a pushed WIP ref stays. |
 
 Any of these can be set per account (`accounts[].remote_sync`) and per repo
@@ -986,26 +990,26 @@ then its workspace's `remote_sync`. The machine name is chosen once (host name p
 in the state file. The push runs after the fetch, on `sync.timeout_per_repo`.
 
 ```bash
-git-mgr remote-sync --dry-run          # what would go offsite, from the latest backups
-git-mgr remote-sync --repos "*/my-repo"
-git-mgr remote-sync --list             # what every machine left offsite, with restore commands
-git-mgr ws rm app --delete --offsite   # take each copy offsite before deleting it
+gitstead remote-sync --dry-run          # what would go offsite, from the latest backups
+gitstead remote-sync --repos "*/my-repo"
+gitstead remote-sync --list             # what every machine left offsite, with restore commands
+gitstead ws rm app --delete --offsite   # take each copy offsite before deleting it
 ```
 
 Restoring on another machine needs only the remote:
 
 ```bash
 git clone <remote> restored && cd restored
-git fetch origin refs/git-mgr/<machine>/<copy>/heads/main:refs/heads/recovered
+git fetch origin refs/gitstead/<machine>/<copy>/heads/main:refs/heads/recovered
 git checkout recovered
-git fetch origin refs/git-mgr/<machine>/<copy>/wip/<id>
+git fetch origin refs/gitstead/<machine>/<copy>/wip/<id>
 git stash apply --index FETCH_HEAD     # the uncommitted work, staged and unstaged as it was
 ```
 
 ### Mirrors: surviving the host
 
 Offsite refs protect your work; a mirror protects the repo itself. With
-`mirror` on, git-mgr keeps a full mirror of each repo's upstream -- every
+`mirror` on, gitstead keeps a full mirror of each repo's upstream -- every
 branch, tag and other ref the host has, pull request refs included -- as a
 bare repository in `mirror.dir`, so a repo or account the host loses, or a
 history rewritten there, is still on your disk, NAS or backup volume.
@@ -1023,23 +1027,23 @@ overrides:
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `mirror.enabled` | `false` | Mirror every tracked repo; `accounts[].mirror` and `overrides[].mirror` turn it on or off for some. |
-| `mirror.dir` | `~/.local/share/git-mgr/mirrors` | Holds `<host>/<owner>/<name>.git`. |
+| `mirror.dir` | `~/.local/share/gitstead/mirrors` | Holds `<host>/<owner>/<name>.git`. |
 | `mirror.interval` | `24h` | How long `sync` leaves a mirror before updating it again; a failing one is retried every sync. |
 | `mirror.lfs` | `false` | Also mirror Git LFS content (`git lfs fetch --all`); per account or repo too. |
-| `mirror.keep_rewritten` | `2160h` (90 days) | How long a mirror keeps the old tip of a ref its upstream rewrote (a force-pushed branch), under `refs/git-mgr-rewritten/<time>/`; `0s` keeps none. |
+| `mirror.keep_rewritten` | `2160h` (90 days) | How long a mirror keeps the old tip of a ref its upstream rewrote (a force-pushed branch), under `refs/gitstead-rewritten/<time>/`; `0s` keeps none. |
 
 A mirror is made with `git clone --mirror`, staged like any clone, from the
 repo's upstream URL with its SSH key -- not from your clone, which may be
 partial, shallow or behind. Updates fetch every ref and never prune, whatever
 `fetch.prune` says: a branch deleted upstream stays in the mirror. A branch
 moved upstream follows the remote; when the move rewrote its history -- a
-force-push -- the old tip is kept as `refs/git-mgr-rewritten/<time>/heads/<branch>`
+force-push -- the old tip is kept as `refs/gitstead-rewritten/<time>/heads/<branch>`
 for `mirror.keep_rewritten`, so the rewritten commits stay too. `sync` updates the mirrors that are due after its
-fetches (`--force` all of them, `--no-fetch` none); `git-mgr mirror` does it
+fetches (`--force` all of them, `--no-fetch` none); `gitstead mirror` does it
 now (`--repos`, `--tag`, `--set`, `--force`). A stale repo's mirror is left as
 it was: its upstream is gone, which is what the mirror is for. A renamed repo's
-mirror moves with it; git-mgr never deletes a mirror. Failing mirrors show in
-`git-mgr status`, `git-mgr top` and `doctor`.
+mirror moves with it; gitstead never deletes a mirror. Failing mirrors show in
+`gitstead status`, `gitstead top` and `doctor`.
 
 To use one: `git clone /Volumes/backup/git-mirrors/github.com/acme/app.git`
 for a working copy, or `git push --mirror <new remote>` from it to re-host.
@@ -1052,10 +1056,10 @@ stale-cleanup policy — first inspects it for work that exists nowhere else:
 changed or untracked files, stashes, commits no remote has (on a branch, a
 detached HEAD, a tag or any other ref of its own) and an unfinished rebase or
 merge. If there is any, it is written to one git bundle in `backup.archive_dir`
-(default `~/.local/share/git-mgr/archive/`) and verified before anything is
+(default `~/.local/share/gitstead/archive/`) and verified before anything is
 deleted. Each checked-out submodule is inspected the same way, and gets its own
 bundle; a clone's Git LFS objects are kept beside its bundle (hardlinked).
-Every archive is recorded in the catalog, `git-mgr archives ls`.
+Every archive is recorded in the catalog, `gitstead archives ls`.
 
 What a bundle holds depends on what else keeps the history it shares with its
 remotes:
@@ -1076,7 +1080,7 @@ Nothing is deleted while git is busy in the repo or one of its submodules --
 a lock such as `index.lock` or a ref's `.lock` exists, `gc` is running, or a
 rebase, merge, cherry-pick or revert is under way -- since a command running
 there could be caught half-done. A lock a crashed git command left behind
-counts too: delete it once no git command is running there. If git-mgr can't
+counts too: delete it once no git command is running there. If gitstead can't
 inspect the repo or write and verify the bundle, nothing is deleted and the
 repo stays tracked. An archive is synced to disk -- bundle, description, LFS
 objects, a whole clone copied across filesystems -- before its source is
@@ -1089,7 +1093,7 @@ a repo waits for it (see `lock_timeout`) and then keeps the repo. Stale
 cleanup lists each repo it kept and why: `discover --apply` prints them, and
 `sync` reports each as a failure (exit code 3) until a later run deletes it.
 
-`git-mgr archives restore <id> --to <dir>` rebuilds a clone from a bundle:
+`gitstead archives restore <id> --to <dir>` rebuilds a clone from a bundle:
 its branches, tags and remotes, HEAD, the stash list, the index, working tree
 and untracked files, its LFS objects, and its submodules' archives in their
 places. The bundle stays in the catalog. Each bundle has a `.json` file beside
@@ -1098,13 +1102,13 @@ restore it by hand:
 
 ```bash
 git init restored && cd restored     # a bundle that leans on a repo: git clone <that repo> restored
-git fetch ~/.local/share/git-mgr/archive/<name>-<time>.bundle '+refs/*:refs/restored/*'
-git for-each-ref refs/restored   # heads/*, tags/*, git-mgr/archive/<id>/{head,worktree,stash-N}
+git fetch ~/.local/share/gitstead/archive/<name>-<time>.bundle '+refs/*:refs/restored/*'
+git for-each-ref refs/restored   # heads/*, tags/*, gitstead/archive/<id>/{head,worktree,stash-N}
 ```
 
 The `worktree` ref is a stash-shaped commit of the index, working tree and
 untracked files; `git stash apply --index <ref>` brings them back. Archives are
-never pruned automatically; `git-mgr archives rm <id>` deletes one for good.
+never pruned automatically; `gitstead archives rm <id>` deletes one for good.
 
 ### Archiving instead of deleting
 
@@ -1125,10 +1129,10 @@ changed, or deleting what a copy left behind -- and that failure is logged as
 a warning with the archive's path. `adopt --scan` skips the archive directory.
 
 ```bash
-git-mgr archives ls                    # ID, where it was, what it held
-git-mgr archives restore <id>          # move it back and track it again (a bundle: rebuild a clone from it)
-git-mgr archives restore <id> --to ~/scratch/app   # the repo is tracked again meanwhile
-git-mgr archives rm <id>               # delete it for good
+gitstead archives ls                    # ID, where it was, what it held
+gitstead archives restore <id>          # move it back and track it again (a bundle: rebuild a clone from it)
+gitstead archives restore <id> --to ~/scratch/app   # the repo is tracked again meanwhile
+gitstead archives rm <id>               # delete it for good
 ```
 
 A restored clone is tracked by hand, so discovery never judges it stale
@@ -1164,9 +1168,9 @@ workspaces:
     path: ~/notes
 ```
 
-`git-mgr apply` (or `git-mgr ws ensure`) makes them. A workspace's repos are
+`gitstead apply` (or `gitstead ws ensure`) makes them. A workspace's repos are
 tracked repo keys, globs over them, a named `set:`, local paths or URLs; a
-local repo or URL git-mgr doesn't track yet is adopted where it is, or cloned
+local repo or URL gitstead doesn't track yet is adopted where it is, or cloned
 where config puts repos, first. Every copy is made from the repo's tracked
 clone, its *source*, so nothing is downloaded twice:
 
@@ -1174,11 +1178,11 @@ clone, its *source*, so nothing is downloaded twice:
 | --- | --- | --- | --- |
 | `worktree` (default) | a linked worktree of the source | the checkout only | Shares the source's objects, branches and fetches. Works with partial and shallow sources. |
 | `clone` | a clone with objects of its own | hardlinked from the source (copied across filesystems) | Independent history; refreshed from the source without the network. |
-| `reference-clone` | a clone borrowing the source's objects | the checkout and its own new objects | git-mgr sets `gc.pruneExpire=never` in the source so `git gc` there can't prune objects a copy uses; `doctor` checks it. |
+| `reference-clone` | a clone borrowing the source's objects | the checkout and its own new objects | gitstead sets `gc.pruneExpire=never` in the source so `git gc` there can't prune objects a copy uses; `doctor` checks it. |
 | `shared` | none: every agent works in one folder | — | The workspace's `path`, or its one repo's clone. |
 
-A clone's `origin` is the repo's upstream, and a `git-mgr` remote points at the
-source (its branches show as `git-mgr/<branch>`). `git-mgr sync` fetches each
+A clone's `origin` is the repo's upstream, and a `gitstead` remote points at the
+source (its branches show as `gitstead/<branch>`). `gitstead sync` fetches each
 repo once and then brings its clones' view of origin up to date from the
 source, without the network; `ws fetch` does the same for one workspace. A
 source made with a partial clone filter (`clone.filter`) can only have
@@ -1192,16 +1196,16 @@ agent left off. Existing copies keep their branch when the template changes.
 Create one from the command line without editing config:
 
 ```bash
-git-mgr ws create app --repo github.com/me/app --agents 4
-git-mgr ws create review --set backend                 # every repo in a set, one agent
-git-mgr ws create spike --repo ~/code/spike --agents 2 --isolation clone
-git-mgr ws create app --repo github.com/me/app --agents 4 --save   # write it to config
-git-mgr ws open app --agent claude                     # tmux session, a pane per agent
+gitstead ws create app --repo github.com/me/app --agents 4
+gitstead ws create review --set backend                 # every repo in a set, one agent
+gitstead ws create spike --repo ~/code/spike --agents 2 --isolation clone
+gitstead ws create app --repo github.com/me/app --agents 4 --save   # write it to config
+gitstead ws open app --agent claude                     # tmux session, a pane per agent
 ```
 
 ### Running agents
 
-`git-mgr ws run <workspace> <agent>` runs an agent in its replica, in the
+`gitstead ws run <workspace> <agent>` runs an agent in its replica, in the
 current terminal; every pane `ws open` makes runs it. It checks the agent's
 copies, then types the agent profile's command into an interactive shell there
 (`$SHELL -i -c`), so shell functions such as a wrapper around `claude` work, with
@@ -1215,7 +1219,7 @@ While it runs, the agent holds a *lease*: a lock on
 `<state dir>/runs/<workspace>/<agent>.lease` that the system releases when the
 run ends, however it ends. A second `ws run` of the same agent is refused, and
 no command removes a copy whose agent holds its lease (`ws rm --delete`,
-`ws prune`, `remove-copy` on apply). `git-mgr ws stop <workspace> [agent]`
+`ws prune`, `remove-copy` on apply). `gitstead ws stop <workspace> [agent]`
 ends runs the way closing their terminal would -- SIGHUP to the agent and its
 shell -- waiting up to `--timeout` (30s); `--kill` then kills what is left.
 
@@ -1233,9 +1237,9 @@ leaves, `ws exec`, `post_create` hooks -- run with an environment of its own:
 
 | Variable | Value |
 | --- | --- |
-| `GIT_MGR_WORKSPACE`, `GIT_MGR_AGENT`, `GIT_MGR_AGENT_N`, `GIT_MGR_REPLICA` | The workspace, the agent, its number (from 1) and its folder |
-| `GIT_MGR_PORT`, `GIT_MGR_PORTS` | The first of the agent's own block of ports, and how many |
-| `GIT_MGR_CACHE` | A directory the workspace's agents share for build caches |
+| `GITSTEAD_WORKSPACE`, `GITSTEAD_AGENT`, `GITSTEAD_AGENT_N`, `GITSTEAD_REPLICA` | The workspace, the agent, its number (from 1) and its folder |
+| `GITSTEAD_PORT`, `GITSTEAD_PORTS` | The first of the agent's own block of ports, and how many |
+| `GITSTEAD_CACHE` | A directory the workspace's agents share for build caches |
 
 Then comes the workspace's `env`, whose values are templates of the same:
 `{{.Workspace}}`, `{{.Agent}}`, `{{.N}}`, `{{.Replica}}`, `{{.Port}}`,
@@ -1261,8 +1265,8 @@ workspaces:
 | --- | --- | --- |
 | `workspace_defaults.ports.base` | `41000` | The lowest port handed out; 0 hands out none. |
 | `workspace_defaults.ports.count` | `10` | Ports per agent. `workspaces[].ports` overrides either. |
-| `workspace_defaults.env` | `{}` | Env templates for every agent; a workspace's `env` adds to them, name by name. `GIT_MGR_*` names are git-mgr's. |
-| `workspace_defaults.cache_root` | `$XDG_CACHE_HOME/git-mgr/workspaces` | Holds `<workspace>/`, the cache its agents share. |
+| `workspace_defaults.env` | `{}` | Env templates for every agent; a workspace's `env` adds to them, name by name. `GITSTEAD_*` names are gitstead's. |
+| `workspace_defaults.cache_root` | `$XDG_CACHE_HOME/gitstead/workspaces` | Holds `<workspace>/`, the cache its agents share. |
 
 An agent gets its block the first time it needs one, the lowest block from
 `base` that no other agent on the machine holds and nothing is listening on,
@@ -1272,35 +1276,35 @@ between runs. The shared cache directory goes when the workspace does
 tools that share a cache safely between concurrent builds at it -- ccache,
 sccache, Turborepo, Nx -- rather than at a build output directory.
 
-`git-mgr ws env` prints an agent's environment as shell exports, for a shell
-or editor of your own in its folder: `eval "$(git-mgr ws env)"` in an agent's
+`gitstead ws env` prints an agent's environment as shell exports, for a shell
+or editor of your own in its folder: `eval "$(gitstead ws env)"` in an agent's
 folder works out which agent it is (`ws env <workspace> <agent>` names one;
 `--json` for an object). With direnv, `.envrc` in a replica can hold that
 line.
 
 ### When an agent is waiting for you
 
-git-mgr notices an agent waiting for you two ways, records it for `ws status`
-and `git-mgr top`, and with `notify.enabled` sends a desktop notification
+gitstead notices an agent waiting for you two ways, records it for `ws status`
+and `gitstead top`, and with `notify.enabled` sends a desktop notification
 (`notify.on_waiting`, on by default).
 
 - **The agent says so.** Agents can run a command when they need you; point
-  it at `git-mgr ws waiting`, which reads which agent from the environment
+  it at `gitstead ws waiting`, which reads which agent from the environment
   `ws run` sets and does nothing outside one, so it is safe in your global
   agent settings. Claude Code, in `~/.claude/settings.json`:
 
   ```json
   {
     "hooks": {
-      "Notification": [{"hooks": [{"type": "command", "command": "git-mgr ws waiting"}]}],
-      "Stop": [{"hooks": [{"type": "command", "command": "git-mgr ws waiting"}]}],
-      "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "git-mgr ws waiting --clear"}]}]
+      "Notification": [{"hooks": [{"type": "command", "command": "gitstead ws waiting"}]}],
+      "Stop": [{"hooks": [{"type": "command", "command": "gitstead ws waiting"}]}],
+      "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "gitstead ws waiting --clear"}]}]
     }
   }
   ```
 
   Codex, at the top of `~/.codex/config.toml`, before any `[table]`:
-  `notify = ["git-mgr", "ws", "waiting"]`. The message comes from what the
+  `notify = ["gitstead", "ws", "waiting"]`. The message comes from what the
   agent passes (Claude's on stdin, Codex's as an argument): "Claude needs your
   permission to use Bash", or "finished: …" and the first line of its last
   reply when it ends its turn. `--message` sets one yourself. `ws waiting`
@@ -1317,7 +1321,7 @@ twice within 10 seconds notifies once.
 
 ### Publishing and retiring
 
-When an agent's work is ready, `git-mgr ws publish <workspace> [agent...]`
+When an agent's work is ready, `gitstead ws publish <workspace> [agent...]`
 pushes each of its copies' branches to origin, tracking them, and with `--pr`
 opens a pull request per repo -- one per copy, against the repo's default
 branch (`--base`), titled after the branch's last commit and listing its
@@ -1344,7 +1348,7 @@ account, or none, and no provider, their own login is used. A request that is
 already open is found instead. For other hosts it prints the compare URL. The
 request's URL is recorded and shown by `ws status`.
 
-When an agent is done, `git-mgr ws retire <workspace> <agent...>` (or
+When an agent is done, `gitstead ws retire <workspace> <agent...>` (or
 `--all`) removes its copies without losing anything:
 
 1. It takes the agent's lease, so no run starts meanwhile; a running agent is
@@ -1361,10 +1365,10 @@ When an agent is done, `git-mgr ws retire <workspace> <agent...>` (or
 archived is kept, and its agent shows as `retiring` until a retire finishes;
 meanwhile `ws ensure` and `apply` leave the agent alone and report it, so a
 retire cut short is never undone by making its copies again.
-`ws rm --delete`, `ws prune` and removals on `git-mgr apply` retire copies the
-same way. `git-mgr archives ls` lists what was saved, from copies and from
+`ws rm --delete`, `ws prune` and removals on `gitstead apply` retire copies the
+same way. `gitstead archives ls` lists what was saved, from copies and from
 repos `remove --delete`, `remove --archive` or stale cleanup took away;
-`git-mgr archives show <id>` prints the restore steps.
+`gitstead archives show <id>` prints the restore steps.
 
 A workspace created from flags or adopted is kept as recorded: `ws ensure`
 makes its missing copies again, including those `ws create` couldn't make
@@ -1372,13 +1376,13 @@ makes its missing copies again, including those `ws create` couldn't make
 removed), and only `ws rm` removes it. Declared
 workspaces follow config: agents or repos removed from a declaration, a new
 `root`, or a removed declaration are moves and removals that wait for
-`git-mgr apply`; each removed copy's unique work is archived first. Commands
+`gitstead apply`; each removed copy's unique work is archived first. Commands
 that act on copies take `--agent` to pick one agent's.
 
 | `ws` subcommand | Description |
 |---|---|
 | `create <name>` | Create a workspace from flags (`--repo`, `--set` or `--path`; `--agents`, `--isolation`, `--branch`, `--base-ref`, `--root`), or the one config declares. `--save` (`--force`) writes it to config; `--open` with `--agent`/`--cmd` opens it. |
-| `ensure [name]` | Make what is missing of one workspace or all of them; list moves and removals for `git-mgr apply`. Idempotent. |
+| `ensure [name]` | Make what is missing of one workspace or all of them; list moves and removals for `gitstead apply`. Idempotent. |
 | `open <name>` | Open the agents with a launcher, as a fleet of one (see [Fleets](#fleets-and-launchers)), after making missing copies. `--launcher`, `--agent`, `--cmd`, `--fresh`, `--no-attach`, `--print`, `--no-ensure`. |
 | `run <name> <agent>` | Run the agent in its replica in this terminal, under its lease, then leave a shell there. `--profile`, `--command`, `--fresh`, `--no-check`, `--no-shell`. |
 | `stop <name> [agent]` | End running agents as closing their terminals would. `--timeout`, `--kill`. |
@@ -1394,7 +1398,7 @@ that act on copies take `--agent` to pick one agent's.
 | `rm <name>` | Forget the workspace, leaving its files. `--delete` retires every copy; `--force` discards unique work instead; `--offsite` takes each copy offsite first and keeps any it can't; `--stop` ends running agents first. |
 | `adopt <name> <dir>` | Record a directory of existing checkouts as a workspace, one agent per checkout. |
 
-`git-mgr sync` backs up every copy (and, with `remote_sync`, takes it
+`gitstead sync` backs up every copy (and, with `remote_sync`, takes it
 offsite) under the policy of the repo it is a copy of, then the workspace's
 own `remote_sync`, after its repos are fetched.
 
@@ -1429,30 +1433,30 @@ fleets:
 ```
 
 ```bash
-git-mgr fleet open daily              # make what is missing, then open every agent
-git-mgr fleet open daily --launcher iterm --fresh
-git-mgr fleet open daily --print      # show the tmux commands / iTerm AppleScript
-git-mgr fleet ls                      # fleets, running agents, last opened
-git-mgr fleet status daily            # each workspace's agents and copies
-git-mgr fleet stop daily              # end every running agent
-git-mgr ws open app                   # one workspace, as a fleet of one
+gitstead fleet open daily              # make what is missing, then open every agent
+gitstead fleet open daily --launcher iterm --fresh
+gitstead fleet open daily --print      # show the tmux commands / iTerm AppleScript
+gitstead fleet ls                      # fleets, running agents, last opened
+gitstead fleet status daily            # each workspace's agents and copies
+gitstead fleet stop daily              # end every running agent
+gitstead ws open app                   # one workspace, as a fleet of one
 ```
 
 `fleet open` first makes what is missing of the fleet's declared workspaces,
 as `ws ensure` does (`--no-ensure` skips it). Each agent's terminal runs
-`git-mgr ws run <workspace> <agent>` (see [Running agents](#running-agents)),
+`gitstead ws run <workspace> <agent>` (see [Running agents](#running-agents)),
 so an agent that is already running elsewhere says so and leaves a shell.
 When an account the workspaces' repos need has `signing.mode: required`, a
 test signature is made first, and nothing opens if it fails: an agent that
 can't sign headless would stall on its first commit. `ws run` makes the same
 check for its agent's copies (`--no-check` skips it, with the copy checks).
 
-**Workspaces on another machine.** With `host:` set, `fleet open` asks git-mgr
-on that machine for the launch plan (`ssh <host> git-mgr fleet plan <name>
---json`; `remote_command:` if git-mgr needs another path or flags there), and
+**Workspaces on another machine.** With `host:` set, `fleet open` asks gitstead
+on that machine for the launch plan (`ssh <host> gitstead fleet plan <name>
+--json`; `remote_command:` if gitstead needs another path or flags there), and
 opens it here: tmux runs on the host through ssh, iTerm types `ssh -t <host>
 …` into each split, and Muxy talks to the Muxy server on the host. The host
-needs this git-mgr and the same workspaces. `fleet status` and `fleet stop` run
+needs this gitstead and the same workspaces. `fleet status` and `fleet stop` run
 there too.
 
 ### Launchers
@@ -1471,7 +1475,7 @@ so panes are native splits.
 
 | `launchers.tmux` | Default | Effect |
 | --- | --- | --- |
-| `session` | `git-mgr-{{.Fleet}}` | Session name; `.` and `:` become `-`. |
+| `session` | `gitstead-{{.Fleet}}` | Session name; `.` and `:` become `-`. |
 | `window_per` | `workspace` | `workspace` or `agent`. |
 | `layout` | `tiled` | `tiled`, `even-horizontal`, `even-vertical`, `main-vertical`, `main-horizontal`. |
 | `max_panes` | `4` | Agents past this spill into `<workspace>-2`, `-3`, … |
@@ -1483,7 +1487,7 @@ so panes are native splits.
 
 **iTerm**: a window per fleet, a tab per workspace (or agent), a split per
 agent, driven with AppleScript (`osascript`). Needs macOS, iTerm2, and the
-Automation permission for the terminal you run git-mgr in, which macOS asks for
+Automation permission for the terminal you run gitstead in, which macOS asks for
 the first time.
 
 | `launchers.iterm` | Default | Effect |
@@ -1505,7 +1509,7 @@ writes `.muxy/layouts/<name>.json` into each project for Apply Layout;
 under Existing Terminals; `state` quits the desktop app, adds the tabs to
 projects that have none in its saved state, and relaunches it, which starts
 them. `state` only edits the state format it knows (version 3) and keeps the
-previous file as `desktop-state.json.git-mgr-backup`.
+previous file as `desktop-state.json.gitstead-backup`.
 
 | `launchers.muxy` | Default | Effect |
 | --- | --- | --- |
@@ -1518,19 +1522,19 @@ previous file as `desktop-state.json.git-mgr-backup`.
 | `prune_projects` | `false` | Remove the projects made for workspaces no longer in the fleet (their files stay). |
 | `command` | `muxy`, else the app's | The muxy CLI. |
 
-**Plugins**: any other terminal is a `git-mgr-launch-<name>` executable on
+**Plugins**: any other terminal is a `gitstead-launch-<name>` executable on
 `PATH`, named as a fleet's `launcher:`. It gets the launch plan as JSON on
 stdin -- `fleet`, `host`, and per workspace its `name`, `dir` and `agents`,
 each with `name`, `dir`, `title`, `profile`, `command` (the shell line to run)
-and `state` -- plus `options` from `launchers.plugins.<name>`. `git-mgr fleet
+and `state` -- plus `options` from `launchers.plugins.<name>`. `gitstead fleet
 plan <name> --json` prints the same plan.
 
 ## Running on a schedule
 
-`git-mgr sync` is built to run unattended. Only one sync runs at a time; a
+`gitstead sync` is built to run unattended. Only one sync runs at a time; a
 second one exits 0 at once. Clones, fetches and backups run without the state
 lock, which a run takes only for the milliseconds it needs to record a result,
-so `git-mgr ws create` or `git-mgr clone` work normally while a long sync is
+so `gitstead ws create` or `gitstead clone` work normally while a long sync is
 running. `min_fetch_interval` skips recently-fetched repos, and `auto_discover`
 picks up new repos. It never merges, it updates a branch only if you ask
 (`sync.update`, below), and it moves or deletes a repo only if you configure
@@ -1570,7 +1574,7 @@ Nothing waits on a person or hangs forever:
 | `token_command` | `30s` (fixed) | Running a provider's `token_command`. |
 | `notify.timeout` | `10s` | Sending one desktop notification, which can hang without a desktop session. |
 
-A clone is made in a hidden `.git-mgr-clone-*` directory beside its
+A clone is made in a hidden `.gitstead-clone-*` directory beside its
 destination and renamed into place when complete. A failed or killed clone
 never leaves half a repository where the repo belongs, and the next clone of
 the same repo removes what a killed run left behind.
@@ -1578,8 +1582,8 @@ the same repo removes what a killed run left behind.
 ### Logging and notifications
 
 Logs go to stderr as JSON (`slog`), and to `log.file` as well when it is set;
-the operation log, `events.jsonl` beside the state file, is what `git-mgr
-report` and `git-mgr log` read. `--verbose` logs debug on the terminal and in
+the operation log, `events.jsonl` beside the state file, is what `gitstead
+report` and `gitstead log` read. `--verbose` logs debug on the terminal and in
 the file; `--quiet` (and `--json`) keeps only errors on the terminal, while the
 file keeps `log.level`.
 
@@ -1600,18 +1604,18 @@ file keeps `log.level`.
 ### Installing a schedule
 
 ```bash
-git-mgr install-agent                                   # every 15m: launchd (macOS) / systemd timer (Linux)
-git-mgr install-agent --name work --tag work --interval 5m
-git-mgr install-agent --list
-git-mgr install-agent --uninstall --name work
-git-mgr install-agent --print                           # show the unit files and commands; change nothing
+gitstead install-agent                                   # every 15m: launchd (macOS) / systemd timer (Linux)
+gitstead install-agent --name work --tag work --interval 5m
+gitstead install-agent --list
+gitstead install-agent --uninstall --name work
+gitstead install-agent --print                           # show the unit files and commands; change nothing
 ```
 
 Each schedule has a name (`default` unless you give one) and its own
 selection of repos, so a work schedule and a personal one live side by side;
 installing a name again replaces it. `bootstrap --profile work` installs a
 `work` schedule that syncs `--tag work`. Schedules are recorded in the state
-file, and `git-mgr doctor` checks each one.
+file, and `gitstead doctor` checks each one.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -1619,18 +1623,18 @@ file, and `git-mgr doctor` checks each one.
 | `--interval` | `15m` | Must divide an hour or a day (5m, 10m, 15m, 20m, 30m, 1h, 2h, 3h, 4h, 6h, 8h, 12h, 24h), so every backend runs it exactly. |
 | `--repos`, `--tag`, `--set` | all repos | What the schedule syncs. |
 | `--kind` | per OS | `launchd`, `systemd` or `cron`. |
-| `--bin` | the `git-mgr` on PATH | Binary the schedule runs. |
+| `--bin` | the `gitstead` on PATH | Binary the schedule runs. |
 | `--daemon` | off | macOS: a LaunchDaemon that runs as you while nobody is logged in. Installed with `sudo`. |
 | `--linger` | off | Linux: `loginctl enable-linger`, so the timer runs while you are logged out. |
-| `--log` | `~/.local/share/git-mgr/git-mgr.log` | Output of launchd and cron runs; systemd runs log to the journal (`journalctl --user -u git-mgr`). |
+| `--log` | `~/.local/share/gitstead/gitstead.log` | Output of launchd and cron runs; systemd runs log to the journal (`journalctl --user -u gitstead`). |
 
 What install does, so a background run behaves like one from your shell:
 
-- **Binary:** the `git-mgr` on your PATH when it is the binary you ran,
+- **Binary:** the `gitstead` on your PATH when it is the binary you ran,
   because a package manager's link there (`/opt/homebrew/bin`,
   `~/.nix-profile/bin`) survives upgrades. A path an upgrade or garbage
   collection removes -- `/nix/store`, a Homebrew `Cellar`, a temporary build
-  -- is refused; put `git-mgr` on PATH or pass `--bin`.
+  -- is refused; put `gitstead` on PATH or pass `--bin`.
 - **Environment:** your current `PATH` is recorded, so `gh`, credential
   helpers and `ssh` are found. `SSH_AUTH_SOCK` is recorded when the agent's
   socket outlives your login (1Password, `$XDG_RUNTIME_DIR`); a per-login one
@@ -1649,7 +1653,7 @@ What install does, so a background run behaves like one from your shell:
 - **crontab:** never rewritten if it can't be read (only "no crontab" counts
   as empty), and backed up to `backups/crontab-<time>.bak` beside the state
   file before each change. Only lines ending in the schedule's own marker
-  (`# com.ashtonian.git-mgr[.<name>]`) are touched.
+  (`# com.ashtonian.gitstead[.<name>]`) are touched.
 
 ### With Nix: home-manager
 
@@ -1659,12 +1663,12 @@ The flake exposes the module as `homeManagerModules.default`:
 
 ```nix
 {
-  inputs.git-mgr.url = "github:ashtonian/git-mgr";
+  inputs.gitstead.url = "github:ashtonian/gitstead";
   # in your home-manager configuration:
-  imports = [ inputs.git-mgr.homeManagerModules.default ];
-  programs.git-mgr = {
+  imports = [ inputs.gitstead.homeManagerModules.default ];
+  programs.gitstead = {
     enable = true;
-    package = pkgs.git-mgr;                       # your build of git-mgr
+    package = pkgs.gitstead;                       # your build of gitstead
     path = with pkgs; [ git openssh gh ];         # what the background sync runs
     sshAuthSock = "%t/ssh-agent";                 # optional
     schedules.default.interval = "15m";
@@ -1674,25 +1678,25 @@ The flake exposes the module as `homeManagerModules.default`:
 }
 ```
 
-| `programs.git-mgr` | Default | Meaning |
+| `programs.gitstead` | Default | Meaning |
 | --- | --- | --- |
-| `enable` | `false` | Install git-mgr and its schedules. |
-| `package` | required | The git-mgr package. |
-| `settings` | `{}` | Written to `~/.config/git-mgr/config.yaml` when set; the file is then read-only, so `setup` and `ws create --save` can't edit it. |
-| `configFile`, `stateFile` | git-mgr's defaults | Passed to the schedules as `--config`, `--state`. |
-| `path` | `[ git openssh ]` | The schedules' `PATH`, with git-mgr itself. |
+| `enable` | `false` | Install gitstead and its schedules. |
+| `package` | required | The gitstead package. |
+| `settings` | `{}` | Written to `~/.config/gitstead/config.yaml` when set; the file is then read-only, so `setup` and `ws create --save` can't edit it. |
+| `configFile`, `stateFile` | gitstead's defaults | Passed to the schedules as `--config`, `--state`. |
+| `path` | `[ git openssh ]` | The schedules' `PATH`, with gitstead itself. |
 | `sshAuthSock` | none | The schedules' `SSH_AUTH_SOCK` (systemd specifiers work). |
-| `logFile` | `~/.local/share/git-mgr/git-mgr.log` | launchd agents' output; systemd logs to the journal. |
+| `logFile` | `~/.local/share/gitstead/gitstead.log` | launchd agents' output; systemd logs to the journal. |
 | `schedules.<name>` | none | A background sync: `interval` (`15m`; dividing an hour or a day), `repos`, `tag`, `set`, `extraArgs`, `environment`. |
 
-Each schedule is a systemd user service and timer (`git-mgr` for `default`,
-else `git-mgr-<name>`) with `OnCalendar=`, `Persistent=true`, `Nice=10` and
+Each schedule is a systemd user service and timer (`gitstead` for `default`,
+else `gitstead-<name>`) with `OnCalendar=`, `Persistent=true`, `Nice=10` and
 idle I/O on Linux, and a launchd agent with the same priority on macOS: the
-units `install-agent` writes. `git-mgr doctor` checks only schedules
+units `install-agent` writes. `gitstead doctor` checks only schedules
 `install-agent` recorded; check these with `systemctl --user list-timers` or
 `launchctl list`.
 
-`git-mgr doctor` checks each recorded schedule: still installed, its binary
+`gitstead doctor` checks each recorded schedule: still installed, its binary
 present, lingering on (systemd), and it runs its own checks again in the
 schedule's environment -- recorded PATH and agent, nothing else -- so a `gh`
 that isn't on the recorded PATH or a token that only your shell can read
@@ -1709,52 +1713,52 @@ broken setup. With `--quiet`, only failures are printed, to stderr.
 | 1 | The command failed: bad config, unreadable state, every target failed, or it has no `--json` output or needs `--yes`. |
 | 2 | A check ran and found problems: `doctor`, `ws check`. |
 | 3 | Partial failure: some repos, copies or changes failed and the rest succeeded, or `bootstrap` finished but couldn't install its schedule. Each failure is printed to stderr. |
-| 75 | Another git-mgr run held the state lock, or a repo's lock (`.git/git-mgr.lock`, held while a repo is deleted, moved or copied into a workspace), for longer than `lock_timeout`, and nothing else was done; try again (EX_TEMPFAIL). When other targets succeeded meanwhile it is a partial failure (3), and when others failed for another reason, a failure (1). `git-mgr doctor` reports a stuck state-lock holder; `lsof <repo>/.git/git-mgr.lock` shows a repo lock's. |
+| 75 | Another gitstead run held the state lock, or a repo's lock (`.git/gitstead.lock`, held while a repo is deleted, moved or copied into a workspace), for longer than `lock_timeout`, and nothing else was done; try again (EX_TEMPFAIL). When other targets succeeded meanwhile it is a partial failure (3), and when others failed for another reason, a failure (1). `gitstead doctor` reports a stuck state-lock holder; `lsof <repo>/.git/gitstead.lock` shows a repo lock's. |
 | 80 | Usage error: unknown command or flag. |
 
 ## Troubleshooting
 
-Start with `git-mgr doctor`: it checks tooling, each provider's token, each
+Start with `gitstead doctor`: it checks tooling, each provider's token, each
 SSH key, the config, every tracked repo and copy on disk, and each installed
 schedule, and says what to do about each problem (`--json` for a script).
 Then:
 
-- **The background sync isn't running.** `git-mgr install-agent --list`
-  shows what is installed. On macOS, `launchctl print gui/$(id -u)/com.ashtonian.git-mgr`
+- **The background sync isn't running.** `gitstead install-agent --list`
+  shows what is installed. On macOS, `launchctl print gui/$(id -u)/com.ashtonian.gitstead`
   shows the agent's state and last exit; its output is in
-  `~/.local/share/git-mgr/git-mgr.log`. On Linux, `systemctl --user status
-  git-mgr.timer` and `journalctl --user -u git-mgr`; if it stops at logout,
+  `~/.local/share/gitstead/gitstead.log`. On Linux, `systemctl --user status
+  gitstead.timer` and `journalctl --user -u gitstead`; if it stops at logout,
   reinstall with `--linger`. A binary that moved or was upgraded out of a Nix
-  store or Homebrew Cellar path: `git-mgr install-agent` again from the
-  `git-mgr` on your PATH.
+  store or Homebrew Cellar path: `gitstead install-agent` again from the
+  `gitstead` on your PATH.
 - **It works in your terminal but not in the background sync.** The schedule
-  has no shell environment: a provider using `token_env` gets nothing (`git-mgr
+  has no shell environment: a provider using `token_env` gets nothing (`gitstead
   setup` warns). Use `token_command` (`gh auth token --hostname H --user U`
   after `gh auth login`, or a password manager's CLI). An SSH key with a
   passphrase needs an agent the schedule can reach; give the account an
   `ssh_key` without one, or see [Installing a schedule](#installing-a-schedule).
-- **A command exits 75.** Another git-mgr command holds the state or a repo
+- **A command exits 75.** Another gitstead command holds the state or a repo
   (deleting, moving, or making a workspace copy of it) past `lock_timeout`.
   Run it again; `doctor` names a stuck state-lock holder, and `lsof
-  <repo>/.git/git-mgr.lock` a repo lock's.
+  <repo>/.git/gitstead.lock` a repo lock's.
 - **A repo is kept instead of deleted.** The message says why: git is busy in
   it (a leftover `index.lock` from a crashed command: delete it once no git
-  runs there), workspace copies are made from it (`git-mgr ws rm <name>
+  runs there), workspace copies are made from it (`gitstead ws rm <name>
   --delete` first), or its work couldn't be archived (the error says why).
 - **A repo shows as stale.** Discovery stopped finding it: renamed (the next
   sync usually re-keys it), deleted or transferred upstream, or your token
-  lost access. `git-mgr status --stale` lists them; `cleanup.policy` decides
+  lost access. `gitstead status --stale` lists them; `cleanup.policy` decides
   what happens after the grace period.
 - **Untracked files were left out of a backup.** Over `max_untracked_file_mb`
   or `max_untracked_total_mb`, unreadable, or a nested repository; the sync
-  output and `git-mgr backup --list` name them. Raise the limits for that repo
+  output and `gitstead backup --list` name them. Raise the limits for that repo
   in `overrides`, or ignore the files.
-- **Getting work back.** `git-mgr restore <repo>` prints the steps for the
+- **Getting work back.** `gitstead restore <repo>` prints the steps for the
   latest backup; `--into <dir>` restores into a scratch clone, `--apply` onto
-  the working tree. Deleted copies and repos: `git-mgr archives ls`, then
-  `archives restore <id>`. From another machine: `git-mgr remote-sync --list`.
-- **An agent's copy is missing, or an agent shows as retiring.** `git-mgr ws
-  ensure <name>` makes missing copies; `git-mgr ws retire <name> <agent>`
+  the working tree. Deleted copies and repos: `gitstead archives ls`, then
+  `archives restore <id>`. From another machine: `gitstead remote-sync --list`.
+- **An agent's copy is missing, or an agent shows as retiring.** `gitstead ws
+  ensure <name>` makes missing copies; `gitstead ws retire <name> <agent>`
   finishes a retire that was cut short.
 
 ### Stale repos
@@ -1798,20 +1802,20 @@ in-flight git and API operations cleanly.
 
 ## Environment variables
 
-All config fields can be overridden via `GIT_MGR_*` env vars (e.g.
-`GIT_MGR_BASE_DIR`, `GIT_MGR_CONCURRENCY`). Notable ones:
+All config fields can be overridden via `GITSTEAD_*` env vars (e.g.
+`GITSTEAD_BASE_DIR`, `GITSTEAD_CONCURRENCY`). Notable ones:
 
 | Variable | Effect |
 |---|---|
-| `GIT_MGR_CONFIG` | Config file path (same as `--config`), which must exist; unset, `~/.config/git-mgr/config.yaml` is read if it exists. |
-| `GIT_MGR_STATE` | State file path (same as `--state`); unset, `$XDG_DATA_HOME/git-mgr/state.yaml` (`~/.local/share/git-mgr/state.yaml`). |
+| `GITSTEAD_CONFIG` | Config file path (same as `--config`), which must exist; unset, `~/.config/gitstead/config.yaml` is read if it exists. |
+| `GITSTEAD_STATE` | State file path (same as `--state`); unset, `$XDG_DATA_HOME/gitstead/state.yaml` (`~/.local/share/gitstead/state.yaml`). |
 | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` | Where the default config, data and cache directories are (see [Configuration](#configuration)). |
-| `GIT_MGR_BASE_DIR` | Override `base_dir`. |
+| `GITSTEAD_BASE_DIR` | Override `base_dir`. |
 | `GITHUB_TOKEN` / `GITLAB_TOKEN` / `GITEA_TOKEN` / `FORGEJO_TOKEN` | Default provider tokens. |
 
 ## Security
 
-git-mgr runs with your credentials, so in short: tokens come from exactly
+gitstead runs with your credentials, so in short: tokens come from exactly
 the one source a provider configures and never go to another account's API;
 credentials in remote URLs are refused and redacted from all output; SSH keys
 are passed by path, never read; git and ssh never prompt; config and state
@@ -1822,14 +1826,14 @@ vulnerability privately, is in [SECURITY.md](SECURITY.md).
 
 ## Docker
 
-From the first release, `ashtonian/git-mgr` runs git-mgr with git in a
+From the first release, `ashtonian/gitstead` runs gitstead with git in a
 container:
 
 ```bash
-docker run -v ~/.config/git-mgr:/root/.config/git-mgr \
+docker run -v ~/.config/gitstead:/root/.config/gitstead \
            -v ~/repos:/root/repos \
            -v ~/.ssh:/root/.ssh:ro \
-           ashtonian/git-mgr sync
+           ashtonian/gitstead sync
 ```
 
 ## Development
@@ -1850,7 +1854,7 @@ govulncheck ./...
 
 End-to-end tests live in a **separate module** under [`e2e/`](e2e/) so their
 heavy dependencies (testcontainers, Docker client) stay out of the root module.
-They build the `git-mgr` binary and drive it against a real Forgejo container:
+They build the `gitstead` binary and drive it against a real Forgejo container:
 
 ```bash
 cd e2e && go test ./...       # requires Docker
@@ -1877,16 +1881,16 @@ go build -ldflags="-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD)" .
 | `internal/agent` | Running agents: profile commands, the lease that marks an agent running, and `ws run` itself. |
 | `internal/launch` | Fleets' terminals: the launch plan, and the tmux, iTerm, Muxy and plugin launchers. |
 | `internal/activity` | Reading agents' terminal activity (tmux panes, Muxy), and watching a pane for an agent waiting. |
-| `internal/view` | `git-mgr top`: collecting every repo and copy's state and terminal activity, and laying it out. |
+| `internal/view` | `gitstead top`: collecting every repo and copy's state and terminal activity, and laying it out. |
 | `internal/jump` | Matching a short query to a repo, workspace, agent or copy, for `cd`, `path` and `open`. |
-| `internal/setup` | `git-mgr setup`'s logic: detecting what the machine has, proposing answers, rendering them into config, checking it, and the shell's startup-file line. |
+| `internal/setup` | `gitstead setup`'s logic: detecting what the machine has, proposing answers, rendering them into config, checking it, and the shell's startup-file line. |
 | `internal/repourl` | Parsing remote URLs into host/owner/name keys. |
 | `internal/pathtemplate`, `internal/pathutil`, `internal/shellutil`, `internal/ctxutil`, `internal/procutil` | Path templates; deletion guards, renames that never replace, moves across filesystems and durable writes; shell quoting; optional deadlines; commands that never prompt and die with their context. |
 | `internal/scheduler` | launchd, systemd and cron installation. |
 | `internal/oplog`, `internal/notify` | The operation log and desktop notifications. |
 | `internal/testenv` | Isolating each package's tests from the machine: home, XDG directories, git config, temporary directories. |
 | `e2e/` | End-to-end tests, a module of their own: the built binary against local remotes and a Forgejo container. |
-| `docs/` | [ARCHITECTURE.md](docs/ARCHITECTURE.md), how the parts fit and why. |
+| `docs/` | [ARCHITECTURE.md](docs/ARCHITECTURE.md), how the parts fit and why; [RELEASING.md](docs/RELEASING.md), cutting a release. |
 | `nix/home-manager.nix`, `flake.nix` | The home-manager module: package, config and schedules as systemd timers or launchd agents. |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow and

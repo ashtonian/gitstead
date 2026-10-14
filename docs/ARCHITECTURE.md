@@ -1,6 +1,6 @@
-# How git-mgr works
+# How gitstead works
 
-This is the map for someone changing git-mgr: what the parts are, how data
+This is the map for someone changing gitstead: what the parts are, how data
 moves through them, what each lock protects, and what happens when something
 fails. [README.md](../README.md) covers using it; [SPEC.md](../SPEC.md) is the
 command-by-command reference and the record of each design detail.
@@ -25,7 +25,7 @@ People who work across many repositories -- several forges, several accounts
 on each, several machines, and now several coding agents at once -- end up
 with clones scattered across the disk, the wrong identity in some of them,
 uncommitted work nothing backs up, and agents' copies nobody cleans up
-safely. git-mgr keeps all of it in one layout and keeps it safe, under these
+safely. gitstead keeps all of it in one layout and keeps it safe, under these
 constraints:
 
 - **Never lose work.** Backups never touch the working tree, the index,
@@ -35,11 +35,11 @@ constraints:
   no prompts (git, ssh and credential helpers are all told not to ask), a
   deadline on every external call, one failing repo or provider never stops
   the rest, and runs that overlap with each other or with you are safe.
-- **Use git itself.** git-mgr drives the `git` CLI, so linked worktrees,
+- **Use git itself.** gitstead drives the `git` CLI, so linked worktrees,
   partial clones, bundles, credential helpers, `includeIf` and your own git
   and SSH config work as they do for you.
 - **No daemon, no database.** One binary and two files you can read: the
-  config (what you want) and the state (what git-mgr did and found).
+  config (what you want) and the state (what gitstead did and found).
 - **Declarative config.** Changing config changes nothing until a run brings
   disk in line with it; `plan` shows what that would do.
 
@@ -53,7 +53,7 @@ constraints:
      +------------+--------------+-+------------+--------------+------------+
      |            |              |              |              |            |
    setup      workspace        launch         view           jump      scheduler
-  (wizard)   (agents' copies)  (tmux, iTerm,  (git-mgr top)  (cd/open)  (launchd,
+  (wizard)   (agents' copies)  (tmux, iTerm,  (gitstead top)  (cd/open)  (launchd,
      |            |             Muxy, plugin)    |                       systemd,
      |            |   agent, activity            |                       cron)
      |            |   (runs, leases, terminals)  |
@@ -83,13 +83,13 @@ from). The README's [code map](../README.md#code-map) lists every package.
 ## Where things live
 
 ```
-$XDG_CONFIG_HOME/git-mgr/              (~/.config/git-mgr)
+$XDG_CONFIG_HOME/gitstead/              (~/.config/gitstead)
   config.yaml                          what you want; setup edits it in place, keeping comments
   accounts/<name>-<digest>.gitconfig   accounts gitconfig: each account's identity, key, signing
   accounts.gitconfig                   includeIf sections, included from your global git config
 
-$XDG_DATA_HOME/git-mgr/                (~/.local/share/git-mgr)
-  state.yaml                           what git-mgr applied and found; machine-local
+$XDG_DATA_HOME/gitstead/                (~/.local/share/gitstead)
+  state.yaml                           what gitstead applied and found; machine-local
   state.yaml.lock                      held for each state write
   state.yaml.sync.lock                 held for a whole sync run: one at a time
   events.jsonl (+ .lock)               operation log: one JSON line per change (report, log)
@@ -101,22 +101,22 @@ $XDG_DATA_HOME/git-mgr/                (~/.local/share/git-mgr)
                                        .json descriptions, whole archived clones, and
                                        unpushed/<copy-id>.bundle (remote_sync.unpushed: bundle)
   mirrors/<host>/<owner>/<name>.git    full mirrors of upstreams (mirror on)
-  git-mgr.log                          the scheduled sync's output (launchd, cron)
+  gitstead.log                          the scheduled sync's output (launchd, cron)
 
-$XDG_CACHE_HOME/git-mgr/               (~/.cache/git-mgr)
+$XDG_CACHE_HOME/gitstead/               (~/.cache/gitstead)
   workspaces/<workspace>/              agents' shared caches (agent environment)
   locks/manifest-<digest>.lock         held while writing the shared manifest
 
 in each working copy (repo clone or agent's copy)
-  .git/git-mgr-copy-id                 this working copy's ID, which namespaces its backups
-  .git/git-mgr.lock                    the repo lock (see below)
-  refs/git-mgr/backups/<copy-id>/<backup-id>            snapshot commits
-  refs/git-mgr/backup-submodules/<copy-id>/<backup-id>  which submodule backups go with it
+  .git/gitstead-copy-id                 this working copy's ID, which namespaces its backups
+  .git/gitstead.lock                    the repo lock (see below)
+  refs/gitstead/backups/<copy-id>/<backup-id>            snapshot commits
+  refs/gitstead/backup-submodules/<copy-id>/<backup-id>  which submodule backups go with it
 
 on a remote, with remote_sync
-  refs/git-mgr/<machine>/<copy-id>/wip/<backup-id>      uncommitted work
-  refs/git-mgr/<machine>/<copy-id>/heads/<branch>       commits no remote has
-  refs/heads/git-mgr/wip/<machine>/<copy-id>            wip: branch only
+  refs/gitstead/<machine>/<copy-id>/wip/<backup-id>      uncommitted work
+  refs/gitstead/<machine>/<copy-id>/heads/<branch>       commits no remote has
+  refs/heads/gitstead/wip/<machine>/<copy-id>            wip: branch only
 ```
 
 Config is portable (the same file on every machine); state is not, since it
@@ -125,11 +125,11 @@ repos you add by hand from machine to machine.
 
 ## A sync run
 
-`git-mgr sync` is what the background schedule runs. Everything it does is
+`gitstead sync` is what the background schedule runs. Everything it does is
 safe to repeat, and it holds the state lock only while recording.
 
 ```
-git-mgr sync
+gitstead sync
   |
   |-- take state.yaml.sync.lock; another sync holds it -> exit 0, nothing done
   |
@@ -185,7 +185,7 @@ An action is **disruptive** if it moves or deletes a directory a shell or
 editor may have open; only `apply` runs those, and only after showing them.
 `Blocked` lists what can't be planned (a path held by something else, a
 partial clone a copy can't be made from), and `Drift` what differs on disk
-from what git-mgr set (reported, or overwritten with `reconcile.drift`).
+from what gitstead set (reported, or overwritten with `reconcile.drift`).
 
 ## Backups
 
@@ -196,7 +196,7 @@ working copy                        temporary index (never the repo's own)
   tracked files --> add -u ----+--> commit "worktree" (the snapshot)   parents: HEAD, index,
   untracked (within limits) ---+--> commit "untracked"                 untracked: git stash's
                                                                         layout
-snapshot --+--> refs/git-mgr/backups/<copy-id>/<id>        (backup.strategy stash-ref)
+snapshot --+--> refs/gitstead/backups/<copy-id>/<id>        (backup.strategy stash-ref)
            +--> patches/<copy-id>/<id>/ patches + tarball   (patch; both by default)
 ```
 
@@ -259,14 +259,14 @@ while it runs; nothing removes its copies while it is held. **Retiring** an
 agent marks it retiring, archives each copy's unique work, removes the copies
 and records tombstones; an interrupted retire is left for `ws retire` to
 finish. `fleet` opens several workspaces' agents side by side through a
-launcher: tmux, iTerm, Muxy, or any `git-mgr-launch-<name>` on PATH, which
+launcher: tmux, iTerm, Muxy, or any `gitstead-launch-<name>` on PATH, which
 gets the plan as JSON on stdin.
 
 ## Offsite copies
 
 With `remote_sync`, each working copy -- and each of its checked-out
 submodules, as a copy of its own -- pushes to hidden refs it alone owns
-(`refs/git-mgr/<machine>/<copy-id>/...`): its latest backup as a WIP ref, and
+(`refs/gitstead/<machine>/<copy-id>/...`): its latest backup as a WIP ref, and
 each branch's commits no remote has. One `git push` per copy carries every
 change; deletions are checked against the remote first; the record of what
 was pushed (in state) means the next run sends only what changed and deletes
@@ -276,7 +276,7 @@ how).
 
 ## Concurrency and locks
 
-Several git-mgr processes run at once routinely: a scheduled sync, commands
+Several gitstead processes run at once routinely: a scheduled sync, commands
 you type, agents' hooks. Every lock is an `flock`, released by the kernel if
 its holder dies.
 
@@ -284,11 +284,11 @@ its holder dies.
 | --- | --- | --- | --- |
 | State write | `state.yaml.lock` | for one load-modify-save, up to `lock_timeout` to get it | `state.yaml`: every change re-reads it under the lock, so runs never overwrite each other |
 | Sync run | `state.yaml.sync.lock` | a whole `sync` | one sync at a time; another just skips |
-| Repo | `.git/git-mgr.lock` | shared while a copy is made from the repo, until recorded; exclusive while it is deleted, archived or moved | a repo is never deleted or moved from under a copy being made of it |
+| Repo | `.git/gitstead.lock` | shared while a copy is made from the repo, until recorded; exclusive while it is deleted, archived or moved | a repo is never deleted or moved from under a copy being made of it |
 | Agent lease | `runs/<ws>/<agent>.lease` | while the agent runs | its copies aren't removed while it works |
 | Manifest | `locks/manifest-<digest>.lock` | one manifest write | the shared manifest, written by several machines' runs |
 | Operation log | `events.jsonl.lock` | one append or trim | no line lost to a concurrent trim |
-| git's own | `index.lock`, ref locks | never taken by git-mgr | checked before deleting (CheckIdle); backups don't need them |
+| git's own | `index.lock`, ref locks | never taken by gitstead | checked before deleting (CheckIdle); backups don't need them |
 
 Ordering: the repo lock is always taken before the state lock, never while
 holding it, so the two can't deadlock. Slow work -- clones, fetches,
@@ -315,17 +315,17 @@ during one write into the next.
 
 ## Failure modes
 
-| What fails | What git-mgr does | What you do |
+| What fails | What gitstead does | What you do |
 | --- | --- | --- |
-| A provider is down or a token is bad | That rule fails; the others run; stale detection is skipped for everything, so nothing is marked stale on partial data | `git-mgr doctor`; fix the token (`token_command`, `gh auth login`) |
+| A provider is down or a token is bad | That rule fails; the others run; stale detection is skipped for everything, so nothing is marked stale on partial data | `gitstead doctor`; fix the token (`token_command`, `gh auth login`) |
 | The network is flaky | API calls retry on rate limits and 5xx with back-off; fetches retry `sync.retries` times; every call has a deadline | Nothing; the next run catches up |
 | git holds a lock in a repo (an agent mid-commit) | The fetch is skipped and retried next run; the backup still runs (temporary index) | Nothing |
 | Another command holds a repo or the state | Waits up to `lock_timeout`, then keeps the target and exits 75 | Run it again later |
-| A run is killed mid-delete | The archive is already on disk and synced; `archives ls` and `doctor` find one that wasn't recorded | `git-mgr archives ls` |
-| A run is killed mid-retire | The agent stays marked retiring; `ensure` and `apply` leave it alone | `git-mgr ws retire <ws> <agent>` |
+| A run is killed mid-delete | The archive is already on disk and synced; `archives ls` and `doctor` find one that wasn't recorded | `gitstead archives ls` |
+| A run is killed mid-retire | The agent stays marked retiring; `ensure` and `apply` leave it alone | `gitstead ws retire <ws> <agent>` |
 | A clone fails partway | Nothing appears at the destination; the staging directory is swept next time | Nothing; the next run retries |
 | The disk is full, or a sync fails | Nothing is deleted before its archive is synced; a failed backup keeps the previous ones | Free space; rerun |
-| The schedule has no login session | Tokens must come from a store (`token_command`, gh's stored login), not your shell's environment; setup and `install-agent` warn | `git-mgr doctor` in the schedule's environment |
+| The schedule has no login session | Tokens must come from a store (`token_command`, gh's stored login), not your shell's environment; setup and `install-agent` warn | `gitstead doctor` in the schedule's environment |
 
 ## Decisions and trade-offs
 
@@ -350,7 +350,7 @@ The ones that shape the code most:
   create` touches the index and fails while `index.lock` is held, which is
   exactly when an agent is working. The cost is building trees by hand.
 - **Reconcile, not imperative commands.** Config says what should be; state
-  says what git-mgr did; each run derives the difference. The cost is a
+  says what gitstead did; each run derives the difference. The cost is a
   planner that must observe disk carefully and record each step as it goes.
 - **Hidden refs for offsite copies.** Nothing shows in branch lists or
   triggers CI, and each copy owns its namespace, so force-pushes stay inside
@@ -358,5 +358,5 @@ The ones that shape the code most:
 - **Worktrees by default for agents.** Cheap and instant from the repo's
   clone; clones and reference clones are there for tools that need a
   separate `.git`.
-- **No daemon.** The host's scheduler runs `git-mgr sync`; there is nothing
+- **No daemon.** The host's scheduler runs `gitstead sync`; there is nothing
   to keep alive, and a run that can't finish just waits for the next one.

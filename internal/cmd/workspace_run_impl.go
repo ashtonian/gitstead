@@ -8,10 +8,10 @@ import (
 	"syscall"
 	"time"
 
-	agents "github.com/ashtonian/git-mgr/internal/agent"
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/workspace"
+	agents "github.com/ashtonian/gitstead/internal/agent"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/state"
+	"github.com/ashtonian/gitstead/internal/workspace"
 )
 
 // WSRunCmd runs an agent in its replica, in this terminal: what each pane a
@@ -39,7 +39,7 @@ func (c *WSRunCmd) Run(ctx *Context) error {
 		return err
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "git-mgr: %v\n", err)
+		fmt.Fprintf(os.Stderr, "gitstead: %v\n", err)
 	}
 	return execShell(c.dir(ctx), c.env)
 }
@@ -55,7 +55,7 @@ func (c *WSRunCmd) run(ctx *Context) error {
 	}
 	ws := st.Workspaces[c.Name]
 	if ws == nil {
-		return fmt.Errorf("workspace %q is not created; run 'git-mgr ws create %s' first", c.Name, c.Name)
+		return fmt.Errorf("workspace %q is not created; run 'gitstead ws create %s' first", c.Name, c.Name)
 	}
 	r := ws.Replica(c.Agent)
 	if r == nil {
@@ -65,12 +65,12 @@ func (c *WSRunCmd) run(ctx *Context) error {
 		spec := workspace.FromState(cfg, st, ws)
 		for _, h := range workspace.Health(ctx.GoCtx(), spec, workspace.OfAgent(spec.Targets(), c.Agent)) {
 			if len(h.Issues) > 0 {
-				fmt.Printf("git-mgr: %s: %s\n", h.Label(spec), strings.Join(h.Issues, "; "))
+				fmt.Printf("gitstead: %s: %s\n", h.Label(spec), strings.Join(h.Issues, "; "))
 			}
 		}
 	}
 	if _, err := os.Stat(r.Path); err != nil {
-		return fmt.Errorf("%s/%s's folder %s is missing; 'git-mgr ws ensure %s' makes it again", c.Name, c.Agent, r.Path, c.Name)
+		return fmt.Errorf("%s/%s's folder %s is missing; 'gitstead ws ensure %s' makes it again", c.Name, c.Agent, r.Path, c.Name)
 	}
 	if !c.NoCheck {
 		if err := checkSigning(ctx, cfg, st, r.Copies); err != nil {
@@ -190,10 +190,10 @@ func execShell(dir string, env []string) error {
 
 // terminal is what this process runs in, for the run's record: the launcher
 // that opened it (as it said, else as the terminal shows), the terminal
-// session, and for tmux the server's socket, which `git-mgr top` reads the
+// session, and for tmux the server's socket, which `gitstead top` reads the
 // pane's activity from.
 func terminal() (launcher, session, socket string) {
-	launcher, session = os.Getenv("GIT_MGR_LAUNCHER"), os.Getenv("GIT_MGR_SESSION")
+	launcher, session = os.Getenv("GITSTEAD_LAUNCHER"), os.Getenv("GITSTEAD_SESSION")
 	switch {
 	case os.Getenv("TMUX_PANE") != "":
 		launcher = orDefault(launcher, "tmux")

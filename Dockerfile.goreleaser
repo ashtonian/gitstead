@@ -1,7 +1,7 @@
 # Image built by GoReleaser (dockers_v2) from pre-compiled binaries; the build
 # context lays binaries out per platform, so copy the matching one.
-FROM alpine:3.21
+FROM alpine:3.24
 RUN apk add --no-cache git openssh-client
 ARG TARGETPLATFORM
-COPY $TARGETPLATFORM/git-mgr /usr/local/bin/git-mgr
-ENTRYPOINT ["git-mgr"]
+COPY $TARGETPLATFORM/gitstead /usr/local/bin/gitstead
+ENTRYPOINT ["gitstead"]

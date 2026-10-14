@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
 // Exit codes. kong adds 80 for usage errors; see the README for the table.
@@ -14,7 +14,7 @@ const (
 	exitFailed   = 1  // the command failed
 	exitProblems = 2  // a check ran and found problems: doctor, ws check
 	exitPartial  = 3  // some targets failed, the others succeeded
-	exitBusy     = 75 // another git-mgr run holds the lock (EX_TEMPFAIL): try again later
+	exitBusy     = 75 // another gitstead run holds the lock (EX_TEMPFAIL): try again later
 )
 
 // problems reports a check that ran and found n problems.
@@ -50,7 +50,7 @@ func ExitCode(err error) int {
 	return exitFailed
 }
 
-// busy reports whether err is another git-mgr command holding a lock that
+// busy reports whether err is another gitstead command holding a lock that
 // was needed: the same command later can succeed.
 func busy(err error) bool {
 	return errors.Is(err, state.ErrLocked) || errors.Is(err, gitops.ErrRepoInUse)
@@ -71,7 +71,7 @@ func outcome(failed, total int, format string, args ...any) error {
 }
 
 // outcomeOf is outcome for total targets, of which those that failed failed
-// with errs. When every target failed only because another git-mgr command
+// with errs. When every target failed only because another gitstead command
 // held a lock, the command is busy rather than failed: it can be run again
 // later.
 func outcomeOf(errs []error, total int, format string, args ...any) error {

@@ -8,14 +8,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/reconcile"
 )
 
-// ErrUnknownSource reports a copy whose repo git-mgr doesn't track and whose
+// ErrUnknownSource reports a copy whose repo gitstead doesn't track and whose
 // source can't be read from disk.
-var ErrUnknownSource = errors.New("its repo isn't tracked, so git-mgr doesn't know what to make it from")
+var ErrUnknownSource = errors.New("its repo isn't tracked, so gitstead doesn't know what to make it from")
 
 // CreateCopy makes copy c at its path from its source, by isolation: a
 // linked worktree, or a clone taking its objects from the source. It checks
@@ -27,7 +27,7 @@ func CreateCopy(ctx context.Context, isolation, baseRef string, c Copy) error {
 		return ErrUnknownSource
 	}
 	if !gitops.HasGitDir(c.Source) {
-		return fmt.Errorf("the repo's clone at %s is missing; git-mgr sync clones it again", c.Source)
+		return fmt.Errorf("the repo's clone at %s is missing; gitstead sync clones it again", c.Source)
 	}
 	opts := reconcile.CloneOptions(c.SSHKey, c.Clone)
 	var made error

@@ -159,10 +159,10 @@ func inspectRepo(ctx context.Context, repoPath string) (UniqueWork, error) {
 	if u.UnpushedCommits, err = gitCount(ctx, repoPath, append(unpushed, "--not", "--remotes")...); err != nil {
 		return u, err
 	}
-	// git-mgr's own refs hold backups of work counted here already, and
+	// gitstead's own refs hold backups of work counted here already, and
 	// refs/prefetch holds copies of remote branches.
 	others := []string{"rev-list", "--count"}
-	for _, ref := range []string{"refs/heads/*", "refs/remotes/*", "refs/stash", "refs/git-mgr/*", "refs/prefetch/*"} {
+	for _, ref := range []string{"refs/heads/*", "refs/remotes/*", "refs/stash", "refs/gitstead/*", "refs/prefetch/*"} {
 		others = append(others, "--exclude="+ref)
 	}
 	others = append(others, "--all", "--not", "--branches", "--remotes")

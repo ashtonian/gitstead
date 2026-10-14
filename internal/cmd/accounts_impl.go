@@ -11,10 +11,10 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/pathutil"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/pathutil"
+	"github.com/ashtonian/gitstead/internal/reconcile"
 )
 
 // AccountsCmd groups the accounts subcommands.
@@ -60,7 +60,7 @@ func (c *AccountsListCmd) Run(ctx *Context) error {
 		return ctx.Emit(accounts)
 	}
 	if len(accounts) == 0 {
-		fmt.Println("No accounts configured; `git-mgr setup` adds them.")
+		fmt.Println("No accounts configured; `gitstead setup` adds them.")
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -81,7 +81,7 @@ func (c *AccountsListCmd) Run(ctx *Context) error {
 
 // AccountsGitconfigCmd generates includeIf config for accounts.
 type AccountsGitconfigCmd struct {
-	Write   bool `help:"Write the account files and the includeIf file to git-mgr's config directory."`
+	Write   bool `help:"Write the account files and the includeIf file to gitstead's config directory."`
 	Install bool `help:"Write them, and include the includeIf file from your global git config (git config --global --add include.path), if it isn't already."`
 }
 
@@ -96,7 +96,7 @@ type gitconfigJSON struct {
 
 // Run makes, for each account with something to set and folders of its own,
 // a git config file of its identity, signing and SSH key, and one file of
-// includeIf sections that applies each to repos under its folders. git-mgr
+// includeIf sections that applies each to repos under its folders. gitstead
 // writes the same settings into the repos it manages; this covers repos you
 // clone yourself there. A folder two accounts share is left out: neither's
 // identity would be right for it. Deeper folders come last, so the account
@@ -144,7 +144,7 @@ func (c *AccountsGitconfigCmd) Run(ctx *Context) error {
 	for i, inc := range includes {
 		entries[i] = gitConfigEntry{"includeIf.gitdir:" + gitdirPattern(inc.folder) + ".path", inc.file}
 	}
-	const header = "# Written by git-mgr accounts gitconfig: each account's git config for repos\n# under its folders. Change accounts in git-mgr's config and run it again.\n"
+	const header = "# Written by gitstead accounts gitconfig: each account's git config for repos\n# under its folders. Change accounts in gitstead's config and run it again.\n"
 	if doc.Text, err = gitConfigText(ctx, header, entries); err != nil {
 		return fmt.Errorf("making %s: %w", doc.File, err)
 	}
@@ -267,7 +267,7 @@ type gitConfigEntry struct{ key, value string }
 // entries in order. git writes it, so its quoting and escaping are git's, and
 // reads it back, which must give entries exactly.
 func gitConfigText(ctx *Context, header string, entries []gitConfigEntry) (string, error) {
-	tmp, err := os.CreateTemp("", "git-mgr-gitconfig-*")
+	tmp, err := os.CreateTemp("", "gitstead-gitconfig-*")
 	if err != nil {
 		return "", err
 	}

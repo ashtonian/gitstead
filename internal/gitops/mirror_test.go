@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/gitops"
 )
 
 // A mirror has every ref; an update follows moved refs and keeps ones

@@ -6,7 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitstead/internal/config"
 )
 
 // Render writes answers into a config document in place. Everything setup

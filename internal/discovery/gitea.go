@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitstead/internal/config"
 )
 
 // giteaPageSize is the per-page count for Gitea/Forgejo list endpoints.

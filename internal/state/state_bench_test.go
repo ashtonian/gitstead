@@ -21,7 +21,7 @@ func scaleState(b *testing.B, n int) string {
 			Cloned: true, DiscoveredBy: "work", Tags: []string{"work", "go"},
 			ManagedConfig: map[string]string{"core.sshcommand": "ssh -i '/Users/me/.ssh/id_work' -o IdentitiesOnly=yes", "user.email": "me@acme.com"},
 			Status:        "clean", CurrentBranch: "main", LastFetch: now, BackupStatus: BackupStatus{LastBackup: now},
-			OffsiteStatus: OffsiteStatus{OffsiteRemote: "origin", OffsiteNamespace: "refs/git-mgr/mac-1a2b3c/0123456789abcdef", OffsiteWIP: []string{"20261012T181037.050Z"}, LastOffsite: now},
+			OffsiteStatus: OffsiteStatus{OffsiteRemote: "origin", OffsiteNamespace: "refs/gitstead/mac-1a2b3c/0123456789abcdef", OffsiteWIP: []string{"20261012T181037.050Z"}, LastOffsite: now},
 		}
 	}
 	if err := s.Save(); err != nil {

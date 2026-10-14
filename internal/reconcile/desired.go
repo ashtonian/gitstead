@@ -8,13 +8,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/discovery"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/pathtemplate"
-	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/shellutil"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/discovery"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/pathtemplate"
+	"github.com/ashtonian/gitstead/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/shellutil"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
 // Managed git config keys, in the lower-case form `git config --list` reports.
@@ -69,7 +69,7 @@ type Repo struct {
 	ProviderID string
 	Path       string
 	URL        string
-	SSHKey     string   // the key git-mgr uses for this repo; "" for ssh's own choice
+	SSHKey     string   // the key gitstead uses for this repo; "" for ssh's own choice
 	Account    string   // the account covering it; "" for none
 	Tags       []string // sorted
 	UserTags   []string
@@ -88,14 +88,14 @@ type Repo struct {
 	accountConfig map[string]string
 }
 
-// SSHCommand is the core.sshCommand git-mgr writes for a repo with a
+// SSHCommand is the core.sshCommand gitstead writes for a repo with a
 // configured key, so your own git commands in it use that key. Host-key
 // checking is left to your ssh config.
 func SSHCommand(key string) string {
 	return "ssh -i " + shellutil.Quote(key) + " -o IdentitiesOnly=yes"
 }
 
-// managedConfig is the repo-local git config git-mgr keeps for a copy: the
+// managedConfig is the repo-local git config gitstead keeps for a copy: the
 // SSH key for SSH remotes, what the covering account asks for, and Git LFS
 // kept from downloading under clone.lfs: skip -- for existing clones' later
 // checkouts too.
@@ -261,7 +261,7 @@ func tagUnion(groups ...[]string) []string {
 }
 
 // CopyAccess is what config gives a clone of the repo with key, found by
-// rule, whose origin is url: the SSH key git-mgr fetches it with ("" for
+// rule, whose origin is url: the SSH key gitstead fetches it with ("" for
 // ssh's own choice) and the managed git config written into it.
 func CopyAccess(cfg *config.Config, key, rule, url string) (sshKey string, managed map[string]string) {
 	r := Repo{Key: key, Rule: rule, URL: url}

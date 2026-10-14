@@ -1,5 +1,5 @@
 // Package activity reads what agents' terminals show: when a tmux pane last
-// printed, or the state Muxy reports for an agent. `git-mgr top` shows it,
+// printed, or the state Muxy reports for an agent. `gitstead top` shows it,
 // and `ws run` watches its own pane with it to tell when its agent is
 // waiting for you.
 package activity
@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	agents "github.com/ashtonian/git-mgr/internal/agent"
+	agents "github.com/ashtonian/gitstead/internal/agent"
 )
 
 // Activity is what an agent's terminal shows.

@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/procutil"
-	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/shellutil"
+	"github.com/ashtonian/gitstead/internal/procutil"
+	"github.com/ashtonian/gitstead/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/shellutil"
 )
 
-// batchEnv keeps git and its helpers from waiting on a person: git-mgr runs
+// batchEnv keeps git and its helpers from waiting on a person: gitstead runs
 // git in parallel and unattended, where a prompt can only hang the run.
 var batchEnv = []string{
 	"GIT_TERMINAL_PROMPT=0",     // git's own username/password prompt
@@ -24,7 +24,7 @@ var batchEnv = []string{
 }
 
 // BatchEnv is the environment that keeps git and its helpers from prompting,
-// for other programs git-mgr runs unattended.
+// for other programs gitstead runs unattended.
 func BatchEnv() []string { return slices.Clone(batchEnv) }
 
 // killGrace bounds how long Wait waits for output after git is killed; a

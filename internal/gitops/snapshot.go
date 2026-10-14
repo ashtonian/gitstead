@@ -14,10 +14,10 @@ import (
 )
 
 // snapshotIdent authors snapshot commits. A fixed identity keeps snapshots
-// working on machines with no user.email and marks them as git-mgr's.
+// working on machines with no user.email and marks them as gitstead's.
 var snapshotIdent = []string{
-	"GIT_AUTHOR_NAME=git-mgr", "GIT_AUTHOR_EMAIL=git-mgr@localhost",
-	"GIT_COMMITTER_NAME=git-mgr", "GIT_COMMITTER_EMAIL=git-mgr@localhost",
+	"GIT_AUTHOR_NAME=gitstead", "GIT_AUTHOR_EMAIL=gitstead@localhost",
+	"GIT_COMMITTER_NAME=gitstead", "GIT_COMMITTER_EMAIL=gitstead@localhost",
 }
 
 // Snapshot is a working copy's state stored as commits in the layout `git
@@ -67,7 +67,7 @@ type SnapshotLimits struct {
 // signed.
 func TakeSnapshot(ctx context.Context, repoPath string, limits SnapshotLimits) (Snapshot, error) {
 	var snap Snapshot
-	tmpDir, err := os.MkdirTemp("", "git-mgr-snapshot-")
+	tmpDir, err := os.MkdirTemp("", "gitstead-snapshot-")
 	if err != nil {
 		return snap, fmt.Errorf("creating temporary index dir: %w", err)
 	}
@@ -143,7 +143,7 @@ func TakeSnapshot(ctx context.Context, repoPath string, limits SnapshotLimits) (
 			return snap, err
 		}
 	}
-	if snap.Commit, err = commit(workTree, "git-mgr snapshot on "+branch, snap.Base, snap.Index, snap.Untracked); err != nil {
+	if snap.Commit, err = commit(workTree, "gitstead snapshot on "+branch, snap.Base, snap.Index, snap.Untracked); err != nil {
 		return snap, err
 	}
 	return snap, nil
@@ -234,7 +234,7 @@ func readSnapshot(ctx context.Context, repoPath, commit string) (Snapshot, error
 	}
 	// Unborn layout: index commit first, both parentless.
 	if len(parents) == 0 || len(parents) > 2 {
-		return snap, fmt.Errorf("%s is not a git-mgr snapshot", commit)
+		return snap, fmt.Errorf("%s is not a gitstead snapshot", commit)
 	}
 	snap.Index = parents[0]
 	if len(parents) == 2 {
@@ -251,7 +251,7 @@ func wipCommit(ctx context.Context, repoPath string, snap Snapshot) (string, err
 	if err != nil {
 		return "", err
 	}
-	args := []string{"commit-tree", "--no-gpg-sign", snap.Commit + "^{tree}", "-m", "git-mgr WIP on " + currentBranchLabel(ctx, repoPath)}
+	args := []string{"commit-tree", "--no-gpg-sign", snap.Commit + "^{tree}", "-m", "gitstead WIP on " + currentBranchLabel(ctx, repoPath)}
 	if snap.Base != "" {
 		args = append(args, "-p", snap.Base)
 	}

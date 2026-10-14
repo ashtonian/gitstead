@@ -13,7 +13,7 @@ type MirrorConfig struct {
 	// overrides[].mirror turn it on or off for some.
 	Enabled bool `koanf:"enabled" yaml:"enabled"`
 	// Dir holds the mirrors, at <dir>/<host>/<owner>/<name>.git: a backup
-	// disk, a NAS mount. Empty for ~/.local/share/git-mgr/mirrors.
+	// disk, a NAS mount. Empty for ~/.local/share/gitstead/mirrors.
 	Dir string `koanf:"dir" yaml:"dir,omitempty"`
 	// Interval is how long sync leaves a mirror before updating it again.
 	Interval time.Duration `koanf:"interval" yaml:"interval" default:"24h" validate:"min=0"`

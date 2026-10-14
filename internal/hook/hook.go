@@ -1,5 +1,5 @@
 // Package hook runs the commands config gives for an event in a checkout
-// git-mgr has just made: post_clone in a repo's new clone, post_create in a
+// gitstead has just made: post_clone in a repo's new clone, post_create in a
 // new workspace copy. Commands come only from config, never from a
 // repository.
 package hook
@@ -16,10 +16,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/pathutil"
-	"github.com/ashtonian/git-mgr/internal/procutil"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/pathutil"
+	"github.com/ashtonian/gitstead/internal/procutil"
 )
 
 // Events.
@@ -52,14 +52,14 @@ type Hook struct {
 	Vars []string
 }
 
-// Env is what a hook is told of its checkout, as GIT_MGR_* variables; empty
+// Env is what a hook is told of its checkout, as GITSTEAD_* variables; empty
 // fields are left out.
 type Env struct {
-	Repo      string // GIT_MGR_REPO: the tracked repo's key
-	Source    string // GIT_MGR_SOURCE: the repo's clone, a copy is made from
-	Workspace string // GIT_MGR_WORKSPACE
-	Agent     string // GIT_MGR_AGENT
-	Branch    string // GIT_MGR_BRANCH: the copy's branch
+	Repo      string // GITSTEAD_REPO: the tracked repo's key
+	Source    string // GITSTEAD_SOURCE: the repo's clone, a copy is made from
+	Workspace string // GITSTEAD_WORKSPACE
+	Agent     string // GITSTEAD_AGENT
+	Branch    string // GITSTEAD_BRANCH: the copy's branch
 }
 
 // Runner runs hooks.
@@ -143,13 +143,13 @@ func (r Runner) run(ctx context.Context, h Hook, command string, out io.Writer) 
 }
 
 func (h Hook) environ() []string {
-	env := append(slices.Clone(h.Vars), "GIT_MGR_EVENT="+h.Event, "GIT_MGR_PATH="+h.Dir)
+	env := append(slices.Clone(h.Vars), "GITSTEAD_EVENT="+h.Event, "GITSTEAD_PATH="+h.Dir)
 	for k, v := range map[string]string{
-		"GIT_MGR_REPO":      h.Env.Repo,
-		"GIT_MGR_SOURCE":    h.Env.Source,
-		"GIT_MGR_WORKSPACE": h.Env.Workspace,
-		"GIT_MGR_AGENT":     h.Env.Agent,
-		"GIT_MGR_BRANCH":    h.Env.Branch,
+		"GITSTEAD_REPO":      h.Env.Repo,
+		"GITSTEAD_SOURCE":    h.Env.Source,
+		"GITSTEAD_WORKSPACE": h.Env.Workspace,
+		"GITSTEAD_AGENT":     h.Env.Agent,
+		"GITSTEAD_BRANCH":    h.Env.Branch,
 	} {
 		if v != "" {
 			env = append(env, k+"="+v)

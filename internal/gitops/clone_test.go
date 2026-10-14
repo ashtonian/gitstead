@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/gitops"
 )
 
 func TestClone(t *testing.T) {
@@ -17,8 +17,8 @@ func TestClone(t *testing.T) {
 	parent := t.TempDir()
 
 	// What a killed run left behind is swept; a running clone's is not.
-	dead := filepath.Join(parent, ".git-mgr-clone-app-dead")
-	running := filepath.Join(parent, ".git-mgr-clone-app-running")
+	dead := filepath.Join(parent, ".gitstead-clone-app-dead")
+	running := filepath.Join(parent, ".gitstead-clone-app-running")
 	for _, d := range []string{dead, running} {
 		if err := os.MkdirAll(filepath.Join(d, ".git"), 0o755); err != nil {
 			t.Fatal(err)

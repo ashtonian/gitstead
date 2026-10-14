@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/pathutil"
+	"github.com/ashtonian/gitstead/internal/pathutil"
 )
 
 // BackupConfig holds backup-related settings.
@@ -78,12 +78,12 @@ func WithClock(now func() time.Time) BackupOption { return func(c *BackupConfig)
 // outside refs/heads and refs/stash, so it stays invisible to git branch, git
 // stash list, git log and IDEs. Linked worktrees share refs, which is why each
 // copy gets its own namespace.
-const backupRefPrefix = "refs/git-mgr/backups/"
+const backupRefPrefix = "refs/gitstead/backups/"
 
 // submoduleRefPrefix holds, as <prefix><copy ID>/<backup ID>, a blob listing
 // the submodules' backups that go with a backup (SubmoduleBackups as JSON),
 // for a backup kept only as a snapshot ref.
-const submoduleRefPrefix = "refs/git-mgr/backup-submodules/"
+const submoduleRefPrefix = "refs/gitstead/backup-submodules/"
 
 // SubmoduleBackup names the backup of one submodule that goes with its
 // parent's: the submodule's own copy ID and backup ID.

@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/repourl"
 )
 
 // --- Path helpers ---

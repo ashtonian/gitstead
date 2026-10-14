@@ -3,7 +3,7 @@ package pathtemplate_test
 import (
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/pathtemplate"
+	"github.com/ashtonian/gitstead/internal/pathtemplate"
 )
 
 func TestResolve(t *testing.T) {
@@ -14,8 +14,8 @@ func TestResolve(t *testing.T) {
 	}{
 		{
 			"{{.Host}}/{{.Owner}}/{{.Name}}",
-			pathtemplate.RepoData{Host: "github.com", Owner: "ashtonian", Name: "git-mgr", FullName: "ashtonian/git-mgr"},
-			"github.com/ashtonian/git-mgr",
+			pathtemplate.RepoData{Host: "github.com", Owner: "ashtonian", Name: "gitstead", FullName: "ashtonian/gitstead"},
+			"github.com/ashtonian/gitstead",
 		},
 		{
 			"{{.Name}}",

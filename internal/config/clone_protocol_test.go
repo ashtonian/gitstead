@@ -3,7 +3,7 @@ package config_test
 import (
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitstead/internal/config"
 )
 
 func TestCloneProtocolFor(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/ashtonian/git-mgr/internal/workspace"
+	"github.com/ashtonian/gitstead/internal/workspace"
 )
 
 // WSPruneCmd removes copies that hold no unique work, so finished or idle

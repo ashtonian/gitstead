@@ -11,17 +11,17 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/state"
 	"github.com/willabides/kongplete"
 )
 
 // CLI defines the top-level command structure.
 type CLI struct {
 	// Global flags
-	Config  string `help:"Config file path ($GIT_MGR_CONFIG); without it, $XDG_CONFIG_HOME/git-mgr/config.yaml (~/.config/git-mgr/config.yaml) if it exists, else the defaults." env:"GIT_MGR_CONFIG" type:"path"`
-	State   string `help:"State file path ($GIT_MGR_STATE); without it, $XDG_DATA_HOME/git-mgr/state.yaml (~/.local/share/git-mgr/state.yaml)." env:"GIT_MGR_STATE" type:"path"`
+	Config  string `help:"Config file path ($GITSTEAD_CONFIG); without it, $XDG_CONFIG_HOME/gitstead/config.yaml (~/.config/gitstead/config.yaml) if it exists, else the defaults." env:"GITSTEAD_CONFIG" type:"path"`
+	State   string `help:"State file path ($GITSTEAD_STATE); without it, $XDG_DATA_HOME/gitstead/state.yaml (~/.local/share/gitstead/state.yaml)." env:"GITSTEAD_STATE" type:"path"`
 	Verbose bool   `help:"Verbose output." short:"v"`
 	Quiet   bool   `help:"Suppress non-error output." short:"q"`
 	Jobs    int    `help:"Max concurrent git operations (default 8)." short:"j" name:"concurrency"`
@@ -29,7 +29,7 @@ type CLI struct {
 
 	// Commands
 	Version    VersionCmd    `cmd:"" help:"Print version information."`
-	Setup      SetupCmd      `cmd:"" help:"Set up git-mgr, or change your setup: accounts, layout, what to track, features."`
+	Setup      SetupCmd      `cmd:"" help:"Set up gitstead, or change your setup: accounts, layout, what to track, features."`
 	Init       InitCmd       `cmd:"" help:"Create a config file with sensible defaults, without asking."`
 	Bootstrap  BootstrapCmd  `cmd:"" help:"Set up a fresh machine: init, doctor, discover, sync, install agent."`
 	Discover   DiscoverCmd   `cmd:"" help:"Discover repos from configured providers."`
@@ -59,7 +59,7 @@ type CLI struct {
 	Path       PathCmd       `cmd:"" help:"Print the path of a repo, workspace or agent's folder from part of its name."`
 	Cd         CdCmd         `cmd:"" help:"Change directory to a repo, workspace or agent's folder (needs shell-init)."`
 	Open       OpenCmd       `cmd:"" help:"Open a repo, workspace or agent's folder in your editor; --web opens the repo's page."`
-	ShellInit  ShellInitCmd  `cmd:"" name:"shell-init" help:"Print the shell function that makes git-mgr cd change directory."`
+	ShellInit  ShellInitCmd  `cmd:"" name:"shell-init" help:"Print the shell function that makes gitstead cd change directory."`
 
 	InstallAgent       InstallAgentCmd              `cmd:"" name:"install-agent" help:"Install/remove a periodic sync agent (launchd/systemd/cron)."`
 	InstallCompletions kongplete.InstallCompletions `cmd:"" name:"install-completions" help:"Output a shell completion script (bash/zsh/fish)."`
@@ -120,7 +120,7 @@ func (c *Context) StatePath() string {
 }
 
 // LoadConfig loads and validates the config file. Only the default file may
-// be missing, when none was given: one given by --config or $GIT_MGR_CONFIG,
+// be missing, when none was given: one given by --config or $GITSTEAD_CONFIG,
 // whatever its path, must exist.
 func (c *Context) LoadConfig() (*config.Config, error) {
 	if c.cfg != nil {
@@ -167,13 +167,13 @@ func (c *Context) Emit(v any) error {
 	return err
 }
 
-// relay writes data, the --json document of git-mgr run elsewhere, as this
+// relay writes data, the --json document of gitstead run elsewhere, as this
 // command's, once it has checked it is one.
 func (c *Context) relay(data []byte, from string) error {
 	var doc json.RawMessage
 	dec := json.NewDecoder(bytes.NewReader(data))
 	if err := dec.Decode(&doc); err != nil || !errors.Is(dec.Decode(new(json.RawMessage)), io.EOF) {
-		return fmt.Errorf("git-mgr on %s didn't print one JSON document (is it older than this one?): %s", from, firstLineOf(string(data)))
+		return fmt.Errorf("gitstead on %s didn't print one JSON document (is it older than this one?): %s", from, firstLineOf(string(data)))
 	}
 	return c.Emit(doc)
 }
@@ -230,7 +230,7 @@ func (c *Context) Logger() *slog.Logger {
 	if settings.File != "" {
 		f, err := openLogFile(config.ExpandHome(settings.File))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "git-mgr: logging only to stderr: %v\n", err)
+			fmt.Fprintf(os.Stderr, "gitstead: logging only to stderr: %v\n", err)
 		} else {
 			h = slog.NewMultiHandler(h, handler(f, file))
 		}

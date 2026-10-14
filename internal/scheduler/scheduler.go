@@ -1,4 +1,4 @@
-// Package scheduler installs and removes background `git-mgr sync` runs with
+// Package scheduler installs and removes background `gitstead sync` runs with
 // the host's scheduler: a launchd agent or daemon on macOS, a systemd user
 // timer on Linux, or a crontab entry.
 package scheduler
@@ -15,11 +15,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/shellutil"
+	"github.com/ashtonian/gitstead/internal/shellutil"
 )
 
 // labelPrefix names every schedule's launchd label and crontab marker.
-const labelPrefix = "com.ashtonian.git-mgr"
+const labelPrefix = "com.ashtonian.gitstead"
 
 // DefaultName is the schedule installed when none is named.
 const DefaultName = "default"
@@ -55,7 +55,7 @@ type Schedule struct {
 	Name     string
 	Kind     Kind
 	Interval time.Duration
-	Bin      string            // a stable path to git-mgr; see StableBinary
+	Bin      string            // a stable path to gitstead; see StableBinary
 	Global   []string          // flags before the subcommand: --config, --state
 	Sync     []string          // flags for sync: which repos it runs on
 	Env      map[string]string // captured at install; see CaptureEnv
@@ -104,9 +104,9 @@ func (s Schedule) Label() string {
 // unit is the schedule's systemd unit name, without the suffix.
 func (s Schedule) unit() string {
 	if s.Name == DefaultName {
-		return "git-mgr"
+		return "gitstead"
 	}
-	return "git-mgr-" + s.Name
+	return "gitstead-" + s.Name
 }
 
 // Every is the interval as people write it: 15m, 2h.
@@ -204,7 +204,7 @@ func (s Schedule) Plist() string {
 // Service renders the systemd service unit.
 func (s Schedule) Service() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[Unit]\nDescription=git-mgr sync (%s)\n\n[Service]\nType=oneshot\n", s.Name)
+	fmt.Fprintf(&b, "[Unit]\nDescription=gitstead sync (%s)\n\n[Service]\nType=oneshot\n", s.Name)
 	fmt.Fprintf(&b, "ExecStart=%s\n", systemdArgv(s.Argv()))
 	for _, k := range slices.Sorted(maps.Keys(s.Env)) {
 		fmt.Fprintf(&b, "Environment=%s\n", systemdQuote(k+"="+s.Env[k]))
@@ -225,7 +225,7 @@ func (s Schedule) Timer() string {
 		spec = fmt.Sprintf("*-*-* 00/%d:00:00", c.hours)
 	}
 	return fmt.Sprintf(`[Unit]
-Description=Run git-mgr sync (%s) every %s
+Description=Run gitstead sync (%s) every %s
 
 [Timer]
 OnCalendar=%s
@@ -331,20 +331,20 @@ func inTempDir(path string) bool {
 	return false
 }
 
-// StableBinary chooses the git-mgr path a schedule runs: the one on PATH when
+// StableBinary chooses the gitstead path a schedule runs: the one on PATH when
 // it is this binary (exe), since a package manager's link there survives
 // upgrades. A path an upgrade or cleanup removes -- the Nix store, a Homebrew
 // Cellar, a temporary build -- is refused. sameFile reports whether two paths
 // are one file; SameFile does for real files.
 func StableBinary(exe string, lookPath func(string) (string, error), sameFile func(a, b string) bool) (string, error) {
-	if onPath, err := lookPath("git-mgr"); err == nil && !ephemeral(onPath) && sameFile(onPath, exe) {
+	if onPath, err := lookPath("gitstead"); err == nil && !ephemeral(onPath) && sameFile(onPath, exe) {
 		if abs, err := filepath.Abs(onPath); err == nil {
 			return abs, nil
 		}
 	}
 	if ephemeral(exe) {
-		return "", fmt.Errorf("git-mgr is running from %s, which an upgrade or cleanup removes; "+
-			"put git-mgr on PATH (or pass --bin) and install again", exe)
+		return "", fmt.Errorf("gitstead is running from %s, which an upgrade or cleanup removes; "+
+			"put gitstead on PATH (or pass --bin) and install again", exe)
 	}
 	return exe, nil
 }

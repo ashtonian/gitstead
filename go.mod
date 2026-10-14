@@ -1,4 +1,4 @@
-module github.com/ashtonian/git-mgr
+module github.com/ashtonian/gitstead
 
 go 1.26.3
 

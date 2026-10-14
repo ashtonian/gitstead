@@ -3,7 +3,7 @@ package discovery
 import (
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitstead/internal/config"
 )
 
 func TestParseManualRepo(t *testing.T) {

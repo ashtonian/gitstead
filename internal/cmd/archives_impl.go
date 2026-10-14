@@ -14,11 +14,11 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/pathutil"
-	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/pathutil"
+	"github.com/ashtonian/gitstead/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
 // ArchivesCmd groups the archive catalog's subcommands.
@@ -130,7 +130,7 @@ func (c *ArchivesShowCmd) Run(ctx *Context) error {
 	switch {
 	case meta.Clone != "":
 		fmt.Printf("  clone:     %s\n", tildify(meta.Clone))
-		fmt.Printf("\nRestore:\n  git-mgr archives restore %s\n", a.ID)
+		fmt.Printf("\nRestore:\n  gitstead archives restore %s\n", a.ID)
 	case meta.Bundle != "":
 		fmt.Printf("  bundle:    %s\n", tildify(meta.Bundle))
 		switch {
@@ -139,10 +139,10 @@ func (c *ArchivesShowCmd) Run(ctx *Context) error {
 		case meta.Base != "":
 			fmt.Printf("             only what %s lacked: it restores into a clone of that, or of origin\n", tildify(meta.Base))
 		}
-		fmt.Printf("\nRestore:\n  git-mgr archives restore %s --to <dir>\nor by hand:\n  %s\n", a.ID, strings.ReplaceAll(meta.Restore, " && ", " &&\n    "))
+		fmt.Printf("\nRestore:\n  gitstead archives restore %s --to <dir>\nor by hand:\n  %s\n", a.ID, strings.ReplaceAll(meta.Restore, " && ", " &&\n    "))
 	}
 	for _, sub := range slices.Sorted(maps.Keys(meta.Submodules)) {
-		fmt.Printf("  submodule %s: git-mgr archives show %s\n", sub, archiveID(meta.Submodules[sub]))
+		fmt.Printf("  submodule %s: gitstead archives show %s\n", sub, archiveID(meta.Submodules[sub]))
 	}
 	if meta.LFS != "" {
 		fmt.Printf("  LFS objects: %s -- copy them into the restored repo's .git/lfs/objects\n", tildify(meta.LFS))
@@ -219,7 +219,7 @@ func (c *ArchivesRestoreCmd) Run(ctx *Context) error {
 	// Tracked by hand, its repo is never judged stale again: it is gone
 	// upstream, and you asked for it back.
 	if err := (&AdoptCmd{}).adoptSingle(ctx, cfg, st, dest); err != nil {
-		return ctx.finish(doc, fmt.Errorf("restored %s to %s, but tracking it: %w; run git-mgr adopt %s", a.ID, dest, err, dest))
+		return ctx.finish(doc, fmt.Errorf("restored %s to %s, but tracking it: %w; run gitstead adopt %s", a.ID, dest, err, dest))
 	}
 	doc["tracked"] = true
 	return ctx.finish(doc, nil)
@@ -342,7 +342,7 @@ func catalogEntry(cfg *config.Config, st *state.State, id string) (state.Archive
 	all := catalog(cfg, st)
 	i := slices.IndexFunc(all, func(a state.ArchiveEntry) bool { return a.ID == id })
 	if i < 0 {
-		return state.ArchiveEntry{}, fmt.Errorf("no archive %q on record or in %s; git-mgr archives ls lists them", id, cfg.Backup.ArchiveDir)
+		return state.ArchiveEntry{}, fmt.Errorf("no archive %q on record or in %s; gitstead archives ls lists them", id, cfg.Backup.ArchiveDir)
 	}
 	return all[i], nil
 }

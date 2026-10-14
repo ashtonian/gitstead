@@ -8,7 +8,7 @@ import (
 	"os/exec"
 )
 
-// Plugin is a launcher outside git-mgr: an executable git-mgr-launch-<name>
+// Plugin is a launcher outside gitstead: an executable gitstead-launch-<name>
 // on PATH, given the launch plan as JSON on stdin, with its options from
 // launchers.plugins.<name>. It has the terminal, and its exit status is the
 // launch's.

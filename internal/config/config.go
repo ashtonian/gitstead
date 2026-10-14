@@ -13,7 +13,7 @@ type Config struct {
 	Layout        string `koanf:"layout" yaml:"layout,omitempty" validate:"omitempty,oneof=owner/name host/owner/name name"`
 	CloneProtocol string `koanf:"clone_protocol" yaml:"clone_protocol" default:"ssh"                            validate:"oneof=ssh https"`
 	Concurrency   int    `koanf:"concurrency"   yaml:"concurrency"   default:"8"                                    validate:"min=1,max=128"`
-	// LockTimeout is how long a command waits for another git-mgr run to
+	// LockTimeout is how long a command waits for another gitstead run to
 	// finish changing state before giving up.
 	LockTimeout time.Duration   `koanf:"lock_timeout" yaml:"lock_timeout" default:"2m" validate:"min=0"`
 	Accounts    []Account       `koanf:"accounts"      yaml:"accounts,omitempty" validate:"dive"`
@@ -37,7 +37,7 @@ type Config struct {
 	Notify     NotifyConfig     `koanf:"notify"        yaml:"notify"`
 	Hooks      HooksConfig      `koanf:"hooks"         yaml:"hooks"`
 	Mirror     MirrorConfig     `koanf:"mirror"        yaml:"mirror"`
-	// Editor is the command `git-mgr open` opens a path with; empty for
+	// Editor is the command `gitstead open` opens a path with; empty for
 	// $VISUAL, then $EDITOR.
 	Editor string    `koanf:"editor" yaml:"editor,omitempty"`
 	Log    LogConfig `koanf:"log"           yaml:"log"`
@@ -392,7 +392,7 @@ type BackupCfg struct {
 	// Untracked files over these limits are left out of a backup and reported.
 	MaxUntrackedFileMB  int `koanf:"max_untracked_file_mb"  yaml:"max_untracked_file_mb"  default:"50"  validate:"min=0"`
 	MaxUntrackedTotalMB int `koanf:"max_untracked_total_mb" yaml:"max_untracked_total_mb" default:"500" validate:"min=0"`
-	// ArchiveDir receives what git-mgr keeps of a clone or worktree before
+	// ArchiveDir receives what gitstead keeps of a clone or worktree before
 	// deleting it -- a verified bundle of its unique work: uncommitted
 	// changes, untracked files, stashes, commits no remote has -- and whole
 	// clones archived instead of deleted. A clone it can't inspect or archive
@@ -405,18 +405,18 @@ type ReconcileConfig struct {
 	// Auto is what sync and discover --apply change on their own: "safe" applies
 	// changes that move or delete nothing (clone, set the remote URL, write
 	// managed git config, retag), "all" also moves repos, "none" only reports.
-	// `git-mgr apply` always applies everything.
+	// `gitstead apply` always applies everything.
 	Auto string `koanf:"auto" yaml:"auto" default:"safe" validate:"oneof=safe all none"`
-	// Drift is what happens when a value git-mgr set (a remote URL, a managed
+	// Drift is what happens when a value gitstead set (a remote URL, a managed
 	// git config key) was changed by hand: "report" leaves it, "overwrite"
-	// puts git-mgr's value back.
+	// puts gitstead's value back.
 	Drift string `koanf:"drift" yaml:"drift" default:"report" validate:"oneof=report overwrite"`
 }
 
 // RemoteSyncConfig is what of a working copy goes offsite, and where. An
 // account or an override can set it for the repos it covers.
 type RemoteSyncConfig struct {
-	// Enabled makes sync push offsite on its own; `git-mgr remote-sync`
+	// Enabled makes sync push offsite on its own; `gitstead remote-sync`
 	// pushes on demand either way.
 	Enabled bool `koanf:"enabled" yaml:"enabled"`
 	// Remote is a remote name, or a URL template ({{.Host}}, {{.Owner}},
@@ -433,7 +433,7 @@ type RemoteSyncConfig struct {
 	Unpushed string `koanf:"unpushed" yaml:"unpushed" default:"push" validate:"oneof=off bundle push"`
 	// Namespace is the hidden ref prefix each copy owns on the remote. It must
 	// include {{.Copy}} so copies never overwrite each other.
-	Namespace string `koanf:"namespace" yaml:"namespace" default:"refs/git-mgr/{{.Machine}}/{{.Copy}}"`
+	Namespace string `koanf:"namespace" yaml:"namespace" default:"refs/gitstead/{{.Machine}}/{{.Copy}}"`
 	// Keep is how long a pushed WIP ref stays; the current one always stays.
 	Keep time.Duration `koanf:"keep" yaml:"keep" default:"720h" validate:"min=0"`
 }
@@ -448,7 +448,7 @@ type NotifyConfig struct {
 	OnWaiting bool `koanf:"on_waiting" yaml:"on_waiting" default:"true"`
 	// WaitingAfter is how long an agent in a tmux pane must be quiet, after
 	// working, to count as waiting for you; 0 stops watching panes, leaving
-	// only what agents say themselves (`git-mgr ws waiting`).
+	// only what agents say themselves (`gitstead ws waiting`).
 	WaitingAfter time.Duration `koanf:"waiting_after" yaml:"waiting_after" default:"30s" validate:"min=0"`
 	// Timeout bounds sending one notification.
 	Timeout time.Duration `koanf:"timeout" yaml:"timeout" default:"10s" validate:"min=0"`

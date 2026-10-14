@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitstead/internal/config"
 )
 
 // muxyApp is the desktop app's CLI, used when muxy isn't on PATH.
@@ -124,7 +124,7 @@ func (m *Muxy) color(i int) string {
 }
 
 // layoutName names the layout file: Opts.LayoutName, else the agents'
-// profile, else git-mgr.
+// profile, else gitstead.
 func (m *Muxy) layoutName(p Plan) string {
 	if m.Opts.LayoutName != "" {
 		return m.Opts.LayoutName
@@ -136,7 +136,7 @@ func (m *Muxy) layoutName(p Plan) string {
 			}
 		}
 	}
-	return "git-mgr"
+	return "gitstead"
 }
 
 // muxyLayout is a Muxy layout file: what Apply Layout opens.

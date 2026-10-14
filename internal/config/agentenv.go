@@ -18,8 +18,8 @@ import (
 type PortsConfig struct {
 	// Base is the lowest port handed out; 0 hands out none.
 	Base int `koanf:"base" yaml:"base" default:"41000" validate:"min=0,max=65535"`
-	// Count is the size of each agent's block: GIT_MGR_PORT up to
-	// GIT_MGR_PORT+Count-1.
+	// Count is the size of each agent's block: GITSTEAD_PORT up to
+	// GITSTEAD_PORT+Count-1.
 	Count int `koanf:"count" yaml:"count" default:"10" validate:"min=0,max=1000"`
 }
 
@@ -30,7 +30,7 @@ type PortsOverride struct {
 }
 
 // AgentVars are what an agent's commands -- the agent itself, `ws exec`,
-// post_create hooks -- are told of it: as GIT_MGR_* variables, and to the
+// post_create hooks -- are told of it: as GITSTEAD_* variables, and to the
 // templates of its workspace's env.
 type AgentVars struct {
 	Workspace, Agent string
@@ -44,34 +44,34 @@ type AgentVars struct {
 	Cache string
 }
 
-// Environ is v as GIT_MGR_* variables; those without a value are left out.
+// Environ is v as GITSTEAD_* variables; those without a value are left out.
 func (v AgentVars) Environ() []string {
 	env := []string{
-		"GIT_MGR_WORKSPACE=" + v.Workspace,
-		"GIT_MGR_AGENT=" + v.Agent,
-		"GIT_MGR_AGENT_N=" + strconv.Itoa(v.N),
-		"GIT_MGR_REPLICA=" + v.Replica,
+		"GITSTEAD_WORKSPACE=" + v.Workspace,
+		"GITSTEAD_AGENT=" + v.Agent,
+		"GITSTEAD_AGENT_N=" + strconv.Itoa(v.N),
+		"GITSTEAD_REPLICA=" + v.Replica,
 	}
 	if v.Port > 0 {
-		env = append(env, "GIT_MGR_PORT="+strconv.Itoa(v.Port), "GIT_MGR_PORTS="+strconv.Itoa(v.Ports))
+		env = append(env, "GITSTEAD_PORT="+strconv.Itoa(v.Port), "GITSTEAD_PORTS="+strconv.Itoa(v.Ports))
 	}
 	if v.Cache != "" {
-		env = append(env, "GIT_MGR_CACHE="+v.Cache)
+		env = append(env, "GITSTEAD_CACHE="+v.Cache)
 	}
 	return env
 }
 
-// ContextVars are the variables git-mgr tells an agent's commands and hooks
+// ContextVars are the variables gitstead tells an agent's commands and hooks
 // where they are. A command started from inside one -- an agent running
-// git-mgr -- must not pass its own on to another, so Environ leaves them out.
+// gitstead -- must not pass its own on to another, so Environ leaves them out.
 var ContextVars = []string{
-	"GIT_MGR_WORKSPACE", "GIT_MGR_AGENT", "GIT_MGR_AGENT_N", "GIT_MGR_REPLICA",
-	"GIT_MGR_PORT", "GIT_MGR_PORTS", "GIT_MGR_CACHE",
-	"GIT_MGR_EVENT", "GIT_MGR_PATH", "GIT_MGR_REPO", "GIT_MGR_SOURCE", "GIT_MGR_BRANCH",
+	"GITSTEAD_WORKSPACE", "GITSTEAD_AGENT", "GITSTEAD_AGENT_N", "GITSTEAD_REPLICA",
+	"GITSTEAD_PORT", "GITSTEAD_PORTS", "GITSTEAD_CACHE",
+	"GITSTEAD_EVENT", "GITSTEAD_PATH", "GITSTEAD_REPO", "GITSTEAD_SOURCE", "GITSTEAD_BRANCH",
 }
 
 // Environ is this process's environment without its own ContextVars: what
-// git-mgr starts an agent, a hook or a command in a copy with, before adding
+// gitstead starts an agent, a hook or a command in a copy with, before adding
 // theirs.
 func Environ() []string {
 	return slices.DeleteFunc(os.Environ(), func(kv string) bool {
@@ -109,8 +109,8 @@ func checkEnv(where string, env map[string]string) error {
 		switch {
 		case !envNameRE.MatchString(name):
 			return fmt.Errorf("%s: env %q is not a variable name", where, name)
-		case strings.HasPrefix(name, "GIT_MGR_"):
-			return fmt.Errorf("%s: env %s: GIT_MGR_* variables are git-mgr's own", where, name)
+		case strings.HasPrefix(name, "GITSTEAD_"):
+			return fmt.Errorf("%s: env %s: GITSTEAD_* variables are gitstead's own", where, name)
 		}
 	}
 	sample := AgentVars{Workspace: "w", Agent: "agent-1", N: 1, Replica: "/w/agent-1", Port: 41000, Ports: 10, Cache: "/c/w"}

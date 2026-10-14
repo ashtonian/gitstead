@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	agents "github.com/ashtonian/git-mgr/internal/agent"
+	agents "github.com/ashtonian/gitstead/internal/agent"
 )
 
 // Watch watches one agent's terminal and says when the agent is waiting for

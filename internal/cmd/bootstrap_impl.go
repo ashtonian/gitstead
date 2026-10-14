@@ -76,7 +76,7 @@ func (c *BootstrapCmd) Run(ctx *Context) error {
 		agent := &InstallAgentCmd{Name: c.Profile, Tag: c.Profile, Interval: c.Interval}
 		if err := step("install-agent", agent.Run); err != nil {
 			fmt.Fprintf(os.Stderr, "install-agent failed (run it later): %v\n", err)
-			unfinished = &exitError{exitPartial, fmt.Errorf("bootstrapped, but installing the background sync failed: %w; run git-mgr install-agent%s", err, c.scheduleFlags())}
+			unfinished = &exitError{exitPartial, fmt.Errorf("bootstrapped, but installing the background sync failed: %w; run gitstead install-agent%s", err, c.scheduleFlags())}
 		}
 	}
 

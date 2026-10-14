@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitstead/internal/config"
 )
 
 // fakeProvider is a Provider whose results and enrichment behavior are scripted,

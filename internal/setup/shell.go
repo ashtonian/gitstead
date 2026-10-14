@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ashtonian/git-mgr/internal/pathutil"
+	"github.com/ashtonian/gitstead/internal/pathutil"
 )
 
 // ShellRC is the startup file of the user's shell, where setup adds the line
-// that loads git-mgr's shell integration (`git-mgr shell-init`): `git-mgr cd`
+// that loads gitstead's shell integration (`gitstead shell-init`): `gitstead cd`
 // changing directory, and tab completion.
 type ShellRC struct {
 	Shell string // bash, zsh or fish
@@ -22,8 +22,8 @@ type ShellRC struct {
 // The lines setup writes are kept between these markers, so running setup
 // again replaces them rather than adding more.
 const (
-	shellBlockStart = "# >>> git-mgr shell integration (git-mgr setup) >>>"
-	shellBlockEnd   = "# <<< git-mgr shell integration <<<"
+	shellBlockStart = "# >>> gitstead shell integration (gitstead setup) >>>"
+	shellBlockEnd   = "# <<< gitstead shell integration <<<"
 )
 
 // DetectShellRC finds the user's shell from $SHELL and its startup file:
@@ -55,16 +55,16 @@ func DetectShellRC(home, goos string, getenv func(string) string) (rc ShellRC, o
 	return ShellRC{}, false
 }
 
-// Line is what the startup file runs: git-mgr's shell integration, when
-// git-mgr is on PATH by then.
+// Line is what the startup file runs: gitstead's shell integration, when
+// gitstead is on PATH by then.
 func (rc ShellRC) Line() string {
 	if rc.Shell == "fish" {
-		return "command -q git-mgr; and git-mgr shell-init fish | source"
+		return "command -q gitstead; and gitstead shell-init fish | source"
 	}
-	return fmt.Sprintf(`command -v git-mgr >/dev/null 2>&1 && eval "$(git-mgr shell-init %s)"`, rc.Shell)
+	return fmt.Sprintf(`command -v gitstead >/dev/null 2>&1 && eval "$(gitstead shell-init %s)"`, rc.Shell)
 }
 
-// Integrated reports whether the startup file loads git-mgr's shell
+// Integrated reports whether the startup file loads gitstead's shell
 // integration already: setup's lines, or a shell-init line of your own.
 func (rc ShellRC) Integrated() (bool, error) {
 	data, err := os.ReadFile(rc.Path)
@@ -74,7 +74,7 @@ func (rc ShellRC) Integrated() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return strings.Contains(string(data), "git-mgr shell-init"), nil
+	return strings.Contains(string(data), "gitstead shell-init"), nil
 }
 
 // Install adds the integration to the startup file, or replaces what setup

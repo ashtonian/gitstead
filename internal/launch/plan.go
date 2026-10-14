@@ -1,18 +1,18 @@
 // Package launch opens agents' terminals: it turns a fleet -- workspaces
 // opened side by side -- into a launch plan, and a launcher (tmux, iTerm,
-// Muxy, or a git-mgr-launch-<name> plugin) turns the plan into terminals,
-// each running `git-mgr ws run` for one agent.
+// Muxy, or a gitstead-launch-<name> plugin) turns the plan into terminals,
+// each running `gitstead ws run` for one agent.
 package launch
 
 import (
 	"fmt"
 	"strings"
 
-	agents "github.com/ashtonian/git-mgr/internal/agent"
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/shellutil"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/workspace"
+	agents "github.com/ashtonian/gitstead/internal/agent"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/shellutil"
+	"github.com/ashtonian/gitstead/internal/state"
+	"github.com/ashtonian/gitstead/internal/workspace"
 )
 
 // Plan is what a launcher opens. It is also what a plugin receives, as
@@ -42,7 +42,7 @@ type Agent struct {
 	Dir     string `json:"dir"` // its replica
 	Title   string `json:"title"`
 	Profile string `json:"profile,omitempty"`
-	// Command is the shell command line the terminal runs: `git-mgr ws run`
+	// Command is the shell command line the terminal runs: `gitstead ws run`
 	// for the agent, which checks its copies, runs it and leaves a shell.
 	Command string `json:"command"`
 	// State is the agent's lifecycle state when the plan was made; a
@@ -50,7 +50,7 @@ type Agent struct {
 	State string `json:"state"`
 }
 
-// Invocation is how a terminal runs this git-mgr: its binary and the global
+// Invocation is how a terminal runs this gitstead: its binary and the global
 // flags that pick its config and state.
 type Invocation struct {
 	Bin    string
@@ -58,7 +58,7 @@ type Invocation struct {
 	State  string
 }
 
-// Command is the shell command line for git-mgr with args.
+// Command is the shell command line for gitstead with args.
 func (inv Invocation) Command(args ...string) string {
 	parts := []string{shellutil.Word(inv.Bin)}
 	if inv.Config != "" {
@@ -91,7 +91,7 @@ func Build(cfg *config.Config, st *state.State, req Request) (Plan, error) {
 	for _, name := range req.Workspaces {
 		ws := st.Workspaces[name]
 		if ws == nil {
-			return Plan{}, fmt.Errorf("workspace %q is not created; 'git-mgr ws ensure %s' or 'git-mgr apply' makes it", name, name)
+			return Plan{}, fmt.Errorf("workspace %q is not created; 'gitstead ws ensure %s' or 'gitstead apply' makes it", name, name)
 		}
 		profile := req.Agent
 		if profile == "" {

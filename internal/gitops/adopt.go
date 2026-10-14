@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/repourl"
 )
 
 // ParseRemoteURL parses a repo's origin remote URL into identity components.

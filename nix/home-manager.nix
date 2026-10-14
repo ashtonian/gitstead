@@ -1,20 +1,20 @@
-# home-manager module for git-mgr: the package, its config, and named
+# home-manager module for gitstead: the package, its config, and named
 # background syncs as systemd user timers (Linux) or launchd agents (macOS).
 #
-# `git-mgr install-agent` refuses a binary in /nix/store, which moves on every
+# `gitstead install-agent` refuses a binary in /nix/store, which moves on every
 # upgrade and is garbage-collected after; here the units are rebuilt with the
 # package on each switch, so the store path is the right one. The units match
-# what install-agent writes: `git-mgr sync --quiet` plus the schedule's
+# what install-agent writes: `gitstead sync --quiet` plus the schedule's
 # selection, every interval, at nice 10 with idle I/O, and on Linux with
 # Persistent=true so a run missed while the machine was off happens at boot.
 { config, lib, pkgs, ... }:
 
 let
-  cfg = config.programs.git-mgr;
+  cfg = config.programs.gitstead;
   yaml = pkgs.formats.yaml { };
   inherit (lib) mkOption mkEnableOption mkIf mkMerge types;
 
-  # An interval as git-mgr schedules it: minutes dividing an hour, or hours
+  # An interval as gitstead schedules it: minutes dividing an hour, or hours
   # dividing a day.
   parseInterval = name: interval:
     let
@@ -25,16 +25,16 @@ let
         || (unit == "h" && n >= 1 && n <= 24 && lib.mod 24 n == 0);
     in
     if ok then { inherit n unit; seconds = if unit == "m" then n * 60 else n * 3600; }
-    else throw "programs.git-mgr.schedules.${name}.interval: ${interval} can't be scheduled exactly; use one that divides an hour or a day (5m, 10m, 15m, 20m, 30m, 1h, 2h, 3h, 4h, 6h, 8h, 12h, 24h)";
+    else throw "programs.gitstead.schedules.${name}.interval: ${interval} can't be scheduled exactly; use one that divides an hour or a day (5m, 10m, 15m, 20m, 30m, 1h, 2h, 3h, 4h, 6h, 8h, 12h, 24h)";
 
   onCalendar = i:
     if i.unit == "m" then "*-*-* *:00/${toString i.n}:00"
     else if i.n < 24 then "*-*-* 00/${toString i.n}:00:00"
     else "*-*-* 00:00:00";
 
-  # The unit or agent name: git-mgr for the default schedule, else
-  # git-mgr-<name>, as install-agent names them.
-  unitName = name: if name == "default" then "git-mgr" else "git-mgr-${name}";
+  # The unit or agent name: gitstead for the default schedule, else
+  # gitstead-<name>, as install-agent names them.
+  unitName = name: if name == "default" then "gitstead" else "gitstead-${name}";
 
   globalArgs =
     lib.optionals (cfg.configFile != null) [ "--config" cfg.configFile ]
@@ -46,7 +46,7 @@ let
     ++ lib.optionals (s.set != null) [ "--set" s.set ]
     ++ s.extraArgs;
 
-  argv = s: [ "${cfg.package}/bin/git-mgr" ] ++ globalArgs ++ [ "sync" "--quiet" ] ++ syncArgs s;
+  argv = s: [ "${cfg.package}/bin/gitstead" ] ++ globalArgs ++ [ "sync" "--quiet" ] ++ syncArgs s;
 
   environment = s:
     { PATH = lib.makeBinPath ([ cfg.package ] ++ cfg.path); }
@@ -86,7 +86,7 @@ let
         type = types.listOf types.str;
         default = [ ];
         example = [ "--no-discover" ];
-        description = "More flags for git-mgr sync.";
+        description = "More flags for gitstead sync.";
       };
       environment = mkOption {
         type = types.attrsOf types.str;
@@ -97,12 +97,12 @@ let
   };
 in
 {
-  options.programs.git-mgr = {
-    enable = mkEnableOption "git-mgr, which clones, syncs and backs up git repos, and runs coding agents in workspaces";
+  options.programs.gitstead = {
+    enable = mkEnableOption "gitstead, which clones, syncs and backs up git repos, and runs coding agents in workspaces";
 
     package = mkOption {
       type = types.package;
-      description = "The git-mgr package.";
+      description = "The gitstead package.";
     };
 
     settings = mkOption {
@@ -116,7 +116,7 @@ in
         }
       '';
       description = ''
-        git-mgr's config, written to ~/.config/git-mgr/config.yaml; see
+        gitstead's config, written to ~/.config/gitstead/config.yaml; see
         config.example.yaml. Empty leaves the file alone. The file is then
         read-only, so commands that edit it (setup, ws create --save) fail:
         change it here instead.
@@ -126,13 +126,13 @@ in
     configFile = mkOption {
       type = types.nullOr types.str;
       default = null;
-      description = "Config file the schedules use; null for git-mgr's default, ~/.config/git-mgr/config.yaml.";
+      description = "Config file the schedules use; null for gitstead's default, ~/.config/gitstead/config.yaml.";
     };
 
     stateFile = mkOption {
       type = types.nullOr types.str;
       default = null;
-      description = "State file the schedules use; null for git-mgr's default, ~/.local/share/git-mgr/state.yaml.";
+      description = "State file the schedules use; null for gitstead's default, ~/.local/share/gitstead/state.yaml.";
     };
 
     path = mkOption {
@@ -160,8 +160,8 @@ in
 
     logFile = mkOption {
       type = types.str;
-      default = "${config.home.homeDirectory}/.local/share/git-mgr/git-mgr.log";
-      defaultText = lib.literalExpression ''"''${config.home.homeDirectory}/.local/share/git-mgr/git-mgr.log"'';
+      default = "${config.home.homeDirectory}/.local/share/gitstead/gitstead.log";
+      defaultText = lib.literalExpression ''"''${config.home.homeDirectory}/.local/share/gitstead/gitstead.log"'';
       description = "Where launchd agents write sync output; systemd logs to the journal.";
     };
 
@@ -175,7 +175,7 @@ in
         }
       '';
       description = ''
-        Named background syncs. git-mgr doctor checks only the schedules
+        Named background syncs. gitstead doctor checks only the schedules
         install-agent recorded, so these show there as not installed; check
         them with systemctl --user list-timers or launchctl list.
       '';
@@ -185,14 +185,14 @@ in
   config = mkIf cfg.enable (mkMerge [
     {
       home.packages = [ cfg.package ];
-      xdg.configFile."git-mgr/config.yaml" = mkIf (cfg.settings != { }) {
-        source = yaml.generate "git-mgr-config.yaml" cfg.settings;
+      xdg.configFile."gitstead/config.yaml" = mkIf (cfg.settings != { }) {
+        source = yaml.generate "gitstead-config.yaml" cfg.settings;
       };
     }
 
     (mkIf pkgs.stdenv.hostPlatform.isLinux {
       systemd.user.services = lib.mapAttrs' (name: s: lib.nameValuePair (unitName name) {
-        Unit.Description = "git-mgr sync (${name})";
+        Unit.Description = "gitstead sync (${name})";
         Service = {
           Type = "oneshot";
           ExecStart = systemdArgv (argv s);
@@ -204,7 +204,7 @@ in
       }) cfg.schedules;
 
       systemd.user.timers = lib.mapAttrs' (name: s: lib.nameValuePair (unitName name) {
-        Unit.Description = "Run git-mgr sync (${name}) every ${s.interval}";
+        Unit.Description = "Run gitstead sync (${name}) every ${s.interval}";
         Timer = {
           OnCalendar = onCalendar (parseInterval name s.interval);
           Persistent = true;

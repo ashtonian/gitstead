@@ -19,13 +19,13 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/discovery"
-	"github.com/ashtonian/git-mgr/internal/scheduler"
-	"github.com/ashtonian/git-mgr/internal/setup"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/discovery"
+	"github.com/ashtonian/gitstead/internal/scheduler"
+	"github.com/ashtonian/gitstead/internal/setup"
 )
 
-// SetupCmd walks through setting git-mgr up, or changing an existing setup.
+// SetupCmd walks through setting gitstead up, or changing an existing setup.
 type SetupCmd struct {
 	Yes         bool   `help:"Accept the detected and recommended answers without asking."`
 	Answers     string `help:"Read the answers from this YAML file instead of asking." type:"path"`
@@ -166,7 +166,7 @@ func (c *SetupCmd) Run(ctx *Context) error {
 		if err := writeAnswers(config.ExpandHome(c.SaveAnswers), answers); err != nil {
 			return err
 		}
-		fmt.Printf("Answers saved to %s; repeat this setup with `git-mgr setup --answers %s`.\n", c.SaveAnswers, c.SaveAnswers)
+		fmt.Printf("Answers saved to %s; repeat this setup with `gitstead setup --answers %s`.\n", c.SaveAnswers, c.SaveAnswers)
 	}
 
 	done, err := afterSetup(ctx, candidate, answers, det)
@@ -228,7 +228,7 @@ func afterSetup(ctx *Context, cfg *config.Config, a setup.Answers, det setup.Det
 	}
 	if a.Shell && det.ShellRC != nil {
 		rc := *det.ShellRC
-		step("shell", "Adding git-mgr to "+tildify(rc.Path), func(ctx *Context) error {
+		step("shell", "Adding gitstead to "+tildify(rc.Path), func(ctx *Context) error {
 			if err := rc.Install(); err != nil {
 				return err
 			}
@@ -260,29 +260,29 @@ func printSetupDone(configPath string, a setup.Answers, det setup.Detected, done
 	}
 	switch {
 	case a.Schedule && ok("schedule"):
-		fmt.Printf("  background sync    every %s; `git-mgr install-agent --list` shows it\n", scheduler.FormatInterval(a.Interval()))
+		fmt.Printf("  background sync    every %s; `gitstead install-agent --list` shows it\n", scheduler.FormatInterval(a.Interval()))
 	case !a.Schedule:
-		fmt.Println("  background sync    off; `git-mgr install-agent` turns it on")
+		fmt.Println("  background sync    off; `gitstead install-agent` turns it on")
 	}
 	if ok("git_includes") {
-		fmt.Println("  git identities     each account's, under its folders (`git-mgr accounts ls` lists them)")
+		fmt.Println("  git identities     each account's, under its folders (`gitstead accounts ls` lists them)")
 	}
 	if ok("shell") {
-		fmt.Printf("  shell              open a new terminal (or `exec %s`) for `git-mgr cd` and tab completion\n", det.ShellRC.Shell)
+		fmt.Printf("  shell              open a new terminal (or `exec %s`) for `gitstead cd` and tab completion\n", det.ShellRC.Shell)
 	}
 	if len(done.failed) > 0 {
 		fmt.Printf("  not done           %s (above); run setup again once fixed\n", strings.Join(done.failed, ", "))
 	}
 	fmt.Println("\nNext:")
 	if !ok("clone") {
-		fmt.Println("  git-mgr plan              what config would clone and change; `git-mgr apply` does it")
+		fmt.Println("  gitstead plan              what config would clone and change; `gitstead apply` does it")
 	}
-	fmt.Println("  git-mgr status            what git-mgr tracks, and how each repo is")
-	fmt.Println("  git-mgr cd <name>         jump to a repo (`git-mgr open <name>` opens it in your editor)")
+	fmt.Println("  gitstead status            what gitstead tracks, and how each repo is")
+	fmt.Println("  gitstead cd <name>         jump to a repo (`gitstead open <name>` opens it in your editor)")
 	if a.Workspaces != nil {
-		fmt.Println("  git-mgr ws create <name> --repo <repo> --save, then git-mgr ws open <name>   give a repo its agents")
+		fmt.Println("  gitstead ws create <name> --repo <repo> --save, then gitstead ws open <name>   give a repo its agents")
 	}
-	fmt.Println("  git-mgr doctor            if anything looks wrong")
+	fmt.Println("  gitstead doctor            if anything looks wrong")
 }
 
 // existingConfig loads the config at path, or nil if there is none yet.
@@ -299,7 +299,7 @@ func existingConfig(path string) (*config.Config, error) {
 
 // loadCandidate loads a rendered config without writing it in place.
 func loadCandidate(data []byte) (*config.Config, error) {
-	dir, err := os.MkdirTemp("", "git-mgr-setup-")
+	dir, err := os.MkdirTemp("", "gitstead-setup-")
 	if err != nil {
 		return nil, err
 	}
@@ -351,14 +351,14 @@ func printSetupReview(path string, before, after []byte, a setup.Answers, det se
 		then = append(then, fmt.Sprintf("give each account's identity to repos you clone yourself under its folders: write %s and include it from your global git config", tildify(accountsIncludeFile())))
 	}
 	if a.Shell && det.ShellRC != nil {
-		then = append(then, fmt.Sprintf("add `git-mgr cd` and tab completion to %s", tildify(det.ShellRC.Path)))
+		then = append(then, fmt.Sprintf("add `gitstead cd` and tab completion to %s", tildify(det.ShellRC.Path)))
 	}
 	if a.Clone {
-		then = append(then, "clone what your accounts track (git-mgr discover --apply)")
+		then = append(then, "clone what your accounts track (gitstead discover --apply)")
 	}
 	switch {
 	case a.Schedule:
-		then = append(then, "install the background sync: `git-mgr sync` every "+scheduler.FormatInterval(a.Interval()))
+		then = append(then, "install the background sync: `gitstead sync` every "+scheduler.FormatInterval(a.Interval()))
 	case det.Schedule != nil:
 		then = append(then, "remove the background sync")
 	}
@@ -388,7 +388,7 @@ func printChecks(checks []setup.Check) (failed int) {
 // configDiff renders the change from before to after as a unified diff,
 // using git so no diff library is needed.
 func configDiff(before, after []byte) string {
-	dir, err := os.MkdirTemp("", "git-mgr-diff-")
+	dir, err := os.MkdirTemp("", "gitstead-diff-")
 	if err != nil {
 		return ""
 	}
@@ -463,21 +463,21 @@ func askFinish(det setup.Detected, a *setup.Answers) error {
 		a.Shell = false
 	case det.ShellRC != nil:
 		fields = append(fields, huh.NewConfirm().
-			Title("Add `git-mgr cd` and tab completion to your shell?").
+			Title("Add `gitstead cd` and tab completion to your shell?").
 			Description(fmt.Sprintf("Adds one line to %s: %s", tildify(det.ShellRC.Path), det.ShellRC.Line())).
 			Value(&a.Shell))
 	}
 	if len(a.Accounts) > 0 && !det.GitIncludes {
 		fields = append(fields, huh.NewConfirm().
 			Title("Use each account's identity in repos you clone yourself?").
-			Description("git-mgr sets it in the repos it clones. This covers the rest, under each account's folders, "+
+			Description("gitstead sets it in the repos it clones. This covers the rest, under each account's folders, "+
 				"with includeIf: one include.path line in your global git config. Recommended with several accounts.").
 			Value(&a.GitIncludes))
 	}
 	if len(a.Accounts) > 0 {
 		fields = append(fields, huh.NewConfirm().
 			Title("Clone the repos your accounts track now?").
-			Description("Otherwise the first background sync does it, or `git-mgr apply`.").
+			Description("Otherwise the first background sync does it, or `gitstead apply`.").
 			Value(&a.Clone))
 	}
 	if len(fields) == 0 {
@@ -502,7 +502,7 @@ func askLayout(det setup.Detected, a *setup.Answers, home string) error {
 		layouts = append(layouts, huh.NewOption("keep my path_template", "custom"))
 	}
 	return huh.NewForm(huh.NewGroup(
-		huh.NewNote().Title("git-mgr setup").Description(found+"\n\nEach answer starts at what was found; nothing is written until you confirm the review."),
+		huh.NewNote().Title("gitstead setup").Description(found+"\n\nEach answer starts at what was found; nothing is written until you confirm the review."),
 		huh.NewInput().Title("Where should repos live?").Value(&a.BaseDir).Validate(nonEmpty),
 		huh.NewSelect[string]().Title("How are they laid out under it?").Options(layouts...).Value(&a.Layout),
 	)).Run()
@@ -517,7 +517,7 @@ func askAccounts(ctx context.Context, det setup.Detected, a *setup.Answers, onli
 			keep = append(keep, acct.Name)
 		}
 		if err := huh.NewForm(huh.NewGroup(huh.NewMultiSelect[string]().
-			Title("Which accounts should git-mgr manage?").
+			Title("Which accounts should gitstead manage?").
 			Description("Each one gets its own token, SSH key and commit identity in the repos it covers.").
 			Options(opts...).Value(&keep))).Run(); err != nil {
 			return err
@@ -528,7 +528,7 @@ func askAccounts(ctx context.Context, det setup.Detected, a *setup.Answers, onli
 		add := false
 		description := "For GitLab, Gitea/Forgejo, or a GitHub account gh isn't logged in to."
 		if len(a.Accounts) == 0 {
-			description = "None found. Without an account git-mgr still manages the clones you adopt; add one to discover repos from a provider."
+			description = "None found. Without an account gitstead still manages the clones you adopt; add one to discover repos from a provider."
 		}
 		if err := huh.NewForm(huh.NewGroup(huh.NewConfirm().
 			Title("Add an account by hand?").
@@ -584,7 +584,7 @@ func askAccount(ctx context.Context, det setup.Detected, acct *setup.Account, on
 	title := fmt.Sprintf("Account %s on %s", orDefault(acct.Login, acct.Name), acct.Host)
 	if err := huh.NewForm(huh.NewGroup(
 		huh.NewNote().Title(title),
-		huh.NewInput().Title("Name for this account in git-mgr").Value(&acct.Name).Validate(nonEmpty),
+		huh.NewInput().Title("Name for this account in gitstead").Value(&acct.Name).Validate(nonEmpty),
 	)).Run(); err != nil {
 		return err
 	}
@@ -742,15 +742,15 @@ func askFeatures(a *setup.Answers) error {
 		huh.NewConfirm().Title("Back up uncommitted work during sync?").
 			Description("Snapshots that never touch your working tree or the index lock. Recommended.").Value(&a.Backups),
 		huh.NewConfirm().Title("Run sync in the background?").
-			Description("Installs a launchd agent, systemd timer or cron entry that runs `git-mgr sync`; you choose how often next. Recommended.").Value(&a.Schedule),
+			Description("Installs a launchd agent, systemd timer or cron entry that runs `gitstead sync`; you choose how often next. Recommended.").Value(&a.Schedule),
 		huh.NewConfirm().Title("Push backup refs to each repo's remote?").
-			Description("Offsite copies of your backups under refs/git-mgr/*; visible to anyone who can read the remote.").Value(&a.RemoteSync),
+			Description("Offsite copies of your backups under refs/gitstead/*; visible to anyone who can read the remote.").Value(&a.RemoteSync),
 		huh.NewConfirm().Title("Fast-forward clones that are behind during sync?").
 			Description("Only a branch with no local commits and no uncommitted changes, while no git command runs in it; anything else is left as it is.").Value(&a.Update),
 		huh.NewSelect[string]().Title("When config changes, what may sync change by itself?").Options(
 			huh.NewOption("everything except moving or deleting directories (recommended)", "safe"),
 			huh.NewOption("everything, moves included", "all"),
-			huh.NewOption("nothing; I'll run git-mgr apply", "none")).Value(&a.ReconcileAuto),
+			huh.NewOption("nothing; I'll run gitstead apply", "none")).Value(&a.ReconcileAuto),
 		huh.NewSelect[string]().Title("When a repo disappears upstream").Options(
 			huh.NewOption("mark it stale and keep it (recommended)", "mark_stale"),
 			huh.NewOption("stop tracking it after 30 days; keep the files", "remove"),
@@ -764,7 +764,7 @@ func askFeatures(a *setup.Answers) error {
 // with which agents, how many per workspace, where, and opened by what.
 func askWorkspaces(det setup.Detected, a *setup.Answers) error {
 	on := a.Workspaces != nil
-	desc := "Each agent works in a copy of its own -- a worktree of the repo on a branch of its own -- and git-mgr opens them side by side in tmux, iTerm or Muxy."
+	desc := "Each agent works in a copy of its own -- a worktree of the repo on a branch of its own -- and gitstead opens them side by side in tmux, iTerm or Muxy."
 	if len(det.Agents) > 0 {
 		var names []string
 		for _, p := range det.Agents {

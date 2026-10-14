@@ -1,4 +1,4 @@
-// Package workspace is git-mgr's workspaces subsystem: repos worked on by
+// Package workspace is gitstead's workspaces subsystem: repos worked on by
 // several agents at once, each in a replica of its own. A replica holds the
 // agent's copy of each of the workspace's repos -- a linked worktree of the
 // repo's tracked clone by default, or a clone taking its objects from it --
@@ -21,11 +21,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/hook"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
-	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/hook"
+	"github.com/ashtonian/gitstead/internal/reconcile"
+	"github.com/ashtonian/gitstead/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
 // Spec is a workspace as config wants it, or as state records it.
@@ -51,7 +51,7 @@ type Replica struct {
 
 // Copy is one checkout of a repo in a replica.
 type Copy struct {
-	// Repo is the tracked repo's key; "" for a copy of a repo git-mgr
+	// Repo is the tracked repo's key; "" for a copy of a repo gitstead
 	// doesn't track.
 	Repo string
 	// Source is the path of the repo's tracked clone, which copies are made
@@ -61,7 +61,7 @@ type Copy struct {
 	URL    string
 	Path   string
 	Branch string
-	// SSHKey is the key git-mgr fetches and pushes with; Config the git
+	// SSHKey is the key gitstead fetches and pushes with; Config the git
 	// config it manages in a clone (worktrees share their repo's).
 	SSHKey string
 	Config map[string]string
@@ -289,7 +289,7 @@ func RepoKeys(cfg *config.Config, st *state.State, decl config.Workspace) ([]str
 			add(key)
 		default:
 			if st.Repos[ref.Key] == nil {
-				return nil, fmt.Errorf("%s is not a tracked repo; give its URL or local path and git-mgr tracks it", entry)
+				return nil, fmt.Errorf("%s is not a tracked repo; give its URL or local path and gitstead tracks it", entry)
 			}
 			add(ref.Key)
 		}

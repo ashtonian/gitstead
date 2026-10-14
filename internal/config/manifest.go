@@ -16,22 +16,22 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/ashtonian/git-mgr/internal/pathutil"
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/pathutil"
+	"github.com/ashtonian/gitstead/internal/repourl"
 )
 
 // Manifest is a portable list of repos: what `manifest export` writes and
 // `manifest import` reads, and the shared file `manifest:` names, which every
-// machine reads as more `repos:` entries and git-mgr keeps up to date as
+// machine reads as more `repos:` entries and gitstead keeps up to date as
 // repos are added and removed by hand.
 type Manifest struct {
 	Repos []ManualRepo `yaml:"repos"`
 }
 
-// manifestHeader starts every manifest git-mgr writes.
-const manifestHeader = "# Repos tracked by hand, on any machine that reads this file. git-mgr keeps it up to date:\n# clone, adopt and manifest import add to it, remove takes from it.\n"
+// manifestHeader starts every manifest gitstead writes.
+const manifestHeader = "# Repos tracked by hand, on any machine that reads this file. gitstead keeps it up to date:\n# clone, adopt and manifest import add to it, remove takes from it.\n"
 
-// manifestLockWait bounds how long a write waits for another git-mgr's.
+// manifestLockWait bounds how long a write waits for another gitstead's.
 const manifestLockWait = 30 * time.Second
 
 // ReadManifest reads the manifest at path. A missing file is an empty
@@ -57,7 +57,7 @@ func ReadManifest(path string) (Manifest, error) {
 }
 
 // UpdateManifest applies change to the manifest at path and writes it, under
-// a lock other git-mgr runs on this machine take too, and atomically, so a
+// a lock other gitstead runs on this machine take too, and atomically, so a
 // reader -- or a sync tool copying it to another machine -- never sees half
 // a file.
 func UpdateManifest(path string, change func(*Manifest) error) error {
@@ -200,7 +200,7 @@ func MatchesRepo(key string) func(*yaml.Node) bool {
 	}
 }
 
-// manifestLock is the lock file for the manifest at path: in git-mgr's cache
+// manifestLock is the lock file for the manifest at path: in gitstead's cache
 // directory, named for the manifest's path, never beside it, where it would
 // end up committed to the dotfiles repo it sits in.
 func manifestLock(path string) (string, error) {

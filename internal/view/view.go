@@ -1,4 +1,4 @@
-// Package view builds `git-mgr top`'s picture of everything git-mgr manages:
+// Package view builds `gitstead top`'s picture of everything gitstead manages:
 // each repo's working tree, and each workspace copy with its agent's state
 // and terminal activity. Collect reads it, live and without the network;
 // Render lays it out.
@@ -13,12 +13,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ashtonian/git-mgr/internal/activity"
-	agents "github.com/ashtonian/git-mgr/internal/agent"
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/workspace"
+	"github.com/ashtonian/gitstead/internal/activity"
+	agents "github.com/ashtonian/gitstead/internal/agent"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/state"
+	"github.com/ashtonian/gitstead/internal/workspace"
 )
 
 // Snapshot is everything at one moment.

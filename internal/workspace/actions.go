@@ -8,11 +8,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/ctxutil"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/ctxutil"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/reconcile"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
 func recorded(st *state.State, name string) (*state.WorkspaceState, error) {
@@ -147,7 +147,7 @@ func createCopy(spec *Spec, r Replica, c Copy, replaces string) reconcile.RunFun
 				err = env.Hooks.Run(ctx, PostCreateHook(spec.Name, r.Agent, c, vars))
 			}
 			if err != nil {
-				return "", fmt.Errorf("made, but %w\n(`git-mgr hooks post-create %s %s` runs them again)", err, spec.Name, r.Agent)
+				return "", fmt.Errorf("made, but %w\n(`gitstead hooks post-create %s %s` runs them again)", err, spec.Name, r.Agent)
 			}
 			return "ran post_create hooks", nil
 		}

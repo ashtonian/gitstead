@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitstead/internal/config"
 )
 
-// Known are the agents git-mgr offers when config declares none, if they
+// Known are the agents gitstead offers when config declares none, if they
 // are on PATH.
 var Known = []config.AgentProfile{
 	{Name: "claude", Command: "claude", Resume: "claude --continue"},

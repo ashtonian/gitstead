@@ -13,14 +13,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
 func launchers() config.LaunchersConfig {
 	return config.LaunchersConfig{
 		Default: "auto", Title: "{{.Workspace}}/{{.Agent}}", Check: true, KeepShell: true,
-		Tmux: config.TmuxConfig{Session: "git-mgr-{{.Fleet}}", WindowPer: "workspace", Layout: "tiled", MaxPanes: 2,
+		Tmux: config.TmuxConfig{Session: "gitstead-{{.Fleet}}", WindowPer: "workspace", Layout: "tiled", MaxPanes: 2,
 			PaneTitles: true, ControlMode: "auto", OnExists: "add-missing", RemainOnExit: true},
 		ITerm: config.ITermConfig{Window: "new", TabPer: "workspace", Split: "grid", MaxPanes: 4, Profile: "Default",
 			Badge: "{{.Agent}}", Focus: true, TypeDelay: 150 * time.Millisecond},
@@ -34,7 +34,7 @@ func testPlan() Plan {
 		for i := 1; i <= n; i++ {
 			name := fmt.Sprintf("agent-%d", i)
 			out = append(out, Agent{Name: name, Dir: "/ws/" + ws + "/" + name, Title: ws + "/" + name, Profile: "claude",
-				Command: "git-mgr ws run " + ws + " " + name, State: "ready"})
+				Command: "gitstead ws run " + ws + " " + name, State: "ready"})
 		}
 		return out
 	}
@@ -160,13 +160,13 @@ func TestTmux_BuildsAndAddsWhatIsMissing(t *testing.T) {
 	if len(fake.windows) != 3 || !names["app"] || !names["app-2"] || !names["lib"] {
 		t.Errorf("windows = %v", fake.windows)
 	}
-	if fake.count("new-session -d -s git-mgr-daily") != 1 || fake.count("split-window") != 1 {
+	if fake.count("new-session -d -s gitstead-daily") != 1 || fake.count("split-window") != 1 {
 		t.Errorf("calls:\n%s", strings.Join(fake.calls, "\n"))
 	}
 	if !slices.Contains(fake.calls, "select-pane -t %1 -T app/agent-1") {
 		t.Error("panes aren't titled")
 	}
-	if want := []string{"tmux", "attach-session", "-t", "=git-mgr-daily"}; !slices.Equal(attached, want) {
+	if want := []string{"tmux", "attach-session", "-t", "=gitstead-daily"}; !slices.Equal(attached, want) {
 		t.Errorf("attach = %v", attached)
 	}
 
@@ -207,7 +207,7 @@ func TestTmux_ControlModeAndRemote(t *testing.T) {
 	if err := tm.Open(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"ssh", "-t", "me@buildbox", "tmux -CC attach-session -t '=git-mgr-daily'"}; !slices.Equal(attached, want) {
+	if want := []string{"ssh", "-t", "me@buildbox", "tmux -CC attach-session -t '=gitstead-daily'"}; !slices.Equal(attached, want) {
 		t.Errorf("attach = %q", attached)
 	}
 	out, err := tm.Print(p)
@@ -259,7 +259,7 @@ func TestITerm_Script(t *testing.T) {
 		`tell s1 to set s3 to (split horizontally with profile "Default")`,
 		`tell w to set t to (create tab with profile "Default")`, // lib's tab
 		`set name to "say \"hi\""`,
-		"write text \"printf '\\\\033]1337;SetBadgeFormat=%s\\\\007' YWdlbnQtMQ==; ssh -t me@buildbox 'git-mgr ws run app agent-1'\"",
+		"write text \"printf '\\\\033]1337;SetBadgeFormat=%s\\\\007' YWdlbnQtMQ==; ssh -t me@buildbox 'gitstead ws run app agent-1'\"",
 		"delay 0.150",
 	} {
 		if !strings.Contains(script, want) {
@@ -333,7 +333,7 @@ func TestMuxy_LayoutsSessionsAndPruning(t *testing.T) {
 		t.Errorf("layout file = %s", w[len(w)-2])
 	}
 	var layout muxyLayout
-	if err := json.Unmarshal([]byte(w[len(w)-1]), &layout); err != nil || len(layout.Tabs) != 3 || layout.Tabs[2].Command != "git-mgr ws run app agent-3" {
+	if err := json.Unmarshal([]byte(w[len(w)-1]), &layout); err != nil || len(layout.Tabs) != 3 || layout.Tabs[2].Command != "gitstead ws run app agent-3" {
 		t.Errorf("layout = %+v, %v", layout, err)
 	}
 
@@ -347,7 +347,7 @@ func TestMuxy_LayoutsSessionsAndPruning(t *testing.T) {
 	if got := fake.find("session create"); len(got) != 3 {
 		t.Errorf("sessions for 3 of 4 agents, one running: %v", got)
 	}
-	if got := fake.find("session create p1 --directory /ws/app/agent-1 -- git-mgr ws run app agent-1"); len(got) != 1 {
+	if got := fake.find("session create p1 --directory /ws/app/agent-1 -- gitstead ws run app agent-1"); len(got) != 1 {
 		t.Errorf("session create: %v", fake.calls)
 	}
 }
@@ -403,13 +403,13 @@ func TestMuxy_State(t *testing.T) {
 	}
 	tab := tabs[0].(map[string]any)
 	pane := tab["panes"].([]any)[0].(map[string]any)["id"].(string)
-	if cmd := st["startup_commands"].(map[string]any)[pane]; cmd != "git-mgr ws run app agent-1" || tab["custom_title"] != "app/agent-1" {
+	if cmd := st["startup_commands"].(map[string]any)[pane]; cmd != "gitstead ws run app agent-1" || tab["custom_title"] != "app/agent-1" {
 		t.Errorf("tab %v, command %v", tab, cmd)
 	}
 	if st["unknown"] == nil {
-		t.Error("state git-mgr doesn't know was dropped")
+		t.Error("state gitstead doesn't know was dropped")
 	}
-	if _, err := os.Stat(path + ".git-mgr-backup"); err != nil {
+	if _, err := os.Stat(path + ".gitstead-backup"); err != nil {
 		t.Error("the previous state wasn't kept")
 	}
 

@@ -8,7 +8,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
 // InitCmd creates a config file with sensible defaults.
@@ -75,8 +75,8 @@ func (c *StatusCmd) Run(ctx *Context) error {
 	}
 
 	if len(st.Repos) == 0 && !ctx.JSON {
-		fmt.Println("No repos tracked. Adopt clones you already have ('git-mgr adopt <path>'),")
-		fmt.Println("clone one ('git-mgr clone <url>'), or discover from a provider ('git-mgr discover --apply').")
+		fmt.Println("No repos tracked. Adopt clones you already have ('gitstead adopt <path>'),")
+		fmt.Println("clone one ('gitstead clone <url>'), or discover from a provider ('gitstead discover --apply').")
 		return nil
 	}
 
@@ -197,7 +197,7 @@ func (c *StatusCmd) runTable(st *state.State, pass func(string, *state.RepoState
 	}
 	fmt.Println()
 	if counts.mirrorFailing > 0 {
-		fmt.Printf("%d mirrors failing to update; `git-mgr mirror` retries them and says why\n", counts.mirrorFailing)
+		fmt.Printf("%d mirrors failing to update; `gitstead mirror` retries them and says why\n", counts.mirrorFailing)
 	}
 	return nil
 }
@@ -300,7 +300,7 @@ type RemoveCmd struct {
 	Tag     string `help:"Remove repos with this tag." default:"" predictor:"tag"`
 	Set     string `help:"Remove repos in this named set (from config 'sets:')." default:"" predictor:"set"`
 	Delete  bool   `help:"Also delete the clone; unique work is archived first." xor:"disk"`
-	Archive bool   `help:"Also move the clone, whole, into backup.archive_dir; git-mgr archives restore puts it back." xor:"disk"`
+	Archive bool   `help:"Also move the clone, whole, into backup.archive_dir; gitstead archives restore puts it back." xor:"disk"`
 	Yes     bool   `help:"Skip confirmation." default:"false"`
 }
 

@@ -7,9 +7,9 @@ import (
 	"os"
 	"slices"
 
-	"github.com/ashtonian/git-mgr/internal/hook"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
-	"github.com/ashtonian/git-mgr/internal/workspace"
+	"github.com/ashtonian/gitstead/internal/hook"
+	"github.com/ashtonian/gitstead/internal/reconcile"
+	"github.com/ashtonian/gitstead/internal/workspace"
 )
 
 // HooksCmd runs hooks again: after fixing one that failed, or changing one.
@@ -107,7 +107,7 @@ func (c *HooksPostCreateCmd) Run(ctx *Context) error {
 	}
 	ws := st.Workspaces[c.Workspace]
 	if ws == nil {
-		return fmt.Errorf("no workspace %q; `git-mgr ws ls` lists them", c.Workspace)
+		return fmt.Errorf("no workspace %q; `gitstead ws ls` lists them", c.Workspace)
 	}
 	spec := workspace.FromState(cfg, st, ws)
 	runner := hookRunner(cfg, st, os.Stdout)

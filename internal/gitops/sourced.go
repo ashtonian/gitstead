@@ -11,8 +11,8 @@ import (
 )
 
 // SourceRemote is a workspace clone's remote for the repo's own clone, its
-// source, whose branches it fetches as git-mgr/<branch>.
-const SourceRemote = "git-mgr"
+// source, whose branches it fetches as gitstead/<branch>.
+const SourceRemote = "gitstead"
 
 // sourceRefspec maps a source's view of origin onto the copy's, so upstream
 // objects cross the network once, into the source. It is given on the fetch
@@ -235,7 +235,7 @@ func IsPartial(ctx context.Context, path string) bool {
 }
 
 // RepointSource points the copy at copyPath at its source's new path to: its
-// git-mgr remote, and the alternates it borrows objects through.
+// gitstead remote, and the alternates it borrows objects through.
 func RepointSource(ctx context.Context, copyPath, from, to string) error {
 	if url, err := Git(ctx, copyPath, "config", "--get", "remote."+SourceRemote+".url"); err == nil && url == from {
 		if _, err := Git(ctx, copyPath, "remote", "set-url", SourceRemote, to); err != nil {
@@ -269,7 +269,7 @@ func RepointSource(ctx context.Context, copyPath, from, to string) error {
 }
 
 // Source returns the path of the repo the copy at path was made from: the
-// main worktree of a linked worktree, the git-mgr remote of a workspace
+// main worktree of a linked worktree, the gitstead remote of a workspace
 // clone; "" when it is neither.
 func Source(ctx context.Context, path string) string {
 	dirs := ResolveGitDirs(ctx, path)

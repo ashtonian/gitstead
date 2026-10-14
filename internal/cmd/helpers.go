@@ -9,18 +9,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/ctxutil"
-	"github.com/ashtonian/git-mgr/internal/discovery"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/hook"
-	"github.com/ashtonian/git-mgr/internal/oplog"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/workspace"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/ctxutil"
+	"github.com/ashtonian/gitstead/internal/discovery"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/hook"
+	"github.com/ashtonian/gitstead/internal/oplog"
+	"github.com/ashtonian/gitstead/internal/state"
+	"github.com/ashtonian/gitstead/internal/workspace"
 )
 
 // eventsPath is the operation-log file, kept next to the state file so it
-// follows GIT_MGR_STATE / --state.
+// follows GITSTEAD_STATE / --state.
 func eventsPath(ctx *Context) string {
 	return filepath.Join(filepath.Dir(ctx.StatePath()), "events.jsonl")
 }

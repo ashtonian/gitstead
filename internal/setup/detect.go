@@ -1,4 +1,4 @@
-// Package setup is the logic behind `git-mgr setup`: it detects what this
+// Package setup is the logic behind `gitstead setup`: it detects what this
 // machine already has (gh accounts, SSH keys and host aliases, git
 // identities, existing clones), proposes answers from it, renders the answers
 // into the config file in place, and checks the result before it is written.
@@ -22,10 +22,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/agent"
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/pathtemplate"
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitstead/internal/agent"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/pathtemplate"
+	"github.com/ashtonian/gitstead/internal/repourl"
 )
 
 // GHAccount is an account the gh CLI is logged in to.
@@ -91,13 +91,13 @@ type Detected struct {
 	// Launchers are the launchers installed: tmux, iterm, muxy.
 	Launchers []string
 
-	// ShellRC is your shell's startup file; nil for a shell git-mgr doesn't
-	// integrate with. ShellIntegrated reports that it loads git-mgr's shell
+	// ShellRC is your shell's startup file; nil for a shell gitstead doesn't
+	// integrate with. ShellIntegrated reports that it loads gitstead's shell
 	// integration already.
 	ShellRC         *ShellRC
 	ShellIntegrated bool
 	// GitIncludes reports that your global git config includes the file
-	// `git-mgr accounts gitconfig` writes.
+	// `gitstead accounts gitconfig` writes.
 	GitIncludes bool
 	// Schedule is the background sync setup installs, when one is; the
 	// caller fills it in from state.
@@ -142,7 +142,7 @@ type Detector struct {
 	// runtime.GOOS and os.Getenv when empty.
 	GOOS   string
 	Getenv func(string) string
-	// AccountsInclude is the file `git-mgr accounts gitconfig` writes, to
+	// AccountsInclude is the file `gitstead accounts gitconfig` writes, to
 	// look for in the global git config's include.path.
 	AccountsInclude string
 	Run             Runner
@@ -441,7 +441,7 @@ func (d *Detector) clones(ctx context.Context, roots []string) []Clone {
 
 // guessLayout finds the root and layout preset that best explain where
 // existing clones are. Clones of your own repos (owned by one of logins)
-// decide when there are any: they show where you put what git-mgr will
+// decide when there are any: they show where you put what gitstead will
 // manage, while clones of other projects land anywhere. A match counts for as
 // many path levels as its layout has, since a flat clone is where `git clone`
 // leaves a repo while an owner/name tree is built on purpose.

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitstead/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -37,7 +37,7 @@ func TestDefaults(t *testing.T) {
 }
 
 // A config file the caller named must exist: a typo in --config or
-// GIT_MGR_CONFIG must not silently run with zero discovery rules.
+// GITSTEAD_CONFIG must not silently run with zero discovery rules.
 func TestLoad_MissingRequiredFile(t *testing.T) {
 	_, err := config.Load(filepath.Join(t.TempDir(), "confg.yaml"))
 	if !errors.Is(err, config.ErrNotFound) {
@@ -92,21 +92,21 @@ func TestDefaultDirs(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/xdg/config")
 	t.Setenv("XDG_DATA_HOME", "/xdg/data")
 	t.Setenv("XDG_CACHE_HOME", "relative/is/ignored")
-	if got := config.DefaultConfigPath(); got != "/xdg/config/git-mgr/config.yaml" {
+	if got := config.DefaultConfigPath(); got != "/xdg/config/gitstead/config.yaml" {
 		t.Errorf("DefaultConfigPath = %s", got)
 	}
-	if got := config.DefaultStatePath(); got != "/xdg/data/git-mgr/state.yaml" {
+	if got := config.DefaultStatePath(); got != "/xdg/data/gitstead/state.yaml" {
 		t.Errorf("DefaultStatePath = %s", got)
 	}
-	if got := config.CacheDir(); got != filepath.Join(home, ".cache", "git-mgr") {
+	if got := config.CacheDir(); got != filepath.Join(home, ".cache", "gitstead") {
 		t.Errorf("CacheDir = %s", got)
 	}
 	cfg := config.Defaults()
-	if cfg.Backup.ArchiveDir != "/xdg/data/git-mgr/archive" || cfg.Mirror.Dir != "/xdg/data/git-mgr/mirrors" {
+	if cfg.Backup.ArchiveDir != "/xdg/data/gitstead/archive" || cfg.Mirror.Dir != "/xdg/data/gitstead/mirrors" {
 		t.Errorf("data defaults: archive %s, mirrors %s", cfg.Backup.ArchiveDir, cfg.Mirror.Dir)
 	}
 	t.Setenv("XDG_CONFIG_HOME", "")
-	if got := config.DefaultConfigPath(); got != filepath.Join(home, ".config", "git-mgr", "config.yaml") {
+	if got := config.DefaultConfigPath(); got != filepath.Join(home, ".config", "gitstead", "config.yaml") {
 		t.Errorf("DefaultConfigPath without XDG = %s", got)
 	}
 }
@@ -310,11 +310,11 @@ func containsStr(s, sub string) bool {
 }
 
 // TestLoad_EnvUnderscoreKey proves env overrides of koanf keys containing
-// underscores now work. The previous hand-rolled loader mapped GIT_MGR_BASE_DIR
+// underscores now work. The previous hand-rolled loader mapped GITSTEAD_BASE_DIR
 // to "base.dir" (≠ koanf key "base_dir") and silently ignored it; the pkg
 // loader's struct-aware env mapping resolves it correctly.
 func TestLoad_EnvUnderscoreKey(t *testing.T) {
-	t.Setenv("GIT_MGR_BASE_DIR", "/custom/env/repos")
+	t.Setenv("GITSTEAD_BASE_DIR", "/custom/env/repos")
 	cfg, err := config.Load(filepath.Join(t.TempDir(), "config.yaml"), config.WithOptionalFile())
 	if err != nil {
 		t.Fatalf("load: %v", err)

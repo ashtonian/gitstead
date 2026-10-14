@@ -1,11 +1,11 @@
 version: 2
 
-project_name: git-mgr
+project_name: gitstead
 
 builds:
-  - id: git-mgr
+  - id: gitstead
     main: .
-    binary: git-mgr
+    binary: gitstead
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin]
@@ -37,7 +37,7 @@ changelog:
 # builds the manifest itself, replacing the old dockers + docker_manifests).
 dockers_v2:
   - images:
-      - ashtonian/git-mgr
+      - ashtonian/gitstead
     tags:
       - "{{ .Version }}"
       - latest
@@ -48,19 +48,32 @@ dockers_v2:
     labels:
       org.opencontainers.image.title: "{{ .ProjectName }}"
       org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.source: "https://github.com/ashtonian/git-mgr"
+      org.opencontainers.image.source: "https://github.com/ashtonian/gitstead"
 
 homebrew_casks:
-  - name: git-mgr
+  - name: gitstead
     repository:
       owner: ashtonian
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: "https://github.com/ashtonian/git-mgr"
-    description: "Discover, clone, sync, and back up git repositories across GitHub and GitLab."
+    homepage: "https://github.com/ashtonian/gitstead"
+    description: "Keep every git repo you work on cloned, in sync and backed up, across accounts and forges"
+    # The binaries aren't signed and notarized, so macOS would refuse the
+    # first run of a downloaded one.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/gitstead"]
+          end
+    caveats: |
+      Get started with `gitstead setup`. Before uninstalling, remove the
+      background sync with `gitstead install-agent --uninstall`.
 
 release:
   github:
     owner: ashtonian
-    name: git-mgr
+    name: gitstead
+  # v1.0.0-rc.1 and the like are marked pre-releases.
+  prerelease: auto

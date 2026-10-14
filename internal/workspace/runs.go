@@ -5,9 +5,9 @@ import (
 
 	"fmt"
 
-	agents "github.com/ashtonian/git-mgr/internal/agent"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/state"
+	agents "github.com/ashtonian/gitstead/internal/agent"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
 // Agent lifecycle states, as AgentState reports them.
@@ -67,7 +67,7 @@ func ForgetRuns(stateDir, workspace string, agentNames ...string) {
 // CheckIdle fails when the agent's run holds its lease.
 func CheckIdle(stateDir, workspace, agent string) error {
 	if h, held := agents.Read(agents.LeasePath(stateDir, workspace, agent)); held {
-		return fmt.Errorf("%s/%s is running (pid %d); stop it first: git-mgr ws stop %s %s", workspace, agent, h.PID, workspace, agent)
+		return fmt.Errorf("%s/%s is running (pid %d); stop it first: gitstead ws stop %s %s", workspace, agent, h.PID, workspace, agent)
 	}
 	return nil
 }

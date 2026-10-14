@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/pathutil"
+	"github.com/ashtonian/gitstead/internal/pathutil"
 )
 
 func TestSafeRemoveAll(t *testing.T) {

@@ -11,20 +11,20 @@ import (
 	"time"
 )
 
-// ErrRepoInUse reports a repository whose lock another git-mgr command
+// ErrRepoInUse reports a repository whose lock another gitstead command
 // holds: one deleting, archiving or moving it, or making a copy of it.
-var ErrRepoInUse = errors.New("another git-mgr command is using the repo")
+var ErrRepoInUse = errors.New("another gitstead command is using the repo")
 
 // ErrRepoGone reports a repository that isn't there to lock: never cloned,
 // or deleted or moved away while its lock was waited for.
 var ErrRepoGone = errors.New("the repo is gone")
 
 const (
-	repoLockFile = "git-mgr.lock"
+	repoLockFile = "gitstead.lock"
 	repoLockPoll = 50 * time.Millisecond
 )
 
-// LockRepo takes git-mgr's lock on the repository at repoPath, waiting up to
+// LockRepo takes gitstead's lock on the repository at repoPath, waiting up to
 // wait: exclusive to delete, archive or move it, shared to make a copy of
 // it. A copy holds the shared lock until it is recorded in state, so a
 // command holding the exclusive lock sees every copy in state and no copy

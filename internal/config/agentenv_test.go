@@ -22,10 +22,10 @@ func TestRenderEnv(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if env := strings.Join(v.Environ(), " "); !strings.Contains(env, "GIT_MGR_PORT=41010") || !strings.Contains(env, "GIT_MGR_AGENT_N=2") {
+	if env := strings.Join(v.Environ(), " "); !strings.Contains(env, "GITSTEAD_PORT=41010") || !strings.Contains(env, "GITSTEAD_AGENT_N=2") {
 		t.Errorf("Environ = %s", env)
 	}
-	if env := strings.Join(AgentVars{Workspace: "a", Agent: "b"}.Environ(), " "); strings.Contains(env, "GIT_MGR_PORT") || strings.Contains(env, "GIT_MGR_CACHE") {
+	if env := strings.Join(AgentVars{Workspace: "a", Agent: "b"}.Environ(), " "); strings.Contains(env, "GITSTEAD_PORT") || strings.Contains(env, "GITSTEAD_CACHE") {
 		t.Errorf("no ports and no cache are left out: %s", env)
 	}
 }
@@ -34,7 +34,7 @@ func TestCheckEnv(t *testing.T) {
 	for name, env := range map[string]map[string]string{
 		"bad name":      {"1PORT": "x"},
 		"dotted":        {"A.B": "x"},
-		"git-mgr's own": {"GIT_MGR_PORT": "1"},
+		"gitstead's own":  {"GITSTEAD_PORT": "1"},
 		"unknown field": {"PORT": "{{.Prot}}"},
 		"bad template":  {"PORT": "{{.Port"},
 	} {
@@ -71,14 +71,14 @@ func TestWithDefaults_EnvAndPorts(t *testing.T) {
 	}
 }
 
-// An agent's own context doesn't reach what it starts; git-mgr's config
+// An agent's own context doesn't reach what it starts; gitstead's config
 // variables do.
 func TestEnviron(t *testing.T) {
-	t.Setenv("GIT_MGR_PORT", "41000")
-	t.Setenv("GIT_MGR_WORKSPACE", "caller")
-	t.Setenv("GIT_MGR_CONFIG", "/c.yaml")
+	t.Setenv("GITSTEAD_PORT", "41000")
+	t.Setenv("GITSTEAD_WORKSPACE", "caller")
+	t.Setenv("GITSTEAD_CONFIG", "/c.yaml")
 	env := strings.Join(Environ(), "\n")
-	if strings.Contains(env, "GIT_MGR_PORT=") || strings.Contains(env, "GIT_MGR_WORKSPACE=") || !strings.Contains(env, "GIT_MGR_CONFIG=/c.yaml") {
+	if strings.Contains(env, "GITSTEAD_PORT=") || strings.Contains(env, "GITSTEAD_WORKSPACE=") || !strings.Contains(env, "GITSTEAD_CONFIG=/c.yaml") {
 		t.Errorf("Environ kept the caller's context or dropped config:\n%s", env)
 	}
 	// Every variable an agent is told is one Environ leaves out.

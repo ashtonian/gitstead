@@ -1,4 +1,4 @@
-git-mgr
+gitstead
 *.exe
 .DS_Store
 dist/

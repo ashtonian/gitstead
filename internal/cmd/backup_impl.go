@@ -7,9 +7,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
 // backupConfigFor is the backup configuration a repo resolves to.
@@ -196,7 +196,7 @@ func (c *BackupCmd) runRestore(ctx *Context, cfg *config.Config, st *state.State
 	if len(docs) == 0 {
 		fmt.Printf("No backup %q found for the selected repos.\n", c.Restore)
 	} else {
-		fmt.Println("Tip: `git-mgr restore <repo> [id]` can apply a backup, or --into a scratch dir.")
+		fmt.Println("Tip: `gitstead restore <repo> [id]` can apply a backup, or --into a scratch dir.")
 	}
 	return ctx.finish(docs, nil)
 }

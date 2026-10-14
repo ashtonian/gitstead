@@ -12,8 +12,8 @@ import (
 type RepoData struct {
 	Host     string // "github.com", "ghes.company.com"
 	Owner    string // "ashtonian"
-	Name     string // "git-mgr"
-	FullName string // "ashtonian/git-mgr"
+	Name     string // "gitstead"
+	FullName string // "ashtonian/gitstead"
 }
 
 // Resolve applies the path template to repo data and returns the relative path.

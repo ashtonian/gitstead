@@ -15,9 +15,9 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/scheduler"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/scheduler"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
 // InstallAgentCmd installs, lists or removes background syncs using the
@@ -29,10 +29,10 @@ type InstallAgentCmd struct {
 	Tag       string        `help:"Sync only repos with this tag." default:"" predictor:"tag"`
 	Set       string        `help:"Sync only this named set (from config 'sets:')." default:"" predictor:"set"`
 	Kind      string        `help:"Backend: launchd, systemd, or cron (default: per-OS)." default:"" enum:",launchd,systemd,cron"`
-	Bin       string        `help:"git-mgr binary the schedule runs (default: the git-mgr on PATH)." default:"" type:"path"`
+	Bin       string        `help:"gitstead binary the schedule runs (default: the gitstead on PATH)." default:"" type:"path"`
 	Daemon    bool          `help:"macOS: install a LaunchDaemon that runs as you, so sync runs when nobody is logged in (uses sudo)."`
 	Linger    bool          `help:"Linux: enable lingering, so the timer runs while you are logged out (loginctl enable-linger)."`
-	Log       string        `help:"Log file for sync output (launchd, cron; systemd logs to the journal); default $XDG_DATA_HOME/git-mgr/git-mgr.log (~/.local/share/git-mgr/git-mgr.log)." type:"path"`
+	Log       string        `help:"Log file for sync output (launchd, cron; systemd logs to the journal); default $XDG_DATA_HOME/gitstead/gitstead.log (~/.local/share/gitstead/gitstead.log)." type:"path"`
 	List      bool          `help:"List installed schedules."`
 	Uninstall bool          `help:"Remove the named schedule instead of installing it."`
 	Print     bool          `help:"Print the planned actions and unit files without applying them."`
@@ -132,7 +132,7 @@ func (c *InstallAgentCmd) install(ctx *Context, cfg *config.Config, st *state.St
 	notes = append(notes, c.afterInstall(s, host)...)
 	printNotes(notes)
 	doc.Notes = notes
-	fmt.Printf("\ngit-mgr will sync %s every %s. Check it with `git-mgr doctor`; remove it with `git-mgr install-agent --uninstall --name %s`.\n",
+	fmt.Printf("\ngitstead will sync %s every %s. Check it with `gitstead doctor`; remove it with `gitstead install-agent --uninstall --name %s`.\n",
 		describeSelection(s.Sync), s.Every(), s.Name)
 	return doc, nil
 }
@@ -148,7 +148,7 @@ func (c *InstallAgentCmd) schedule(ctx *Context) (scheduler.Schedule, []string, 
 	if bin == "" {
 		exe, err := os.Executable()
 		if err != nil {
-			return scheduler.Schedule{}, nil, fmt.Errorf("finding the git-mgr binary: %w", err)
+			return scheduler.Schedule{}, nil, fmt.Errorf("finding the gitstead binary: %w", err)
 		}
 		if bin, err = scheduler.StableBinary(exe, exec.LookPath, scheduler.SameFile); err != nil {
 			return scheduler.Schedule{}, nil, err
@@ -237,7 +237,7 @@ func (c *InstallAgentCmd) uninstall(cfg *config.Config, st *state.State, host sc
 
 func listSchedules(st *state.State) error {
 	if len(st.Schedules) == 0 {
-		fmt.Println("No schedules installed. Add one with `git-mgr install-agent`.")
+		fmt.Println("No schedules installed. Add one with `gitstead install-agent`.")
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
@@ -326,11 +326,11 @@ func printNotes(notes []string) {
 	}
 }
 
-// logPath is where the schedule's output goes: --log, else git-mgr.log in
+// logPath is where the schedule's output goes: --log, else gitstead.log in
 // the data directory.
 func (c *InstallAgentCmd) logPath() string {
 	if c.Log == "" {
-		return filepath.Join(config.DataDir(), "git-mgr.log")
+		return filepath.Join(config.DataDir(), "gitstead.log")
 	}
 	return config.ExpandHome(c.Log)
 }
