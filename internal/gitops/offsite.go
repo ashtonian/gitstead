@@ -37,6 +37,12 @@ type OffsiteRecord struct {
 	Bundled   map[string]string // branch -> commit in the bundle
 }
 
+// Empty reports whether the record holds nothing pushed or bundled: nothing
+// a later push would have to clean up.
+func (r OffsiteRecord) Empty() bool {
+	return len(r.WIP) == 0 && r.Branch == "" && len(r.Heads) == 0 && len(r.Bundled) == 0
+}
+
 // OffsitePlan is what one push does.
 type OffsitePlan struct {
 	// Push are refspecs: "+<commit>:<ref>" writes a ref, ":<ref>" deletes one.

@@ -97,6 +97,8 @@ type copyJSON struct {
 	// didn't run.
 	Offsite      []string `json:"offsite,omitempty"`
 	OffsiteError string   `json:"offsite_error,omitempty"`
+	// OffsiteSubmodules is, by path, what each submodule's push did.
+	OffsiteSubmodules map[string][]string `json:"offsite_submodules,omitempty"`
 }
 
 func copiesJSON(outcomes []copyOutcome) []copyJSON {
@@ -122,6 +124,14 @@ func copiesJSON(outcomes []copyOutcome) []copyJSON {
 		}
 		if o.offsite != nil || len(o.offsitePlan.Push) > 0 {
 			c.Offsite = append([]string{}, o.offsitePlan.Push...)
+		}
+		for path, sub := range o.offsiteSubs {
+			if len(sub.plan.Push) > 0 {
+				if c.OffsiteSubmodules == nil {
+					c.OffsiteSubmodules = map[string][]string{}
+				}
+				c.OffsiteSubmodules[path] = sub.plan.Push
+			}
 		}
 		out = append(out, c)
 	}

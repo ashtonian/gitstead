@@ -449,16 +449,19 @@ mirror:
 
 remote_sync:
   # Take each working copy offsite during sync: uncommitted work and commits
-  # no remote has, pushed under a hidden namespace the copy owns. `git-mgr
-  # remote-sync` does it on demand either way. Any key below can be set per
-  # account (accounts[].remote_sync) or per repo (overrides[].remote_sync).
+  # no remote has, pushed under a hidden namespace the copy owns. Each
+  # checked-out submodule goes too, as a working copy of its own, to its own
+  # remote. `git-mgr remote-sync` does it on demand either way. Any key below
+  # can be set per account (accounts[].remote_sync) or per repo
+  # (overrides[].remote_sync).
   enabled: false
 
   # A remote name, or a URL template ({{.Host}}, {{.Owner}}, {{.Name}},
   # {{.FullName}}) for a separate backup remote, e.g.
-  # "git@backup.example:{{.Host}}/{{.FullName}}.git". Hidden refs don't show
-  # in branch lists or trigger CI, but anyone who can read the remote can
-  # fetch them.
+  # "git@backup.example:{{.Host}}/{{.FullName}}.git". A submodule uses the
+  # remote of that name in it, or the template filled in from its origin.
+  # Hidden refs don't show in branch lists or trigger CI, but anyone who can
+  # read the remote can fetch them.
   remote: "origin"
 
   # Uncommitted work: "ref" pushes each new backup to <namespace>/wip/<id>
