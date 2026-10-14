@@ -59,14 +59,18 @@ homebrew_casks:
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/ashtonian/gitstead"
     description: "Find, clone and sync every repo you work on, then launch coding agents on them"
-    # The binaries aren't signed and notarized, so macOS would refuse the
-    # first run of a downloaded one.
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/gitstead"]
-          end
+    # The binaries aren't notarized, and Homebrew quarantines what it
+    # downloads, so macOS would refuse to run gitstead: clear the quarantine
+    # after install. Homebrew 7 deprecates postflight blocks, which
+    # hooks.post.install generates, for declarative postflight_steps; until
+    # GoReleaser emits those (hooks.post.install_steps, after v2.18), the
+    # stanza goes in raw.
+    custom_block: |
+      on_macos do
+        postflight_steps do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "gitstead"], chdir: ".", writable_paths: ["gitstead"]
+        end
+      end
     caveats: |
       Get started with `gitstead setup`. Before uninstalling, remove the
       background sync with `gitstead install-agent --uninstall`.
