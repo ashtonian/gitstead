@@ -58,6 +58,9 @@ go install github.com/ashtonian/gitten@v0.1.0 && gitten version
 docker run --rm ashtonian/gitten:0.1.0 version
 ```
 
-Each should print the tag's version and commit. The cask removes macOS's
-quarantine bit after install, since the binaries aren't notarized; a
-"cannot be opened" dialog means that hook didn't run.
+Each should print the tag's version and commit. Homebrew quarantines what
+it downloads and the binaries aren't notarized, so the cask clears the
+quarantine after install (`postflight_steps`, from `custom_block` in
+`.goreleaser.yaml`); a "cannot be opened" dialog means that step didn't run.
+Install by the full name, `ashtonian/tap/gitten`: Homebrew 7 requires trust
+for third-party taps, and naming the cask in full trusts it.
