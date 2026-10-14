@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 
 	"github.com/alecthomas/kong"
@@ -22,13 +23,15 @@ var (
 )
 
 func main() {
+	info, _ := debug.ReadBuildInfo()
+	ver := cmd.Version(version, commit, date, info)
 	cli := &cmd.CLI{}
 	options := []kong.Option{
 		kong.Name("gitstead"),
 		kong.Description("Find, clone and keep in sync every repo you work on, then launch coding agents on them side by side."),
 		kong.UsageOnError(),
 		kong.Vars{
-			"version": fmt.Sprintf("%s (%s, built %s)", version, commit, date),
+			"version": ver,
 		},
 	}
 	// Under --json, stdout carries only the one document: help and usage go
@@ -64,7 +67,6 @@ func main() {
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	ver := fmt.Sprintf("%s (%s, built %s)", version, commit, date)
 	run := &cmd.Context{
 		Config:     cli.Config,
 		State:      cli.State,
