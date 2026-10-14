@@ -96,21 +96,16 @@ How it works inside -- components, data flow, locks, failure modes -- is in
 
 ## Install
 
-There is no release yet; the release archives, the Homebrew cask and the
-Docker image start with the first one. Until then, build it from source:
-
 ```bash
-git clone https://github.com/ashtonian/gitten
-cd gitten && go install .        # Go version: see go.mod
+brew install --cask ashtonian/tap/gitten        # macOS
+go install github.com/ashtonian/gitten@latest   # Go version: see go.mod
+docker pull ashtonian/gitten                    # linux/amd64, linux/arm64
 ```
 
-Once released:
-
-```bash
-brew install --cask ashtonian/tap/gitten
-go install github.com/ashtonian/gitten@latest
-docker pull ashtonian/gitten     # linux/amd64, linux/arm64
-```
+The [releases](https://github.com/ashtonian/gitten/releases) have archives
+for macOS and Linux on amd64 and arm64, with checksums. Name the cask in full,
+`ashtonian/tap/gitten`: Homebrew asks you to trust a third-party tap, and
+naming its cask does.
 
 gitten shells out to `git`, so git must be on `PATH`.
 
