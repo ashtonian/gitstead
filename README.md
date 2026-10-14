@@ -99,7 +99,7 @@ How it works inside -- components, data flow, locks, failure modes -- is in
 ```bash
 brew install --cask ashtonian/tap/gitten        # macOS
 go install github.com/ashtonian/gitten@latest   # Go version: see go.mod
-docker pull ashtonian/gitten                    # linux/amd64, linux/arm64
+docker pull ghcr.io/ashtonian/gitten            # linux/amd64, linux/arm64
 ```
 
 The [releases](https://github.com/ashtonian/gitten/releases) have archives
@@ -1892,14 +1892,15 @@ vulnerability privately, is in [SECURITY.md](SECURITY.md).
 
 ## Docker
 
-From the first release, `ashtonian/gitten` runs gitten with git in a
-container:
+`ghcr.io/ashtonian/gitten` runs gitten with git in a container, for
+linux/amd64 and linux/arm64: `:<version>` and `:latest` for each release,
+`:edge` for `master`.
 
 ```bash
 docker run -v ~/.config/gitten:/root/.config/gitten \
            -v ~/repos:/root/repos \
            -v ~/.ssh:/root/.ssh:ro \
-           ashtonian/gitten sync
+           ghcr.io/ashtonian/gitten sync
 ```
 
 ## Development
