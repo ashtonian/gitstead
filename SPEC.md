@@ -1822,123 +1822,29 @@ All dependencies pinned to latest stable versions at build time. No go-git.
 
 ---
 
-## Build, Versioning & Docker
+## Build, Release and CI
 
-### Go Version
-
-Use latest stable Go (currently 1.24+). Set in `go.mod` and Dockerfile.
-
-### Version Embedding
-
-Version is injected at build time via ldflags. No hardcoded version strings.
-
-```go
-// main.go
-var (
-    version = "dev"
-    commit  = "none"
-    date    = "unknown"
-)
-```
-
-Build: `go build -ldflags="-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$DATE"`
-
-### Dockerfile (Multi-Arch)
-
-```dockerfile
-# syntax=docker/dockerfile:1.4
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
-
-WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-
-ARG TARGETARCH
-ARG VERSION=dev
-ARG COMMIT=none
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build \
-    -ldflags="-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    -o gitstead .
-
-FROM alpine:3.21
-RUN apk add --no-cache git openssh-client
-COPY --from=builder /app/gitstead /usr/local/bin/gitstead
-ENTRYPOINT ["gitstead"]
-```
-
-Key: Alpine final image includes `git` and `openssh-client` (required for SSH clone/fetch).
-
-### GitHub Actions CI/CD
-
-```yaml
-name: Build & Push
-
-on:
-  push:
-    branches: [main]
-    tags: ['v*']
-  pull_requests:
-    branches: [main]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version override'
-        required: false
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0          # Full history for version calculation
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to DockerHub
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Calculate version
-        id: version
-        run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          else
-            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-            MAJOR=$(echo $LATEST_TAG | sed 's/v//' | cut -d. -f1)
-            COMMITS=$(git rev-list --count HEAD)
-            echo "version=${MAJOR}.${COMMITS}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ashtonian/gitstead:latest
-            ashtonian/gitstead:${{ steps.version.outputs.version }}
-          build-args: |
-            VERSION=${{ steps.version.outputs.version }}
-            COMMIT=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-```
-
-**Version strategy**:
-- Tagged push (`v1.2.3`): uses tag as version
-- Main branch push: `MAJOR.COMMIT_COUNT` (auto-incrementing)
-- Manual dispatch: explicit version input
-- PR: build only, no push
+- **Go version:** the one in `go.mod`; CI and releases build with it
+  (`go-version-file: go.mod`).
+- **Version embedding:** `main.version`, `main.commit` and `main.date` are
+  set with `-ldflags -X` at build time (`dev`, `none`, `unknown` otherwise)
+  and printed by `gitstead version`. Nothing hardcodes a version.
+- **Binaries:** `CGO_ENABLED=0`, for linux and darwin on amd64 and arm64
+  (`.goreleaser.yaml`).
+- **Images:** `Dockerfile` builds from source in two stages for any platform
+  (CI's multi-arch build, local use); `Dockerfile.goreleaser` packages a
+  release's pre-built binary. Both end on Alpine with `git` and
+  `openssh-client`, which clone and fetch need, and run `gitstead` as the
+  entrypoint.
+- **CI** (`.github/workflows/ci.yml`, on pushes and pull requests to
+  `master`): build, vet, gofmt, race tests; the e2e module against a Forgejo
+  container; govulncheck; golangci-lint; and a linux/amd64 + linux/arm64 image
+  build, pushed as `ashtonian/gitstead:edge` from `master` when Docker Hub
+  credentials are set.
+- **Release** (`.github/workflows/release.yml`, on a `v*` tag): the race
+  tests, then GoReleaser publishes the archives and checksums, the Homebrew
+  cask and the Docker images. [docs/RELEASING.md](docs/RELEASING.md) has the
+  steps and the secrets.
 
 ---
 
