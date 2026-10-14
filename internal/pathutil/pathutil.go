@@ -1,4 +1,9 @@
-// Package pathutil provides filesystem path-safety helpers.
+// Package pathutil holds the filesystem primitives the rest of git-mgr
+// relies on not to lose data: guarded deletion (SafeRemoveAll), safe file
+// names, renames that never replace (RenameNoReplace), whole-tree moves that
+// fall back to copy-then-delete across filesystems (Move), and durable
+// writes -- atomic file replacement and fsync of files, trees and the
+// directories holding them (WriteFileAtomic, SyncTree, MkdirAll).
 package pathutil
 
 import (

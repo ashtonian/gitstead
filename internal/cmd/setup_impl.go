@@ -242,7 +242,7 @@ func afterSetup(ctx *Context, cfg *config.Config, a setup.Answers, det setup.Det
 	switch {
 	case a.Schedule:
 		agent := &InstallAgentCmd{Interval: a.Interval(), Linger: a.Linger}
-		done.schedule = step("schedule", "Installing the background sync, every "+setup.FormatInterval(a.Interval()), agent.Run)
+		done.schedule = step("schedule", "Installing the background sync, every "+scheduler.FormatInterval(a.Interval()), agent.Run)
 	case det.Schedule != nil:
 		agent := &InstallAgentCmd{Uninstall: true}
 		done.schedule = step("schedule", "Removing the background sync", agent.Run)
@@ -260,7 +260,7 @@ func printSetupDone(configPath string, a setup.Answers, det setup.Detected, done
 	}
 	switch {
 	case a.Schedule && ok("schedule"):
-		fmt.Printf("  background sync    every %s; `git-mgr install-agent --list` shows it\n", setup.FormatInterval(a.Interval()))
+		fmt.Printf("  background sync    every %s; `git-mgr install-agent --list` shows it\n", scheduler.FormatInterval(a.Interval()))
 	case !a.Schedule:
 		fmt.Println("  background sync    off; `git-mgr install-agent` turns it on")
 	}
@@ -358,7 +358,7 @@ func printSetupReview(path string, before, after []byte, a setup.Answers, det se
 	}
 	switch {
 	case a.Schedule:
-		then = append(then, "install the background sync: `git-mgr sync` every "+setup.FormatInterval(a.Interval()))
+		then = append(then, "install the background sync: `git-mgr sync` every "+scheduler.FormatInterval(a.Interval()))
 	case det.Schedule != nil:
 		then = append(then, "remove the background sync")
 	}
@@ -434,7 +434,7 @@ func askSetup(ctx *Context, det setup.Detected, a setup.Answers, tracked map[str
 // askSchedule asks how often the background sync runs, and on Linux whether
 // it keeps running while you are logged out.
 func askSchedule(a *setup.Answers) error {
-	interval := setup.FormatInterval(a.Interval())
+	interval := scheduler.FormatInterval(a.Interval())
 	intervals := []string{"5m", "10m", "15m", "30m", "1h", "2h", "6h"}
 	if !slices.Contains(intervals, interval) {
 		intervals = append(intervals, interval)

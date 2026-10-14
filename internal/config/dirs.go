@@ -22,7 +22,8 @@ func ConfigDir() string { return xdgDir("XDG_CONFIG_HOME", "~/.config") }
 // mirrors and the scheduled sync's log, unless config puts them elsewhere.
 func DataDir() string { return xdgDir("XDG_DATA_HOME", "~/.local/share") }
 
-// CacheDir holds what can be made again: workspaces' shared caches.
+// CacheDir holds what can be made again: workspaces' shared caches, and
+// lock files.
 func CacheDir() string { return xdgDir("XDG_CACHE_HOME", "~/.cache") }
 
 // DefaultConfigPath is where git-mgr looks for its config when none is given.

@@ -45,6 +45,7 @@ func (r *Repo) Key() string {
 // client-side pass can skip them rather than re-applying.
 type Filter string
 
+// The filters a discovery rule can set.
 const (
 	FilterForks      Filter = "forks"
 	FilterArchived   Filter = "archived"

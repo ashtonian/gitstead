@@ -58,17 +58,6 @@ type Answers struct {
 // answers say otherwise.
 const DefaultScheduleInterval = 15 * time.Minute
 
-// FormatInterval writes a schedule's interval as people do: 15m, 1h.
-func FormatInterval(d time.Duration) string {
-	if d >= time.Hour && d%time.Hour == 0 {
-		return fmt.Sprintf("%dh", d/time.Hour)
-	}
-	if d%time.Minute == 0 {
-		return fmt.Sprintf("%dm", d/time.Minute)
-	}
-	return d.String()
-}
-
 // Interval is how often the background sync runs.
 func (a Answers) Interval() time.Duration {
 	if d, err := time.ParseDuration(a.ScheduleInterval); err == nil {
@@ -217,7 +206,7 @@ func (w Workspaces) validate() error {
 func Defaults(det Detected, existing *config.Config, home string) Answers {
 	a := Answers{
 		BaseDir: "~/repos", Layout: "host/owner/name",
-		Backups: true, Schedule: true, ScheduleInterval: FormatInterval(DefaultScheduleInterval), Linger: true,
+		Backups: true, Schedule: true, ScheduleInterval: scheduler.FormatInterval(DefaultScheduleInterval), Linger: true,
 		ReconcileAuto: "safe", Cleanup: "mark_stale",
 	}
 	if existing != nil {
@@ -234,7 +223,7 @@ func Defaults(det Detected, existing *config.Config, home string) Answers {
 		a.Schedule = det.Schedule != nil
 	}
 	if det.Schedule != nil {
-		a.ScheduleInterval = FormatInterval(det.Schedule.Interval)
+		a.ScheduleInterval = scheduler.FormatInterval(det.Schedule.Interval)
 	}
 	if len(a.Accounts) == 0 {
 		a.Accounts = detectedAccounts(det)

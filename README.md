@@ -38,6 +38,47 @@ agents at once, each in a copy of its own — keeping their WIP safe.
 - **Resilient** — one failing provider doesn't abort the run; GitHub/Gitea calls
   retry on rate-limit and 5xx; Ctrl-C cancels in-flight work cleanly.
 
+## What it does, and what it doesn't
+
+git-mgr **does**:
+
+- find your repositories on GitHub, GitHub Enterprise, GitLab and
+  Gitea/Forgejo, by owner, organization, group or search, for any number of
+  accounts, and clone them into one layout with each account's identity, SSH
+  key and signing written into the repos it covers;
+- keep them current -- fetch, and optionally fast-forward clean clones -- on a
+  schedule, and bring them in line when config changes (`plan`, `apply`);
+- back up uncommitted work without touching your working tree, index or
+  branches, locally and optionally offsite, and restore it exactly;
+- delete nothing until what only it holds is archived and verified;
+- put several coding agents on a repo at once, each in a copy of its own, and
+  open them side by side.
+
+It **doesn't**:
+
+- pull, merge, rebase or commit on your branches (the one exception is the
+  opt-in fast-forward of a clone with no local work), or push them (offsite
+  copies go to hidden refs; `ws publish` pushes agents' branches when you ask);
+- create, change or delete anything on a forge, beyond the pull requests `ws
+  publish --pr` opens;
+- run as a server or daemon: the host's scheduler runs `git-mgr sync`;
+- support Bitbucket or Windows: it runs on macOS and Linux.
+
+## Contents
+
+- [Install](#install) and [Quick start](#quick-start)
+- [Commands](#commands), [JSON output](#json-output), [Live view](#live-view-git-mgr-top), [Jump and open](#jump-and-open), [Shell completions](#shell-completions)
+- [Configuration](#configuration): [providers](#providers), [discovery](#discovery-rules), [authentication](#authentication), [accounts](#accounts), [clone options](#clone-options), [hooks](#hooks), [several machines](#several-machines)
+- [Config changes: plan and apply](#config-changes-plan-and-apply)
+- [Transparent backups](#transparent-backups), [offsite](#offsite-surviving-a-lost-disk), [mirrors](#mirrors-surviving-the-host), [deleting](#deleting-without-losing-work) and [archiving](#archiving-instead-of-deleting)
+- [Workspaces](#workspaces) and [fleets](#fleets-and-launchers)
+- [Running on a schedule](#running-on-a-schedule)
+- [Exit codes](#exit-codes), [Troubleshooting](#troubleshooting), [Resilience](#resilience), [Environment variables](#environment-variables), [Security](#security)
+- [Docker](#docker), [Development](#development), [Code map](#code-map)
+
+How it works inside -- components, data flow, locks, failure modes -- is in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Install
 
 There is no release yet. git-mgr's config loader is
@@ -311,7 +352,8 @@ Config lives at `~/.config/git-mgr/config.yaml`. See
 git-mgr follows the XDG base directories: its config in
 `$XDG_CONFIG_HOME/git-mgr`, its state, operation log, backups, archives,
 mirrors and scheduled-sync log in `$XDG_DATA_HOME/git-mgr`, and workspaces'
-shared caches in `$XDG_CACHE_HOME/git-mgr`, each when the variable is set to
+shared caches and the shared manifest's lock file in `$XDG_CACHE_HOME/git-mgr`,
+each when the variable is set to
 an absolute path, else in `~/.config/git-mgr`, `~/.local/share/git-mgr` and
 `~/.cache/git-mgr` -- the defaults shown throughout this README.
 
@@ -1645,6 +1687,51 @@ broken setup. With `--quiet`, only failures are printed, to stderr.
 | 75 | Another git-mgr run held the state lock, or a repo's lock (`.git/git-mgr.lock`, held while a repo is deleted, moved or copied into a workspace), for longer than `lock_timeout`, and nothing else was done; try again (EX_TEMPFAIL). When other targets succeeded meanwhile it is a partial failure (3), and when others failed for another reason, a failure (1). `git-mgr doctor` reports a stuck state-lock holder; `lsof <repo>/.git/git-mgr.lock` shows a repo lock's. |
 | 80 | Usage error: unknown command or flag. |
 
+## Troubleshooting
+
+Start with `git-mgr doctor`: it checks tooling, each provider's token, each
+SSH key, the config, every tracked repo and copy on disk, and each installed
+schedule, and says what to do about each problem (`--json` for a script).
+Then:
+
+- **The background sync isn't running.** `git-mgr install-agent --list`
+  shows what is installed. On macOS, `launchctl print gui/$(id -u)/com.ashtonian.git-mgr`
+  shows the agent's state and last exit; its output is in
+  `~/.local/share/git-mgr/git-mgr.log`. On Linux, `systemctl --user status
+  git-mgr.timer` and `journalctl --user -u git-mgr`; if it stops at logout,
+  reinstall with `--linger`. A binary that moved or was upgraded out of a Nix
+  store or Homebrew Cellar path: `git-mgr install-agent` again from the
+  `git-mgr` on your PATH.
+- **It works in your terminal but not in the background sync.** The schedule
+  has no shell environment: a provider using `token_env` gets nothing (`git-mgr
+  setup` warns). Use `token_command` (`gh auth token --hostname H --user U`
+  after `gh auth login`, or a password manager's CLI). An SSH key with a
+  passphrase needs an agent the schedule can reach; give the account an
+  `ssh_key` without one, or see [Installing a schedule](#installing-a-schedule).
+- **A command exits 75.** Another git-mgr command holds the state or a repo
+  (deleting, moving, or making a workspace copy of it) past `lock_timeout`.
+  Run it again; `doctor` names a stuck state-lock holder, and `lsof
+  <repo>/.git/git-mgr.lock` a repo lock's.
+- **A repo is kept instead of deleted.** The message says why: git is busy in
+  it (a leftover `index.lock` from a crashed command: delete it once no git
+  runs there), workspace copies are made from it (`git-mgr ws rm <name>
+  --delete` first), or its work couldn't be archived (the error says why).
+- **A repo shows as stale.** Discovery stopped finding it: renamed (the next
+  sync usually re-keys it), deleted or transferred upstream, or your token
+  lost access. `git-mgr status --stale` lists them; `cleanup.policy` decides
+  what happens after the grace period.
+- **Untracked files were left out of a backup.** Over `max_untracked_file_mb`
+  or `max_untracked_total_mb`, unreadable, or a nested repository; the sync
+  output and `git-mgr backup --list` name them. Raise the limits for that repo
+  in `overrides`, or ignore the files.
+- **Getting work back.** `git-mgr restore <repo>` prints the steps for the
+  latest backup; `--into <dir>` restores into a scratch clone, `--apply` onto
+  the working tree. Deleted copies and repos: `git-mgr archives ls`, then
+  `archives restore <id>`. From another machine: `git-mgr remote-sync --list`.
+- **An agent's copy is missing, or an agent shows as retiring.** `git-mgr ws
+  ensure <name>` makes missing copies; `git-mgr ws retire <name> <agent>`
+  finishes a retire that was cut short.
+
 ## Resilience
 
 GitHub and Gitea requests retry on rate limits (429, GitHub's primary and
@@ -1680,6 +1767,17 @@ All config fields can be overridden via `GIT_MGR_*` env vars (e.g.
 | `GIT_MGR_BASE_DIR` | Override `base_dir`. |
 | `GITHUB_TOKEN` / `GITLAB_TOKEN` / `GITEA_TOKEN` / `FORGEJO_TOKEN` | Default provider tokens. |
 
+## Security
+
+git-mgr runs with your credentials, so in short: tokens come from exactly
+the one source a provider configures and never go to another account's API;
+credentials in remote URLs are refused and redacted from all output; SSH keys
+are passed by path, never read; git and ssh never prompt; config and state
+are written `0600`. Offsite refs are readable by anyone who can read the
+remote, untracked files included, so point `remote_sync.remote` at a private
+remote for repos where that matters. The full model, and how to report a
+vulnerability privately, is in [SECURITY.md](SECURITY.md).
+
 ## Docker
 
 From the first release, `ashtonian/git-mgr` runs git-mgr with git in a
@@ -1694,11 +1792,18 @@ docker run -v ~/.config/git-mgr:/root/.config/git-mgr \
 
 ## Development
 
+Go (the version in `go.mod`), `git`, and -- until pkg's config package is
+published -- a [pkg](https://github.com/ashtonian/pkg) checkout beside
+this one (see [Install](#install)). [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+explains how the parts fit; [SPEC.md](SPEC.md) is the detailed reference.
+
 ```bash
 go build ./...
 go vet ./...
-go test ./...                 # unit tests
+go test ./...                 # unit tests; each package's run is isolated from your home and git config
 go test -race ./...           # with the race detector
+golangci-lint run             # the version CI pins: see CONTRIBUTING.md
+govulncheck ./...
 ```
 
 End-to-end tests live in a **separate module** under [`e2e/`](e2e/) so their
@@ -1732,11 +1837,14 @@ go build -ldflags="-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD)" .
 | `internal/activity` | Reading agents' terminal activity (tmux panes, Muxy), and watching a pane for an agent waiting. |
 | `internal/view` | `git-mgr top`: collecting every repo and copy's state and terminal activity, and laying it out. |
 | `internal/jump` | Matching a short query to a repo, workspace, agent or copy, for `cd`, `path` and `open`. |
-| `internal/setup` | `git-mgr setup`'s logic: detecting what the machine has, proposing answers, rendering them into config. |
+| `internal/setup` | `git-mgr setup`'s logic: detecting what the machine has, proposing answers, rendering them into config, checking it, and the shell's startup-file line. |
 | `internal/repourl` | Parsing remote URLs into host/owner/name keys. |
-| `internal/pathtemplate`, `internal/pathutil`, `internal/shellutil`, `internal/ctxutil` | Path templates, deletion guards and moves across filesystems, shell quoting, optional deadlines. |
+| `internal/pathtemplate`, `internal/pathutil`, `internal/shellutil`, `internal/ctxutil`, `internal/procutil` | Path templates; deletion guards, renames that never replace, moves across filesystems and durable writes; shell quoting; optional deadlines; commands that never prompt and die with their context. |
 | `internal/scheduler` | launchd, systemd and cron installation. |
 | `internal/oplog`, `internal/notify` | The operation log and desktop notifications. |
+| `internal/testenv` | Isolating each package's tests from the machine: home, XDG directories, git config, temporary directories. |
+| `e2e/` | End-to-end tests, a module of their own: the built binary against local remotes and a Forgejo container. |
+| `docs/` | [ARCHITECTURE.md](docs/ARCHITECTURE.md), how the parts fit and why. |
 | `nix/home-manager.nix`, `flake.nix` | The home-manager module: package, config and schedules as systemd timers or launchd agents. |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow and
