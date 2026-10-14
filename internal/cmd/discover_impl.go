@@ -4,9 +4,13 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
+	"github.com/ashtonian/gitstead/internal/config"
 	"github.com/ashtonian/gitstead/internal/discovery"
 	"github.com/ashtonian/gitstead/internal/reconcile"
+	"github.com/ashtonian/gitstead/internal/scheduler"
+	"github.com/ashtonian/gitstead/internal/state"
 )
 
 func (c *DiscoverCmd) Run(ctx *Context) error {
@@ -54,11 +58,12 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 	scope := discovery.StaleScopeOf(results, c.Rule, c.Tag)
 	plan := reconcile.Compute(ctx.GoCtx(), cfg, st, reconcile.Scope{Discovered: discovered, Rules: scope})
 	var applyErr error
+	safe := 0
 	if c.Apply {
 		applyErr = changesOutcome(applyAuto(ctx, cfg, st, plan, reconcile.Safe), plan)
 		doc.Changes = &ctx.changes
 	} else {
-		printPlan(plan, "safe")
+		safe = printPlan(plan, "safe")
 		doc.Plan = plan
 	}
 
@@ -100,11 +105,50 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 	}
 
 	if !c.Apply {
-		fmt.Println("\nUse --apply to make the changes that move and delete nothing, or `gitstead apply` for all of them.")
+		printPreviewNext(cfg, st, plan, safe)
 		return ctx.finish(doc, nil)
 	}
 	fmt.Printf("State updated: %d repos tracked.\n", len(st.Repos))
 	return ctx.finish(doc, applyErr)
+}
+
+// printPreviewNext says that a preview changed nothing, what would make its
+// changes, and whether anything will without being asked: a background sync
+// applies what reconcile.auto allows.
+func printPreviewNext(cfg *config.Config, st *state.State, p *reconcile.Plan, safe int) {
+	if len(p.Actions) == 0 {
+		return
+	}
+	clones := 0
+	for _, a := range p.Actions {
+		if a.Kind == reconcile.KindClone {
+			clones++
+		}
+	}
+	fmt.Println("\nThis was a preview: nothing was cloned or changed.")
+	if clones > 0 {
+		fmt.Printf("%d %s would be cloned.\n", clones, plural(clones, "repo", "repos"))
+	}
+	fmt.Printf("  gitstead discover --apply   makes %d of the %d changes: all but moving or deleting directories\n", safe, len(p.Actions))
+	fmt.Println("  gitstead apply              makes them all, asking before moves and deletions")
+	fmt.Println("  gitstead setup              changes which repos are tracked")
+	if len(st.Schedules) == 0 {
+		fmt.Println("No background sync is installed, so nothing changes until you run one of these.")
+		return
+	}
+	var every []string
+	for _, name := range slices.Sorted(maps.Keys(st.Schedules)) {
+		every = append(every, fmt.Sprintf("%s every %s", name, scheduler.FormatInterval(st.Schedules[name].Interval)))
+	}
+	auto := reconcile.AutoFilter(cfg.Reconcile.Auto)
+	bySync := 0
+	for _, a := range p.Actions {
+		if !a.Disruptive && !a.Serial && auto(a) {
+			bySync++
+		}
+	}
+	fmt.Printf("Your background sync (%s) makes %d of them on its next run (reconcile.auto: %s).\n",
+		strings.Join(every, ", "), bySync, cfg.Reconcile.Auto)
 }
 
 // discoverJSON is what discover --json prints: what each rule found, the

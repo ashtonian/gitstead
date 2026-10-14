@@ -15,19 +15,19 @@ discovery:
     org: acme
     languages: [Go]                 # any of these
     topics: [service]               # all of these
-    name_pattern: "^svc-"           # a regular expression on the name
+    names: ["svc-*"]                # globs on the name, any of them, ignoring case
     tags: [services]
   - name: acme-terraform
     provider: github.com
     org: acme
     languages: [HCL]
-    name_pattern: "^terraform-"
+    name_pattern: "^terraform-"     # or a regular expression
     visibility: private
     tags: [infra]
 
 exclude:
-  - name_pattern: "-(sandbox|experiment)$"
-  - repos: ["github.com/acme/svc-legacy-*"]
+  - names: ["*-sandbox", "*-experiment"]
+  - repos: ["github.com/acme/svc-legacy-*"]   # repo keys or globs over them
 
 sets:
   - name: services

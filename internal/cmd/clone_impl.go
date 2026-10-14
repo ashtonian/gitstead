@@ -23,7 +23,7 @@ import (
 
 func (c *CloneCmd) Run(ctx *Context) error {
 	selecting := c.Org != "" || c.User != "" || c.Group != "" || c.Query != "" || c.Mine
-	filtering := len(c.Language) > 0 || len(c.Topic) > 0 || c.Name != "" || c.Visibility != "" || c.Forks || c.Archived ||
+	filtering := len(c.Language) > 0 || len(c.Topic) > 0 || len(c.Name) > 0 || c.NamePattern != "" || c.Visibility != "" || c.Forks || c.Archived ||
 		c.Provider != "" || c.Save != "" || c.NoSave || c.DryRun
 	switch {
 	case c.URL != "" && (selecting || filtering):
@@ -251,7 +251,7 @@ func (c *CloneCmd) provider(ctx *Context, cfg *config.Config) (p config.Provider
 func (c *CloneCmd) rule(cfg *config.Config, provider config.Provider) config.DiscoveryRule {
 	r := config.DiscoveryRule{
 		Provider: provider.Name, Org: c.Org, User: c.User, Group: c.Group, Query: c.Query,
-		Languages: c.Language, Topics: c.Topic, NamePattern: c.Name, Visibility: c.Visibility,
+		Languages: c.Language, Topics: c.Topic, Names: c.Name, NamePattern: c.NamePattern, Visibility: c.Visibility,
 		IncludeForks: c.Forks, IncludeArchived: c.Archived, Tags: splitTags(c.Tag),
 	}
 	if c.Mine && config.NormalizeProviderType(provider.Type) == "github" {
@@ -264,8 +264,8 @@ func (c *CloneCmd) rule(cfg *config.Config, provider config.Provider) config.Dis
 	return r
 }
 
-// ruleName names a selection after what it selects -- acme-go-service --
-// unique among config's rules.
+// ruleName names a selection after what it selects -- acme-go-service,
+// acme-billing-payments -- unique among config's rules.
 func ruleName(cfg *config.Config, r config.DiscoveryRule, mine bool) string {
 	var parts []string
 	switch {
@@ -280,7 +280,7 @@ func ruleName(cfg *config.Config, r config.DiscoveryRule, mine bool) string {
 	default:
 		parts = append(parts, "search")
 	}
-	parts = append(append(parts, r.Languages...), r.Topics...)
+	parts = append(append(append(parts, r.Languages...), r.Topics...), r.Names...)
 	base := strings.Trim(nonSlug.ReplaceAllString(strings.ToLower(strings.Join(parts, "-")), "-"), "-")
 	taken := func(name string) bool {
 		return slices.ContainsFunc(cfg.Discovery, func(d config.DiscoveryRule) bool { return d.Name == name })

@@ -183,7 +183,7 @@ func sampleAnswers() Answers {
 		Accounts: []Account{{
 			Name: "work", Type: "github", Host: "github.com", Login: "me-at-acme",
 			TokenCommand: "gh auth token --hostname github.com --user me-at-acme",
-			Track: []Track{{Owner: "me-at-acme", Kind: "self"}, {Owner: "acme", Kind: "org"},
+			Track: []Track{{Owner: "me-at-acme", Kind: "self"}, {Owner: "acme", Kind: "org", Names: []string{"*billing*", "*payments*"}},
 				{Owner: "acme-labs", Kind: "org", Languages: []string{"Go"}, Topics: []string{"service"}, NamePattern: "^svc-"}},
 			SSHKey: "~/.ssh/id_work", Protocol: "ssh",
 			Git:     config.GitIdentity{Name: "Me", Email: "me@acme.com"},
