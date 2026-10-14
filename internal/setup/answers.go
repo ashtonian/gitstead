@@ -103,19 +103,25 @@ type Account struct {
 // of Languages, with all of Topics, and whose name matches NamePattern, when
 // set.
 type Track struct {
-	Owner     string   `yaml:"owner"`
-	Kind      string   `yaml:"kind"` // self | org | group
+	Owner string `yaml:"owner"`
+	Kind  string `yaml:"kind"` // self | org | group
+	// Rule is the discovery rule this is, by name: one already in config,
+	// or empty for one setup names. An owner can have several.
+	Rule      string   `yaml:"rule,omitempty"`
 	Languages []string `yaml:"languages,omitempty"`
 	Topics    []string `yaml:"topics,omitempty"`
-	// Names are globs over repo names (*billing*); NamePattern a regular
-	// expression. A repo must match both, when both are set.
+	// Names are patterns over repo names -- words (billing) or globs
+	// (svc-*), see config.NameMatches; NamePattern a regular expression. A
+	// repo must match both, when both are set. Skip are the names of repos
+	// picked off the list by hand.
 	Names       []string `yaml:"names,omitempty"`
 	NamePattern string   `yaml:"name_pattern,omitempty"`
+	Skip        []string `yaml:"skip,omitempty"`
 }
 
 // Narrowed reports whether t keeps only some of the owner's repos.
 func (t Track) Narrowed() bool {
-	return len(t.Languages) > 0 || len(t.Topics) > 0 || len(t.Names) > 0 || t.NamePattern != ""
+	return len(t.Languages) > 0 || len(t.Topics) > 0 || len(t.Names) > 0 || t.NamePattern != "" || len(t.Skip) > 0
 }
 
 // Owners are the owners an account covers: the ones it tracks.
@@ -187,6 +193,9 @@ func (a Answers) Validate() error {
 				if err := config.CheckNameGlob(g); err != nil {
 					return fmt.Errorf("account %q: owner %q: names: %w", acct.Name, t.Owner, err)
 				}
+			}
+			if slices.Contains(t.Skip, "") {
+				return fmt.Errorf("account %q: owner %q: skip: an empty name", acct.Name, t.Owner)
 			}
 		}
 	}
@@ -316,7 +325,7 @@ func existingAccounts(cfg *config.Config) []Account {
 		if len(ca.Hosts) > 0 {
 			acct.Host = ca.Hosts[0]
 		}
-		var self *config.DiscoveryRule
+		var selfRules, userRules []config.DiscoveryRule
 		for _, p := range cfg.Providers {
 			if p.Account != ca.Name {
 				continue
@@ -327,29 +336,43 @@ func existingAccounts(cfg *config.Config) []Account {
 				acct.Protocol = p.CloneProtocol
 			}
 			for _, r := range cfg.Discovery {
-				switch {
-				case r.Provider != p.Name:
-				case r.Org != "":
+				if r.Provider != p.Name {
+					continue
+				}
+				switch ruleKind(r) {
+				case "org":
 					acct.Track = append(acct.Track, trackOf(r, r.Org, "org"))
-				case r.Group != "":
+				case "group":
 					acct.Track = append(acct.Track, trackOf(r, r.Group, "group"))
-				case r.User != "":
-					acct.Login = r.User
-					self = &r
-				default:
-					self = &r
+				case "user":
+					userRules = append(userRules, r)
+				case "self":
+					selfRules = append(selfRules, r)
 				}
 			}
 		}
 		// The account's own login is the owner it covers that isn't an
-		// organization it tracks.
+		// organization it tracks; a user rule for that login is its own repos,
+		// and one for anybody else is a rule setup leaves alone.
 		for _, o := range ca.Owners {
 			if acct.Login == "" && !acct.Tracks(o) {
 				acct.Login = o
 			}
 		}
-		if self != nil && acct.Login != "" {
-			acct.Track = append([]Track{trackOf(*self, acct.Login, "self")}, acct.Track...)
+		for _, r := range userRules {
+			if acct.Login == "" {
+				acct.Login = r.User
+			}
+			if strings.EqualFold(r.User, acct.Login) {
+				selfRules = append(selfRules, r)
+			}
+		}
+		if acct.Login != "" {
+			var self []Track
+			for _, r := range selfRules {
+				self = append(self, trackOf(r, acct.Login, "self"))
+			}
+			acct.Track = append(self, acct.Track...)
 		}
 		accounts = append(accounts, acct)
 	}
@@ -358,7 +381,42 @@ func existingAccounts(cfg *config.Config) []Account {
 
 // trackOf is the Track rule r describes for owner.
 func trackOf(r config.DiscoveryRule, owner, kind string) Track {
-	return Track{Owner: owner, Kind: kind, Languages: r.Languages, Topics: r.Topics, Names: r.Names, NamePattern: r.NamePattern}
+	return Track{Owner: owner, Kind: kind, Rule: r.Name, Languages: r.Languages, Topics: r.Topics, Names: r.Names,
+		NamePattern: r.NamePattern, Skip: r.Skip}
+}
+
+// ruleKind is what a discovery rule covers, as setup sees it: an
+// organization's repos ("org"), a group's ("group"), a user's ("user"), or
+// the token's own ("self") -- the rules Track describes, which setup edits.
+// Anything else -- a search, or a GitHub rule widened beyond the repos the
+// token owns -- is "", a rule setup leaves as it is.
+func ruleKind(r config.DiscoveryRule) string {
+	switch {
+	case r.Query != "":
+		return ""
+	case r.Org != "":
+		return "org"
+	case r.Group != "":
+		return "group"
+	case r.User != "":
+		return "user"
+	case len(r.Affiliation) == 0 || slices.Equal(r.Affiliation, []string{"owner"}):
+		return "self"
+	}
+	return ""
+}
+
+// Manages reports whether rule r is one of the account's that setup edits:
+// an organization's, a group's or the account's own repos, as opposed to a
+// search or another user's repos, which it leaves as they are.
+func (a Account) Manages(r config.DiscoveryRule) bool {
+	switch ruleKind(r) {
+	case "org", "group", "self":
+		return true
+	case "user":
+		return a.Login == "" || strings.EqualFold(r.User, a.Login)
+	}
+	return false
 }
 
 // AdoptCandidates are existing clones that discovery won't pick up by

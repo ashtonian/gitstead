@@ -20,7 +20,7 @@ discovery:
     provider: github.com
     org: charmbracelet
     languages: [Go]
-    names: ["bubble*", "lip*", "glam*"]   # globs on the name, any of them
+    names: ["bubble*", "lip*", "glam*"]   # globs over the name; a word without * matches whole words
     tags: [oss, tui]
   - name: acme-payments
     provider: github.com

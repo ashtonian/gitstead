@@ -7,20 +7,42 @@ import (
 
 func TestNameMatches(t *testing.T) {
 	for _, tt := range []struct {
-		globs []string
-		name  string
-		want  bool
+		patterns []string
+		name     string
+		want     bool
 	}{
-		{[]string{"*billing*"}, "billing-api", true},
-		{[]string{"*billing*"}, "Rebilling", true},
-		{[]string{"*BILLING*", "*payments*"}, "payments-ui", true},
+		// A pattern without a wildcard is a run of whole words.
+		{[]string{"ops"}, "ops-tools", true},
+		{[]string{"ops"}, "platform-ops", true},
+		{[]string{"ops"}, "OpsPortal", true},
+		{[]string{"ops"}, "platform_ops.v2", true},
+		{[]string{"ops"}, "devops", false},
+		{[]string{"ops"}, "ops2", true},
+		{[]string{"ops"}, "dev-OPS", true},
+		{[]string{"server"}, "HTTPServer", true},
+		{[]string{"platform-ops"}, "team-platform-ops", true},
+		{[]string{"platform-ops"}, "platform-team-ops", false},
+		{[]string{"payments"}, "prepayments", false},
+		{[]string{"payments", "billing"}, "billing-api", true},
+		// With one, it is a glob over the whole name.
+		{[]string{"*bill*"}, "Rebilling", true},
 		{[]string{"billing-*"}, "BILLING-Web", true},
-		{[]string{"billing"}, "billing-api", false},
 		{[]string{"svc-?"}, "svc-a", true},
+		{[]string{"svc-*"}, "my-svc-a", false},
 		{nil, "anything", false},
+		// The README's "Matching names" table.
+		{[]string{"billing"}, "billing", true},
+		{[]string{"billing"}, "team-billing", true},
+		{[]string{"billing"}, "BillingPortal", true},
+		{[]string{"billing"}, "billing_v2", true},
+		{[]string{"billing"}, "rebilling", false},
+		{[]string{"billing"}, "billings", false},
+		{[]string{"billing-api"}, "old-billing-api-v2", true},
+		{[]string{"billing-api"}, "billing-web-api", false},
+		{[]string{"billing-*"}, "team-billing-api", false},
 	} {
-		if got := NameMatches(tt.globs, tt.name); got != tt.want {
-			t.Errorf("NameMatches(%q, %q) = %v, want %v", tt.globs, tt.name, got, tt.want)
+		if got := NameMatches(tt.patterns, tt.name); got != tt.want {
+			t.Errorf("NameMatches(%q, %q) = %v, want %v", tt.patterns, tt.name, got, tt.want)
 		}
 	}
 }
@@ -34,7 +56,9 @@ func TestCheck_NameGlobs(t *testing.T) {
 		err  string
 	}{
 		{"rule names", func(c *Config) { c.Discovery[0].Names = []string{"billing-[a"} }, `discovery rule "r": names: "billing-[a" is not a valid glob`},
-		{"empty glob", func(c *Config) { c.Discovery[0].Names = []string{" "} }, "an empty name glob"},
+		{"empty pattern", func(c *Config) { c.Discovery[0].Names = []string{" "} }, "an empty name pattern"},
+		{"no word", func(c *Config) { c.Discovery[0].Names = []string{"--"} }, "no letters or digits"},
+		{"empty skip", func(c *Config) { c.Discovery[0].Skip = []string{""} }, `discovery rule "r": skip`},
 		{"exclude names", func(c *Config) { c.Exclude = []ExcludeRule{{Names: []string{"[x"}}} }, "exclude[0]: names"},
 		{"exclude repos", func(c *Config) { c.Exclude = []ExcludeRule{{Repos: []string{"github.com/[x"}}} }, "exclude[0].repos"},
 		{"with a query", func(c *Config) {

@@ -358,13 +358,17 @@ func validatePatterns(cfg *Config) error {
 		if err := check(where+".repos", e.Repos); err != nil {
 			return err
 		}
-		if err := checkNameGlobs(where, e.Names); err != nil {
+		if err := checkNameGlobs(where, "names", e.Names); err != nil {
 			return err
 		}
 	}
 	for _, r := range cfg.Discovery {
-		if err := checkNameGlobs(fmt.Sprintf("discovery rule %q", r.Name), r.Names); err != nil {
+		where := fmt.Sprintf("discovery rule %q", r.Name)
+		if err := checkNameGlobs(where, "names", r.Names); err != nil {
 			return err
+		}
+		if slices.Contains(r.Skip, "") {
+			return fmt.Errorf("%s: skip: an empty name skips nothing; leave it out", where)
 		}
 	}
 	return nil

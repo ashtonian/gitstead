@@ -133,7 +133,9 @@ func TestFilterReposNameGlobs(t *testing.T) {
 	}{
 		{"any glob, any case", config.DiscoveryRule{Names: []string{"*billing*", "*payments*"}}, nil,
 			[]string{"billing-api", "BILLING-web", "payments", "data-payments-etl", "billing-sandbox", "billing-old"}},
-		{"a glob without * is the whole name", config.DiscoveryRule{Names: []string{"payments"}}, nil, []string{"payments"}},
+		{"a word, not part of one", config.DiscoveryRule{Names: []string{"payments"}}, nil, []string{"payments", "data-payments-etl"}},
+		{"skipped by whole name", config.DiscoveryRule{Names: []string{"billing"}, Skip: []string{"Billing-Sandbox", "billing"}}, nil,
+			[]string{"billing-api", "BILLING-web", "billing-old"}},
 		{"with name_pattern, both", config.DiscoveryRule{Names: []string{"*billing*", "*payments*"}, NamePattern: "^(billing|payments)"}, nil,
 			[]string{"billing-api", "payments", "billing-sandbox", "billing-old"}},
 		{"excluded by name and by key", config.DiscoveryRule{Names: []string{"*billing*"}},

@@ -132,6 +132,8 @@ func printPreviewNext(cfg *config.Config, st *state.State, p *reconcile.Plan, sa
 	fmt.Printf("  gitstead discover --apply   makes %d of the %d changes: all but moving or deleting directories\n", safe, len(p.Actions))
 	fmt.Println("  gitstead apply              makes them all, asking before moves and deletions")
 	fmt.Println("  gitstead setup              changes which repos are tracked")
+	fmt.Println("  gitstead clone --org <org> --name <word> --save <rule>")
+	fmt.Println("                            tracks more, showing what it finds first")
 	if len(st.Schedules) == 0 {
 		fmt.Println("No background sync is installed, so nothing changes until you run one of these.")
 		return
