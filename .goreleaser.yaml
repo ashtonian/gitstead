@@ -58,7 +58,7 @@ homebrew_casks:
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/ashtonian/gitten"
-    description: "Keep every git repo you work on cloned, in sync and backed up, across accounts and forges"
+    description: "Clone and keep in sync every repo from your orgs, users and searches"
     # The binaries aren't signed and notarized, so macOS would refuse the
     # first run of a downloaded one.
     hooks:

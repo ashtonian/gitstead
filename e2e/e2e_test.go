@@ -440,6 +440,78 @@ discovery:
 	}
 }
 
+// TestE2E_CloneSelection: clone selects an organization's repos by name,
+// previews them, clones them and saves the selection as a rule that the next
+// sync uses to clone a repo that newly matches; unsaved, a selection's repos
+// are tracked as cloned by hand.
+func TestE2E_CloneSelection(t *testing.T) {
+	env := setupTestEnv(t)
+	token := env.createToken(t)
+	env.createOrg(t, token, "test-org")
+	for _, name := range []string{"svc-a", "svc-b", "lib-c"} {
+		env.createOrgRepo(t, token, "test-org", name)
+	}
+	cfg := fmt.Sprintf("base_dir: %s\nclone_protocol: https\nproviders:\n  - name: forgejo\n    type: gitea\n    url: %s\n    token: %s\n",
+		env.baseDir, env.httpURL, token)
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The container advertises its internal URL in clone URLs; git is told
+	// where that is mapped to.
+	env.extraEnv = []string{
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=url." + strings.TrimSuffix(env.httpURL, "/") + "/.insteadOf",
+		"GIT_CONFIG_VALUE_0=http://localhost:3000/",
+	}
+	key := func(name string) string { return "localhost/test-org/" + name }
+
+	var preview struct {
+		Rule string   `json:"rule"`
+		New  []string `json:"new"`
+	}
+	if stderr, code := env.runJSON(t, &preview, "clone", "--org", "test-org", "--name", "^svc-", "--dry-run"); code != 0 ||
+		preview.Rule != "test-org" || strings.Join(preview.New, " ") != key("svc-a")+" "+key("svc-b") {
+		t.Fatalf("clone --dry-run: exit %d, %+v\n%s", code, preview, stderr)
+	}
+	if repos := env.statusJSON(t); len(repos) != 0 {
+		t.Fatalf("a dry run tracked %v", repos)
+	}
+
+	if out, code := env.run(t, "clone", "--org", "test-org", "--name", "^svc-", "--save", "services"); code != 0 {
+		t.Fatalf("clone --save exit %d:\n%s", code, out)
+	}
+	for _, name := range []string{"svc-a", "svc-b"} {
+		if !gitOK(filepath.Join(env.baseDir, "localhost", "test-org", name, ".git")) {
+			t.Errorf("%s wasn't cloned", name)
+		}
+	}
+	if cfg := mustRead(t, env.configFile); !strings.Contains(cfg, "name: services") || !strings.Contains(cfg, "name_pattern: ^svc-") {
+		t.Errorf("the rule wasn't saved:\n%s", cfg)
+	}
+
+	// The saved rule keeps working: a repo that newly matches is cloned.
+	env.createOrgRepo(t, token, "test-org", "svc-d")
+	if out, code := env.run(t, "sync", "--no-backup"); code != 0 {
+		t.Fatalf("sync exit %d:\n%s", code, out)
+	}
+	if !gitOK(filepath.Join(env.baseDir, "localhost", "test-org", "svc-d", ".git")) {
+		t.Error("sync didn't clone svc-d, which the saved rule matches")
+	}
+
+	// Unsaved, the repos are tracked as cloned by hand, and config is left be.
+	before := mustRead(t, env.configFile)
+	if out, code := env.run(t, "clone", "--org", "test-org", "--name", "^lib-", "--no-save"); code != 0 {
+		t.Fatalf("clone --no-save exit %d:\n%s", code, out)
+	}
+	if mustRead(t, env.configFile) != before {
+		t.Error("clone --no-save changed config")
+	}
+	st := env.statusJSON(t)[key("lib-c")]
+	if st == nil || st["manually_added"] != true {
+		t.Errorf("lib-c: %v, want it tracked as cloned by hand", st)
+	}
+}
+
 // TestE2E_DiscoverByOrg checks org-scoped discovery.
 func TestE2E_DiscoverByOrg(t *testing.T) {
 	env := setupTestEnv(t)

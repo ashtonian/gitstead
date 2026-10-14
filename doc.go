@@ -1,6 +1,7 @@
-// gitten keeps every git repository you work on -- across GitHub, GitHub
-// Enterprise, GitLab and Gitea/Forgejo, several accounts on each, and
-// several machines -- cloned into one layout, in sync, and backed up.
+// gitten clones and keeps in sync every git repository you work on: whole
+// organizations, users or searches across GitHub, GitHub Enterprise, GitLab
+// and Gitea/Forgejo, filtered by language, topics, name or keywords, in one
+// layout with the right account per repo, on every machine you use.
 //
 // Run by hand or on a schedule, it discovers repositories from providers,
 // clones and tracks them with each account's identity and key, fetches them,

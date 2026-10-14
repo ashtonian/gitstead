@@ -24,7 +24,7 @@ func main() {
 	cli := &cmd.CLI{}
 	options := []kong.Option{
 		kong.Name("gitten"),
-		kong.Description("Every git repo you work on, cloned, in sync and backed up, across accounts and forges."),
+		kong.Description("Clone and keep in sync every repo you work on: whole orgs, users or searches, across accounts and forges."),
 		kong.UsageOnError(),
 		kong.Vars{
 			"version": fmt.Sprintf("%s (%s, built %s)", version, commit, date),

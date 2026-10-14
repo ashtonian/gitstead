@@ -1,5 +1,5 @@
 {
-  description = "gitten: clone, sync and back up git repos across accounts, and run coding agents in workspaces";
+  description = "gitten: clone and keep in sync every repo you work on, across orgs, accounts and forges";
 
   outputs = { self }: {
     # home-manager module: programs.gitten. Give it the gitten package;

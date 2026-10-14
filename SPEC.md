@@ -136,7 +136,8 @@ login whose token gh has from an environment variable (`tokenSource`) gets
 lists both for one login, the stored one wins.
 
 Answers (`setup.Answers`, the `--answers`/`--save-answers` file): `base_dir`,
-`layout`, `accounts`, `adopt`, `backups`, `schedule`, `schedule_interval` (divides
+`layout`, `accounts` (each owner tracked as `track: [{owner, kind, languages,
+topics, name_pattern}]`, the filters becoming its rule's), `adopt`, `backups`, `schedule`, `schedule_interval` (divides
 an hour or a day; default `15m`, or the installed schedule's), `linger`,
 `remote_sync`, `update`, `reconcile_auto`, `cleanup`, `workspaces`, `shell`,
 `git_includes`, `clone`. Defaults: the schedule on for a fresh config, else as
@@ -309,21 +310,41 @@ Would adopt 14 repos:
 3. Write managed git config that isn't already set (a value you set yourself is kept and reported as drift), record its copy ID, add it to state with `manually_added: true`
 4. `--scan` walks directory tree looking for `.git` dirs, adopts each
 
-#### `gitten clone <url> [flags]`
+#### `gitten clone <url> [flags]`, `gitten clone <selection> [flags]`
 
-Add a single repo by hand and clone it, at its templated path or `--path`. It
-is planned like any other repo, so a clone already at that path is adopted
-instead, and it keeps that path and URL from then on.
+With a URL, add a single repo by hand and clone it, at its templated path or
+`--path`. It is planned like any other repo, so a clone already at that path
+is adopted instead, and it keeps that path and URL from then on.
+
+With a selection instead, clone every repo it finds: the selection becomes a
+discovery rule (`config.DiscoveryRule`), validated with the rest of config,
+and run once (`discovery.RunDiscovery`) against `--provider`'s provider, the
+only configured one, or, with none, a github.com provider whose token is
+`gh auth token --hostname github.com --user <login>` when gh is logged in
+there and `GITHUB_TOKEN` is unset. The repos it finds that aren't tracked are
+planned (`reconcile.Repos`, `PlanRepos`) and cloned or adopted; nothing else
+in the plan runs. On a terminal it asks whether to keep the rule; kept
+(`--save <name>`), it is upserted into the config file in place (`config.Document`,
+checked to load first), with the provider when config lacked it, and the
+repos are recorded as that rule's. Otherwise (`--no-save`, or no terminal)
+they are recorded as added by hand (`manually_added`, the rule's tags as
+their own) and put in the shared manifest when there is one. The rule is
+named by `--save`, or after the owner (`mine` for `--mine`, `search` for
+`--query`), languages and topics, made unique among config's rules.
 
 | Flag | Description |
 |---|---|
 | `--tag <tag>` | Assign tags (comma-separated) |
-| `--path <override>` | Override the templated path |
+| `--path <override>` | Override the templated path (one repo) |
+| `--org`, `--user`, `--group`, `--mine`, `--query` | The selection: an organization, a user, a GitLab group, the token's own repos (`affiliation: [owner]` on GitHub), or a raw search |
+| `--language`, `--topic`, `--name`, `--visibility`, `--forks`, `--archived` | Its filters, as a rule's `languages`, `topics`, `name_pattern`, `visibility`, `include_forks`, `include_archived` |
+| `--provider <name>` | The provider to search |
+| `--save <name>`, `--no-save` | Keep the selection as a rule with this name, or don't ask |
+| `--dry-run` | List what matches (`{rule, provider, new, tracked}` under `--json`); clone nothing |
 
 ```
 $ gitten clone git@github.com:someone/cool-lib.git --tag libs
-Cloned to ~/projects/github.com/someone/cool-lib
-Added to state with tags: [libs]
+$ gitten clone --org acme --language go --topic service --save acme-services
 ```
 
 #### `gitten remove <repo-pattern> [flags]`
@@ -507,10 +528,11 @@ entry is upserted -- URL, user tags, `config.PortablePath` of its path
 (`""` when templated) -- and `remove` drops the entries of what it untracked.
 Writes hold an flock (30s wait) on a lock file in gitten's cache directory (`$XDG_CACHE_HOME/gitten/locks/manifest-<hash of its path>.lock`), never beside the manifest, and replace the file
 through a synced temp file and rename. Entries match by repo key, so a URL's
-transport may differ. Config itself is never written, with one exception:
-without `manifest:`, `manifest import` keeps an entry's `account` or
-`ssh_key` in config's `repos:`, edited in place (state can't hold them); a
-read-only config fails that entry, naming what to add.
+transport may differ. Manifest commands never write config, with one
+exception: without `manifest:`, `manifest import` keeps an entry's `account`
+or `ssh_key` in config's `repos:`, edited in place (state can't hold them); a
+read-only config fails that entry, naming what to add. (`setup` and `clone
+--save` also edit config, when asked.)
 | `restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` (clone+apply to a scratch dir), or `--apply` onto the tree (refuses dirty without `--force`). id defaults to `latest`. |
 | `report [--since]` / `log [-n]` | Summarize / list recent activity from the operation log (clone/sync/backup/remove/workspace events and applied changes). |
 | `config --redact` | Print the resolved config with inline provider tokens blanked (token_env/token_command kept), safe to share. |

@@ -157,10 +157,10 @@ func TestDefaults_FromDetection(t *testing.T) {
 	want := []Account{
 		{Name: "me", Type: "github", Host: "github.com", Login: "me",
 			TokenCommand: "gh auth token --hostname github.com --user me",
-			Track:        []Track{{"me", "self"}}, Protocol: "https"},
+			Track:        []Track{{Owner: "me", Kind: "self"}}, Protocol: "https"},
 		{Name: "me-at-acme", Type: "github", Host: "github.com", Login: "me-at-acme",
 			TokenCommand: "gh auth token --hostname github.com --user me-at-acme",
-			Track:        []Track{{"me-at-acme", "self"}}, SSHKey: filepath.Join(home, ".ssh", "id_work"), Protocol: "ssh"},
+			Track:        []Track{{Owner: "me-at-acme", Kind: "self"}}, SSHKey: filepath.Join(home, ".ssh", "id_work"), Protocol: "ssh"},
 	}
 	if !reflect.DeepEqual(a.Accounts, want) {
 		t.Errorf("accounts =\n%+v\nwant\n%+v", a.Accounts, want)
@@ -183,8 +183,9 @@ func sampleAnswers() Answers {
 		Accounts: []Account{{
 			Name: "work", Type: "github", Host: "github.com", Login: "me-at-acme",
 			TokenCommand: "gh auth token --hostname github.com --user me-at-acme",
-			Track:        []Track{{"me-at-acme", "self"}, {"acme", "org"}, {"acme-labs", "org"}},
-			SSHKey:       "~/.ssh/id_work", Protocol: "ssh",
+			Track: []Track{{Owner: "me-at-acme", Kind: "self"}, {Owner: "acme", Kind: "org"},
+				{Owner: "acme-labs", Kind: "org", Languages: []string{"Go"}, Topics: []string{"service"}, NamePattern: "^svc-"}},
+			SSHKey: "~/.ssh/id_work", Protocol: "ssh",
 			Git:     config.GitIdentity{Name: "Me", Email: "me@acme.com"},
 			Signing: config.Signing{Mode: "off"},
 			BaseDir: "~/work",
