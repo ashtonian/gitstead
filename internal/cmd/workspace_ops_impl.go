@@ -13,12 +13,12 @@ import (
 	"text/tabwriter"
 	"time"
 
-	agents "github.com/ashtonian/git-mgr/internal/agent"
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/ctxutil"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/workspace"
+	agents "github.com/ashtonian/gitten/internal/agent"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/ctxutil"
+	"github.com/ashtonian/gitten/internal/gitops"
+	"github.com/ashtonian/gitten/internal/state"
+	"github.com/ashtonian/gitten/internal/workspace"
 )
 
 // WSStatusCmd shows the status of a workspace's copies.
@@ -66,7 +66,7 @@ func (c *WSOverviewCmd) Run(ctx *Context) error {
 		return err
 	}
 	if len(st.Workspaces) == 0 && !ctx.JSON {
-		fmt.Println("No workspaces created. See 'git-mgr ws create --help'.")
+		fmt.Println("No workspaces created. See 'gitten ws create --help'.")
 		return nil
 	}
 	cfg, _ := ctx.LoadConfig()
@@ -171,7 +171,7 @@ func (c *WSFetchCmd) Run(ctx *Context) error {
 
 // fetchCopies fetches the repos targets are copies of, each once -- worktrees
 // share their repo's fetch -- then brings each clone up to date from its
-// repo's clone. A copy of a repo git-mgr can't find fetches on its own.
+// repo's clone. A copy of a repo gitten can't find fetches on its own.
 func fetchCopies(ctx context.Context, cfg *config.Config, st *state.State, spec *workspace.Spec, targets []workspace.Located) []workspace.OpResult {
 	sources := map[string]error{}
 	for _, t := range targets {
@@ -320,7 +320,7 @@ type WSExecCmd struct {
 
 func (c *WSExecCmd) Run(ctx *Context) error {
 	if len(c.Command) == 0 {
-		return fmt.Errorf("no command given (usage: git-mgr ws exec <name> -- <command>)")
+		return fmt.Errorf("no command given (usage: gitten ws exec <name> -- <command>)")
 	}
 	cfg, err := ctx.LoadConfig()
 	if err != nil {
@@ -383,7 +383,7 @@ func (c *WSBackupCmd) Run(ctx *Context) error {
 	}
 	ws, ok := st.Workspaces[c.Name]
 	if !ok {
-		return fmt.Errorf("workspace %q is not created; run 'git-mgr ws create %s' first", c.Name, c.Name)
+		return fmt.Errorf("workspace %q is not created; run 'gitten ws create %s' first", c.Name, c.Name)
 	}
 	machine := ""
 	if c.Offsite {
@@ -473,7 +473,7 @@ func (c *WSRecoverCmd) Run(ctx *Context) error {
 	for _, t := range targets {
 		label := t.Label(spec)
 		if !gitops.HasGitDir(t.Path) {
-			fmt.Printf("  %s: not present (run 'git-mgr ws ensure %s' to make it again, then recover)\n", label, c.Name)
+			fmt.Printf("  %s: not present (run 'gitten ws ensure %s' to make it again, then recover)\n", label, c.Name)
 			continue
 		}
 		patchDir := cfg.ResolveForRepo(t.Repo).Backup.PatchDir
@@ -497,7 +497,7 @@ func (c *WSRecoverCmd) Run(ctx *Context) error {
 		}
 	}
 	if found == 0 {
-		fmt.Println("No local backups found. `git-mgr remote-sync --list` shows what went offsite, and how to restore it.")
+		fmt.Println("No local backups found. `gitten remote-sync --list` shows what went offsite, and how to restore it.")
 	}
 	return ctx.finish(docs, outcome(failed, attempted, "copies could not be recovered"))
 }

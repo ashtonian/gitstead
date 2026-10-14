@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/discovery"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
-	"github.com/ashtonian/git-mgr/internal/scheduler"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/discovery"
+	"github.com/ashtonian/gitten/internal/gitops"
+	"github.com/ashtonian/gitten/internal/reconcile"
+	"github.com/ashtonian/gitten/internal/scheduler"
 )
 
 // Status is how a check went.

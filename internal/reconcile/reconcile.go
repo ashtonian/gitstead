@@ -5,12 +5,12 @@
 // Every run compares three views of each object:
 //
 //   - desired: derived from config and this run's discovery (see Repos);
-//   - applied: what git-mgr last set, kept in state (path, origin URL, tags,
+//   - applied: what gitten last set, kept in state (path, origin URL, tags,
 //     managed git config);
 //   - actual: what is on disk now (see Observe).
 //
 // Desired against applied gives the actions of a Plan. Actual against applied
-// gives drift: a value git-mgr set was changed by hand, which is reported and
+// gives drift: a value gitten set was changed by hand, which is reported and
 // left alone unless drift is set to overwrite.
 //
 // Every action checks the disk before acting, so an interrupted apply is
@@ -26,8 +26,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/hook"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitten/internal/hook"
+	"github.com/ashtonian/gitten/internal/state"
 )
 
 // Kind names what an action does.
@@ -52,7 +52,7 @@ type Action struct {
 	To     string `json:"to,omitempty"`
 	Note   string `json:"note,omitempty"`
 	// Disruptive actions move or delete directories that a shell, editor or
-	// agent may be using; they wait for an explicit `git-mgr apply`.
+	// agent may be using; they wait for an explicit `gitten apply`.
 	Disruptive bool `json:"disruptive"`
 	// Serial actions run one at a time, in plan order, after all the others.
 	// Workspace actions are serial: their copies share records, and the
@@ -85,16 +85,16 @@ type Outcome struct {
 	Release func()
 }
 
-// Drift is a value git-mgr set that was changed by hand.
+// Drift is a value gitten set that was changed by hand.
 type Drift struct {
 	Target   string `json:"target"`
 	What     string `json:"what"`
-	Recorded string `json:"recorded"` // what git-mgr set
+	Recorded string `json:"recorded"` // what gitten set
 	Found    string `json:"found"`    // what is there now
 	Wanted   string `json:"wanted"`   // what config wants
 }
 
-// Blocked is a change config asks for that git-mgr will not make.
+// Blocked is a change config asks for that gitten will not make.
 type Blocked struct {
 	Target string `json:"target"`
 	Reason string `json:"reason"`
@@ -178,7 +178,7 @@ type Env struct {
 	// actions run at once and read only what their plan gives them.
 	State *state.State
 	// Update applies a change to the latest state and saves it, under the
-	// state lock, so other git-mgr runs can work between actions: an action
+	// state lock, so other gitten runs can work between actions: an action
 	// does its slow disk work (a clone, an archive) first and only then
 	// records the result. Required.
 	Update func(change func(*state.State) error) error
@@ -187,7 +187,7 @@ type Env struct {
 	Concurrency int
 	// CloneTimeout bounds each clone; 0 means none.
 	CloneTimeout time.Duration
-	// LockWait is how long an action waits for a repo another git-mgr
+	// LockWait is how long an action waits for a repo another gitten
 	// command is using (see gitops.LockRepo).
 	LockWait time.Duration
 	// InspectTimeout bounds each look at a working copy; 0 means none.

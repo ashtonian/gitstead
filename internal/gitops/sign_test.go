@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/gitten/internal/gitops"
 )
 
 func TestTestSign(t *testing.T) {

@@ -20,7 +20,7 @@ const signTestTimeout = 20 * time.Second
 // values) in a temporary repository, with no terminal, as an agent would. It
 // returns why signing failed, or nil if it works unattended.
 func TestSign(ctx context.Context, settings map[string]string) error {
-	dir, err := os.MkdirTemp("", "git-mgr-signtest-")
+	dir, err := os.MkdirTemp("", "gitten-signtest-")
 	if err != nil {
 		return err
 	}
@@ -36,11 +36,11 @@ func TestSign(ctx context.Context, settings map[string]string) error {
 		return err
 	}
 	// A fallback identity first; the account's own, if any, overrides it.
-	args := []string{"-c", "user.name=git-mgr", "-c", "user.email=git-mgr@localhost"}
+	args := []string{"-c", "user.name=gitten", "-c", "user.email=gitten@localhost"}
 	for _, k := range slices.Sorted(maps.Keys(settings)) {
 		args = append(args, "-c", k+"="+settings[k])
 	}
-	args = append(args, "commit-tree", "-S", tree, "-m", "git-mgr signing test")
+	args = append(args, "commit-tree", "-S", tree, "-m", "gitten signing test")
 	cmd := gitCommand(ctx, dir, nil, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/ctxutil"
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/ctxutil"
+	"github.com/ashtonian/gitten/internal/repourl"
 )
 
 // ProviderForConfig creates the right Provider for a given provider config.

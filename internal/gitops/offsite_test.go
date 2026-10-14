@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/gitten/internal/gitops"
 )
 
-const ns = "refs/git-mgr/laptop/0123456789abcdef"
+const ns = "refs/gitten/laptop/0123456789abcdef"
 
 func offsite(mods ...func(*gitops.Offsite)) gitops.Offsite {
 	o := gitops.Offsite{
 		Remote: "origin", Namespace: ns, WIP: "ref", Unpushed: "push", Keep: 24 * time.Hour,
-		Branch: "refs/heads/git-mgr/wip/laptop/0123456789abcdef",
+		Branch: "refs/heads/gitten/wip/laptop/0123456789abcdef",
 		Now:    func() time.Time { return time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC) },
 	}
 	for _, m := range mods {
@@ -63,7 +63,7 @@ func TestOffsite_WIPRefs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := remoteRefs(t, remote, "refs/git-mgr/"); got[ns+"/wip/"+b1.ID] != b1.Snapshot || len(got) != 1 {
+	if got := remoteRefs(t, remote, "refs/gitten/"); got[ns+"/wip/"+b1.ID] != b1.Snapshot || len(got) != 1 {
 		t.Fatalf("remote refs after the first push: %v", got)
 	}
 	if heads := remoteRefs(t, remote, "refs/heads/"); len(heads) != 1 {
@@ -82,7 +82,7 @@ func TestOffsite_WIPRefs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := remoteRefs(t, remote, "refs/git-mgr/"); len(got) != 1 || got[ns+"/wip/"+b2.ID] != b2.Snapshot {
+	if got := remoteRefs(t, remote, "refs/gitten/"); len(got) != 1 || got[ns+"/wip/"+b2.ID] != b2.Snapshot {
 		t.Errorf("remote refs after the second push: %v", got)
 	}
 
@@ -110,7 +110,7 @@ func TestOffsite_UnpushedCommits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := remoteRefs(t, remote, "refs/git-mgr/"); got[ns+"/heads/feature"] != tip || len(got) != 1 {
+	if got := remoteRefs(t, remote, "refs/gitten/"); got[ns+"/heads/feature"] != tip || len(got) != 1 {
 		t.Fatalf("unpushed commits on the remote: %v (want feature at %s, and main left out: it has nothing unpushed)", got, tip)
 	}
 	if _, ok := remoteRefs(t, remote, "refs/heads/")["refs/heads/feature"]; ok {
@@ -122,7 +122,7 @@ func TestOffsite_UnpushedCommits(t *testing.T) {
 	if _, _, err := gitops.PushOffsite(ctx, clone, &gitops.Latest{}, o, rec); err != nil {
 		t.Fatal(err)
 	}
-	if got := remoteRefs(t, remote, "refs/git-mgr/"); len(got) != 0 {
+	if got := remoteRefs(t, remote, "refs/gitten/"); len(got) != 0 {
 		t.Errorf("refs left after the branch was pushed: %v", got)
 	}
 }
@@ -141,7 +141,7 @@ func TestOffsite_Bundle(t *testing.T) {
 	if out := mustGit(t, clone, "bundle", "list-heads", bundle); !strings.Contains(out, "refs/heads/main") {
 		t.Errorf("bundle heads: %s", out)
 	}
-	if got := remoteRefs(t, remote, "refs/git-mgr/"); len(got) != 0 {
+	if got := remoteRefs(t, remote, "refs/gitten/"); len(got) != 0 {
 		t.Errorf("bundle mode pushed %v", got)
 	}
 
@@ -171,13 +171,13 @@ func TestOffsite_CopiesDontCollide(t *testing.T) {
 			t.Fatal(err)
 		}
 		o := offsite(func(o *gitops.Offsite) {
-			o.WIP, o.Namespace, o.Branch = "branch", "refs/git-mgr/laptop/"+copyID, "refs/heads/git-mgr/wip/laptop/"+copyID
+			o.WIP, o.Namespace, o.Branch = "branch", "refs/gitten/laptop/"+copyID, "refs/heads/gitten/wip/laptop/"+copyID
 		})
 		if _, _, err := gitops.PushOffsite(ctx, c, latest(b), o, gitops.OffsiteRecord{}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got := remoteRefs(t, remote, "refs/heads/git-mgr/wip/"); len(got) != 2 {
+	if got := remoteRefs(t, remote, "refs/heads/gitten/wip/"); len(got) != 2 {
 		t.Errorf("visible WIP branches: %v; want one per copy", got)
 	}
 }
@@ -215,7 +215,7 @@ func TestOffsite_WIPBranch(t *testing.T) {
 	if _, _, err := gitops.PushOffsite(ctx, clone, &gitops.Latest{}, o, rec); err != nil {
 		t.Fatal(err)
 	}
-	if got := remoteRefs(t, remote, "refs/heads/git-mgr/"); len(got) != 0 {
+	if got := remoteRefs(t, remote, "refs/heads/gitten/"); len(got) != 0 {
 		t.Errorf("a clean copy's WIP branch stayed: %v", got)
 	}
 }

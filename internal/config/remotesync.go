@@ -5,7 +5,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitten/internal/repourl"
 )
 
 // OffsiteNamespace renders a remote_sync namespace for one copy. The result

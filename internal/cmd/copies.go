@@ -8,10 +8,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/ctxutil"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/ctxutil"
+	"github.com/ashtonian/gitten/internal/gitops"
+	"github.com/ashtonian/gitten/internal/state"
 )
 
 // copyJob is one working copy a run backs up and fetches: a tracked repo or

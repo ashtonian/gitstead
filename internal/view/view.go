@@ -1,4 +1,4 @@
-// Package view builds `git-mgr top`'s picture of everything git-mgr manages:
+// Package view builds `gitten top`'s picture of everything gitten manages:
 // each repo's working tree, and each workspace copy with its agent's state
 // and terminal activity. Collect reads it, live and without the network;
 // Render lays it out.
@@ -13,12 +13,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ashtonian/git-mgr/internal/activity"
-	agents "github.com/ashtonian/git-mgr/internal/agent"
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/workspace"
+	"github.com/ashtonian/gitten/internal/activity"
+	agents "github.com/ashtonian/gitten/internal/agent"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/gitops"
+	"github.com/ashtonian/gitten/internal/state"
+	"github.com/ashtonian/gitten/internal/workspace"
 )
 
 // Snapshot is everything at one moment.

@@ -11,7 +11,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitten/internal/repourl"
 )
 
 // --- Validation ---
@@ -105,7 +105,7 @@ func Validate(cfg *Config) error {
 	return nil
 }
 
-// filterRE matches the partial clone filters git-mgr accepts.
+// filterRE matches the partial clone filters gitten accepts.
 var filterRE = regexp.MustCompile(`^(blob:none|blob:limit=[0-9]+[kmg]?|tree:[0-9]+)$`)
 
 // validateClone checks clone filters and sparse directories wherever they

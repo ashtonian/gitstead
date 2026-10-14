@@ -1,5 +1,5 @@
-# git-mgr configuration
-# Copy to ~/.config/git-mgr/config.yaml
+# gitten configuration
+# Copy to ~/.config/gitten/config.yaml
 
 # Where to clone repos. Supports ~ expansion.
 base_dir: "~/repos"
@@ -21,7 +21,7 @@ path_template: "{{.Host}}/{{.Owner}}/{{.Name}}"
 #           into its own git config as core.sshCommand, so your own git
 #           commands there use it too.
 #   https - uses git's own credential helper for auth (e.g. `gh auth setup-git`,
-#           osxkeychain, or a PAT via the manager) -- git-mgr does not store
+#           osxkeychain, or a PAT via the manager) -- gitten does not store
 #           credentials. Override per repo set under `overrides:`.
 clone_protocol: "ssh"
 
@@ -38,7 +38,7 @@ lock_timeout: "2m"
 # Accounts
 # =============================================================================
 # An account is one identity on one or more hosts. Its SSH key and commit
-# identity are used for git-mgr's own git commands and written into each repo
+# identity are used for gitten's own git commands and written into each repo
 # it covers (core.sshCommand, user.name, user.email), including workspace
 # clones, so your and your agents' pushes and commits use the right account.
 #
@@ -125,7 +125,7 @@ discovery:
     user: "your-login"                       # Your GitHub username
     include_forks: false
     include_archived: false
-    tags: ["personal"]                      # Tags for filtering (git-mgr status --tag personal)
+    tags: ["personal"]                      # Tags for filtering (gitten status --tag personal)
 
   # All repos in a GitHub org
   # - name: "work-org"
@@ -184,9 +184,9 @@ repos: []
   #   tags: ["work"]
 
 # A shared file of repos tracked by hand -- cloned, adopted, imported -- that
-# every machine reads as more repos: entries and git-mgr keeps up to date:
+# every machine reads as more repos: entries and gitten keeps up to date:
 # clone, adopt and manifest import add to it, remove takes from it. Keep it in
-# your dotfiles or a synced folder. "" = none; git-mgr never writes this config.
+# your dotfiles or a synced folder. "" = none; gitten never writes this config.
 manifest: ""
 
 # =============================================================================
@@ -334,8 +334,8 @@ sync:
 # =============================================================================
 # Config Changes
 # =============================================================================
-# Every run compares what config wants with what git-mgr last set (state) and
-# what is on disk; `git-mgr plan` shows the difference, `git-mgr apply` makes it.
+# Every run compares what config wants with what gitten last set (state) and
+# what is on disk; `gitten plan` shows the difference, `gitten apply` makes it.
 
 reconcile:
   # What sync and discover --apply change on their own:
@@ -343,12 +343,12 @@ reconcile:
   #          repos, change origin URLs, write managed git config, retag
   #   all  - also move repos to new paths
   #   none - only report
-  # Moves and removals of workspace copies always wait for `git-mgr apply`.
+  # Moves and removals of workspace copies always wait for `gitten apply`.
   auto: "safe"
 
-  # A value git-mgr set (origin URL, core.sshCommand) that was changed by hand:
+  # A value gitten set (origin URL, core.sshCommand) that was changed by hand:
   #   report    - leave it and list it
-  #   overwrite - put git-mgr's value back
+  #   overwrite - put gitten's value back
   drift: "report"
 
 # =============================================================================
@@ -357,10 +357,10 @@ reconcile:
 
 cleanup:
   # What happens when a repo is no longer found by discovery:
-  #   mark_stale       - Set status to "stale" (visible in `git-mgr status --stale`)
+  #   mark_stale       - Set status to "stale" (visible in `gitten status --stale`)
   #   remove           - Remove from state after grace_period (keep files on disk)
   #   archive          - Remove from state after grace_period and move the clone,
-  #                       whole, into backup.archive_dir (`git-mgr archives
+  #                       whole, into backup.archive_dir (`gitten archives
   #                       restore` puts it back); a clone with linked worktrees
   #                       or workspace copies is kept and stays tracked
   #   remove_and_delete - Remove from state AND delete from disk after grace_period
@@ -376,8 +376,8 @@ cleanup:
   # Grace period before remove, archive or remove_and_delete takes effect.
   grace_period: "720h"    # 30 days
 
-  # Never judge repos added by hand: `git-mgr clone`, `adopt`, and `repos:`
-  # entries. Dropping a repos: entry leaves the repo tracked; `git-mgr
+  # Never judge repos added by hand: `gitten clone`, `adopt`, and `repos:`
+  # entries. Dropping a repos: entry leaves the repo tracked; `gitten
   # remove` stops tracking it.
   protect_manual: true
 
@@ -392,7 +392,7 @@ backup:
   # Each backup is a snapshot of the index, the working tree and the untracked
   # files, taken without touching the index or index.lock. Strategy picks where
   # it is kept:
-  #   stash-ref - a stash-format commit at refs/git-mgr/backups/<copy>/<id>;
+  #   stash-ref - a stash-format commit at refs/gitten/backups/<copy>/<id>;
   #               restore with `git stash apply --index <ref>`.
   #   patch     - patches + a tarball under patch_dir; outlives the repo.
   #   both      - both.
@@ -414,16 +414,16 @@ backup:
   max_per_copy: 100
 
   # Patch file storage directory.
-  # Default: ~/.local/share/git-mgr/patches/
+  # Default: ~/.local/share/gitten/patches/
   patch_dir: ""
 
-  # Before git-mgr deletes a clone or worktree (ws rm --delete, ws prune,
+  # Before gitten deletes a clone or worktree (ws rm --delete, ws prune,
   # remove --delete, stale cleanup), any unique work -- uncommitted changes,
   # untracked files, stashes, unpushed commits -- is saved here as a verified
   # git bundle with a .json file describing how to restore it. If that fails,
   # nothing is deleted. Clones archived whole (cleanup.policy archive, remove
-  # --archive) are moved here too. `git-mgr archives ls` lists everything here.
-  # Default: ~/.local/share/git-mgr/archive/
+  # --archive) are moved here too. `gitten archives ls` lists everything here.
+  # Default: ~/.local/share/gitten/archive/
   archive_dir: ""
 
 # =============================================================================
@@ -433,12 +433,12 @@ backup:
 # has -- as a bare repo, made and updated by sync: a copy that outlives the host
 # losing the repo. Updates never prune, so a branch deleted upstream stays,
 # and the old tip of a branch rewritten upstream (force-pushed) is kept for
-# keep_rewritten under refs/git-mgr-rewritten/<time>/.
+# keep_rewritten under refs/gitten-rewritten/<time>/.
 # accounts[].mirror and overrides[].mirror ({enabled, lfs}) set it per repo.
 
 mirror:
   enabled: false
-  dir: ""                  # <dir>/<host>/<owner>/<name>.git; "" = ~/.local/share/git-mgr/mirrors
+  dir: ""                  # <dir>/<host>/<owner>/<name>.git; "" = ~/.local/share/gitten/mirrors
   interval: "24h"          # how often sync updates each mirror
   lfs: false               # also mirror Git LFS content
   keep_rewritten: "2160h"  # keep rewritten branches' old tips 90 days; "0s" keeps none
@@ -451,7 +451,7 @@ remote_sync:
   # Take each working copy offsite during sync: uncommitted work and commits
   # no remote has, pushed under a hidden namespace the copy owns. Each
   # checked-out submodule goes too, as a working copy of its own, to its own
-  # remote. `git-mgr remote-sync` does it on demand either way. Any key below
+  # remote. `gitten remote-sync` does it on demand either way. Any key below
   # can be set per account (accounts[].remote_sync) or per repo
   # (overrides[].remote_sync).
   enabled: false
@@ -466,7 +466,7 @@ remote_sync:
 
   # Uncommitted work: "ref" pushes each new backup to <namespace>/wip/<id>
   # (untracked files and the staged/unstaged split included); "branch" pushes
-  # a visible branch git-mgr/wip/<machine>/<copy> (tracked changes only, on
+  # a visible branch gitten/wip/<machine>/<copy> (tracked changes only, on
   # top of HEAD); "off" pushes none.
   wip: "ref"
 
@@ -478,7 +478,7 @@ remote_sync:
 
   # The hidden ref prefix each copy owns on the remote. Must stay under refs/,
   # outside branches and tags, and include {{.Copy}}.
-  namespace: "refs/git-mgr/{{.Machine}}/{{.Copy}}"
+  namespace: "refs/gitten/{{.Machine}}/{{.Copy}}"
 
   # How long a pushed WIP ref stays; the current one always stays.
   keep: "720h"
@@ -486,7 +486,7 @@ remote_sync:
 # =============================================================================
 # Hooks
 # =============================================================================
-# Commands git-mgr runs, each with /bin/sh -c, in a checkout it has just made:
+# Commands gitten runs, each with /bin/sh -c, in a checkout it has just made:
 #   post_clone  - in a repo's new clone (not one adopted where it was)
 #   post_create - in a new workspace copy, after the repo's post_create comes
 #                 the workspace's (workspace_defaults.hooks / workspaces[].hooks)
@@ -495,9 +495,9 @@ remote_sync:
 # in order with no input and no terminal; the first that fails stops the rest,
 # the checkout is kept and recorded, and the failure is reported. Output goes
 # to <state dir>/hooks/<checkout>.<event>.log. Hooks come only from this file,
-# never from a repository. Environment: GIT_MGR_EVENT, GIT_MGR_PATH,
-# GIT_MGR_REPO, GIT_MGR_SOURCE (the repo's clone), GIT_MGR_WORKSPACE,
-# GIT_MGR_AGENT, GIT_MGR_BRANCH. `git-mgr hooks post-clone|post-create` runs
+# never from a repository. Environment: GITTEN_EVENT, GITTEN_PATH,
+# GITTEN_REPO, GITTEN_SOURCE (the repo's clone), GITTEN_WORKSPACE,
+# GITTEN_AGENT, GITTEN_BRANCH. `gitten hooks post-clone|post-create` runs
 # them again.
 
 hooks:
@@ -518,7 +518,7 @@ notify:
   on_stale: true           # Notify when new stale repos detected
   on_waiting: true         # Notify when an agent is waiting for you
   # An agent in a tmux pane that printed for a while and then nothing for this
-  # long counts as waiting; 0 = only what agents report (git-mgr ws waiting).
+  # long counts as waiting; 0 = only what agents report (gitten ws waiting).
   waiting_after: "30s"
   timeout: "10s"           # how long sending one notification may take
 
@@ -530,10 +530,10 @@ log:
   level: "info"            # debug, info, warn, error
   format: "json"           # json or text
   file: ""                 # Log to file in addition to stderr, at level (--quiet only quiets stderr)
-                           # e.g., "~/.local/share/git-mgr/git-mgr.log"
+                           # e.g., "~/.local/share/gitten/gitten.log"
   events: true             # write the operation log (events.jsonl, read by report/log); false to disable
 
-# The command `git-mgr open` opens a repo or workspace with; the path is added
+# The command `gitten open` opens a repo or workspace with; the path is added
 # as its last argument. Empty uses $VISUAL, then $EDITOR.
 editor: ""                          # e.g. "code -n", "cursor", "nvim"
 
@@ -543,10 +543,10 @@ editor: ""                          # e.g. "code -n", "cursor", "nvim"
 # A workspace is one repo, or several related ones, worked on by N agents.
 # Each agent gets a replica of its own: a linked worktree of each repo's clone
 # by default, on a branch of its own. Declare workspaces here and run
-# `git-mgr apply` (or `git-mgr ws ensure`), or create one from the command line:
+# `gitten apply` (or `gitten ws ensure`), or create one from the command line:
 #
-#   git-mgr ws create app --repo github.com/me/app --agents 4
-#   git-mgr ws create platform --repo github.com/me/api --repo github.com/me/web --agents 2
+#   gitten ws create app --repo github.com/me/app --agents 4
+#   gitten ws create platform --repo github.com/me/api --repo github.com/me/web --agents 2
 #
 # --save writes a workspace made from flags back here.
 
@@ -570,7 +570,7 @@ workspace_defaults:
   #                     objects and fetches, costs only the checkout
   #   clone           - a clone with objects of its own, hardlinked from the
   #                     repo's clone (copied across filesystems)
-  #   reference-clone - a clone borrowing the repo's clone's objects; git-mgr
+  #   reference-clone - a clone borrowing the repo's clone's objects; gitten
   #                     stops git gc there from pruning objects the copies use
   #   shared          - every agent works in one folder: the repo's clone, or
   #                     a workspace's path
@@ -582,7 +582,7 @@ workspace_defaults:
   branch: "agents/{{.Workspace}}/{{.Agent}}"
   base_ref: ""                      # new branches start here; "" = upstream's default branch
   agent: ""                         # the profile agents run; "" = the first one
-  # Each agent's own block of ports: GIT_MGR_PORT .. GIT_MGR_PORT+count-1,
+  # Each agent's own block of ports: GITTEN_PORT .. GITTEN_PORT+count-1,
   # kept for its folder's life. base 0 = none.
   ports: {base: 41000, count: 10}
   # Set for each agent's commands (its run, ws exec, post_create hooks). Values
@@ -592,13 +592,13 @@ workspace_defaults:
   #   PORT: "{{.Port}}"
   #   DATABASE_URL: "postgres://localhost/app_{{.N}}"
   #   SCCACHE_DIR: "{{.Cache}}/sccache"
-  # Holds <workspace>/, a cache directory its agents share (GIT_MGR_CACHE);
-  # deleted with the workspace. "" = $XDG_CACHE_HOME/git-mgr/workspaces.
+  # Holds <workspace>/, a cache directory its agents share (GITTEN_CACHE);
+  # deleted with the workspace. "" = $XDG_CACHE_HOME/gitten/workspaces.
   cache_root: ""
   # Run in each new copy after its repo's post_create hooks, unless a
   # workspace sets its own (hooks: {post_create: [...]}; [] for none).
   hooks:
-    post_create: []                 # e.g. ['cp "$GIT_MGR_SOURCE/.env" .env', "direnv allow"]
+    post_create: []                 # e.g. ['cp "$GITTEN_SOURCE/.env" .env', "direnv allow"]
 
 workspaces: []
   # One repo, four agents: ~/workspaces/app/agent-1 .. agent-4.
@@ -625,7 +625,7 @@ workspaces: []
 # Fleets and Launchers
 # =============================================================================
 # A fleet opens several workspaces' agents side by side with one launcher:
-# `git-mgr fleet open <name>`. Each agent's terminal runs `git-mgr ws run`,
+# `gitten fleet open <name>`. Each agent's terminal runs `gitten ws run`,
 # which checks its copies, runs its agent and leaves a shell.
 
 fleets: []
@@ -634,7 +634,7 @@ fleets: []
   #   agent: claude                 # every agent runs this profile; default each workspace's
   #   launcher: tmux                # tmux | iterm | muxy | auto | a plugin's name
   #   host: ""                      # SSH destination the workspaces live on;
-  #   remote_command: git-mgr       # git-mgr there makes the plan
+  #   remote_command: gitten       # gitten there makes the plan
 
 launchers:
   default: auto       # auto: tmux inside tmux, Muxy inside Muxy, iTerm inside iTerm, else tmux
@@ -643,7 +643,7 @@ launchers:
   keep_shell: true    # leave a shell in the replica when the agent exits
 
   tmux:               # a session per fleet, a window per workspace, a pane per agent
-    session: "git-mgr-{{.Fleet}}"
+    session: "gitten-{{.Fleet}}"
     window_per: workspace         # workspace | agent
     layout: tiled                 # tiled | even-horizontal | even-vertical | main-vertical | main-horizontal
     max_panes: 4                  # more agents spill into another window
@@ -676,5 +676,5 @@ launchers:
     prune_projects: false         # remove projects of workspaces no longer in the fleet
     command: ""                   # the muxy CLI; default muxy on PATH, else the app's
 
-  plugins: {}         # options for git-mgr-launch-<name> executables
+  plugins: {}         # options for gitten-launch-<name> executables
     # wezterm: {tabs: per-agent}

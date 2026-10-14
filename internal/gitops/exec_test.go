@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/gitten/internal/gitops"
 )
 
 // setupTestRepo creates a temp git repo with one commit.

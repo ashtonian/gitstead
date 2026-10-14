@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/gitten/internal/gitops"
 )
 
 func writeFile(t *testing.T, path string, data []byte) {

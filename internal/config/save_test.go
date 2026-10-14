@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitten/internal/config"
 )
 
 func writeFile(t *testing.T, path, content string) {
@@ -20,7 +20,7 @@ func writeFile(t *testing.T, path, content string) {
 func TestSaveWorkspace_AppendPreservesComments(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	writeFile(t, path, `# my git-mgr config
+	writeFile(t, path, `# my gitten config
 base_dir: ~/repos   # where repos live
 providers:
   - name: github.com
@@ -34,7 +34,7 @@ providers:
 
 	out, _ := os.ReadFile(path)
 	s := string(out)
-	if !strings.Contains(s, "# my git-mgr config") || !strings.Contains(s, "# where repos live") {
+	if !strings.Contains(s, "# my gitten config") || !strings.Contains(s, "# where repos live") {
 		t.Errorf("comments not preserved:\n%s", s)
 	}
 	if !strings.Contains(s, "name: scratch") || !strings.Contains(s, "- /code/app") {

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/gitten/internal/gitops"
 )
 
 // copyState is everything a backup must reproduce: status, the staged and
@@ -137,7 +137,7 @@ func TestBackup_CleanRepoSavesNothing(t *testing.T) {
 	if res.Dirty() || res.ID != "" {
 		t.Fatalf("clean repo: %+v", res)
 	}
-	if refs := mustGit(t, dir, "for-each-ref", "refs/git-mgr/"); refs != "" {
+	if refs := mustGit(t, dir, "for-each-ref", "refs/gitten/"); refs != "" {
 		t.Errorf("clean repo got refs: %s", refs)
 	}
 	if entries, _ := os.ReadDir(patchRoot); len(entries) != 0 {

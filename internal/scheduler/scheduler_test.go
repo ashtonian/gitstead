@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/scheduler"
+	"github.com/ashtonian/gitten/internal/scheduler"
 )
 
 func sched(mods ...func(*scheduler.Schedule)) scheduler.Schedule {
@@ -14,10 +14,10 @@ func sched(mods ...func(*scheduler.Schedule)) scheduler.Schedule {
 		Name:     scheduler.DefaultName,
 		Kind:     scheduler.Launchd,
 		Interval: 15 * time.Minute,
-		Bin:      "/usr/local/bin/git-mgr",
+		Bin:      "/usr/local/bin/gitten",
 		Global:   []string{"--config", "/cfg/config.yaml", "--state", "/state/state.yaml"},
 		Env:      map[string]string{"PATH": "/opt/homebrew/bin:/usr/bin:/bin"},
-		LogPath:  "/log/git-mgr.log",
+		LogPath:  "/log/gitten.log",
 	}
 	for _, m := range mods {
 		m(&s)
@@ -49,15 +49,15 @@ func mustContain(t *testing.T, what, got string, wants ...string) {
 func TestPlist(t *testing.T) {
 	p := sched(func(s *scheduler.Schedule) { s.Sync = []string{"--tag", "work"} }).Plist()
 	mustContain(t, "plist", p,
-		"<key>Label</key><string>com.ashtonian.git-mgr</string>",
-		"<string>/usr/local/bin/git-mgr</string>",
+		"<key>Label</key><string>com.ashtonian.gitten</string>",
+		"<string>/usr/local/bin/gitten</string>",
 		"<string>sync</string>\n    <string>--quiet</string>\n    <string>--tag</string>\n    <string>work</string>",
 		"<key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin</string>",
 		"<key>StartInterval</key><integer>900</integer>",
 		"<key>ProcessType</key><string>Background</string>",
 		"<key>LowPriorityIO</key><true/>",
 		"<key>Nice</key><integer>10</integer>",
-		"<string>/log/git-mgr.log</string>",
+		"<string>/log/gitten.log</string>",
 	)
 	if strings.Contains(p, "UserName") {
 		t.Errorf("an agent runs as whoever is logged in; it names no user:\n%s", p)
@@ -72,7 +72,7 @@ func TestSystemd(t *testing.T) {
 		s.Env["SSH_AUTH_SOCK"] = "/run/user/1000/ssh-agent.socket"
 	})
 	mustContain(t, "service", s.Service(),
-		`ExecStart="/usr/local/bin/git-mgr" "--config" "/cfg/config.yaml" "--state" "/state/state.yaml" "sync" "--quiet"`,
+		`ExecStart="/usr/local/bin/gitten" "--config" "/cfg/config.yaml" "--state" "/state/state.yaml" "sync" "--quiet"`,
 		`Environment="PATH=/opt/homebrew/bin:/usr/bin:/bin"`,
 		`Environment="SSH_AUTH_SOCK=/run/user/1000/ssh-agent.socket"`,
 		"Nice=10", "IOSchedulingClass=idle",
@@ -96,8 +96,8 @@ func TestSystemd(t *testing.T) {
 
 func TestCronLine(t *testing.T) {
 	l := sched(kind(scheduler.Cron)).CronLine()
-	want := "*/15 * * * * PATH='/opt/homebrew/bin:/usr/bin:/bin' nice -n 10 '/usr/local/bin/git-mgr' '--config' '/cfg/config.yaml'" +
-		" '--state' '/state/state.yaml' 'sync' '--quiet' >> '/log/git-mgr.log' 2>&1  # com.ashtonian.git-mgr"
+	want := "*/15 * * * * PATH='/opt/homebrew/bin:/usr/bin:/bin' nice -n 10 '/usr/local/bin/gitten' '--config' '/cfg/config.yaml'" +
+		" '--state' '/state/state.yaml' 'sync' '--quiet' >> '/log/gitten.log' 2>&1  # com.ashtonian.gitten"
 	if l != want {
 		t.Errorf("cron line\n%s\nwant\n%s", l, want)
 	}
@@ -118,16 +118,16 @@ func TestCronLine(t *testing.T) {
 // specially stay one literal argument.
 func TestEscaping(t *testing.T) {
 	s := sched(func(s *scheduler.Schedule) {
-		s.Bin = "/Apps/My Tools/git-mgr"
+		s.Bin = "/Apps/My Tools/gitten"
 		s.Global = []string{"--config", "/c fg/a&b 100%$HOME.yaml"}
 		s.LogPath = "/log dir/out.log"
 	})
-	mustContain(t, "service", s.Service(), `"/Apps/My Tools/git-mgr"`, `"/c fg/a&b 100%%$$HOME.yaml"`)
+	mustContain(t, "service", s.Service(), `"/Apps/My Tools/gitten"`, `"/c fg/a&b 100%%$$HOME.yaml"`)
 	p := s.Plist()
 	if !strings.Contains(p, "a&amp;b") || strings.Contains(p, "a&b") {
 		t.Errorf("plist not XML-escaped:\n%s", p)
 	}
-	mustContain(t, "cron line", s.CronLine(), `'/Apps/My Tools/git-mgr'`, `'/c fg/a&b 100\%$HOME.yaml'`, `>> '/log dir/out.log'`)
+	mustContain(t, "cron line", s.CronLine(), `'/Apps/My Tools/gitten'`, `'/c fg/a&b 100\%$HOME.yaml'`, `>> '/log dir/out.log'`)
 }
 
 func TestValidate(t *testing.T) {
@@ -144,7 +144,7 @@ func TestValidate(t *testing.T) {
 		{"nor seconds", every(30 * time.Second), "can't be scheduled exactly"},
 		{"a name with spaces", named("my work"), "schedule name"},
 		{"an uppercase name", named("Work"), "schedule name"},
-		{"a relative binary", func(s *scheduler.Schedule) { s.Bin = "git-mgr" }, "not absolute"},
+		{"a relative binary", func(s *scheduler.Schedule) { s.Bin = "gitten" }, "not absolute"},
 		{"a daemon on systemd", func(s *scheduler.Schedule) { s.Kind, s.Daemon = scheduler.Systemd, true }, "LaunchDaemon"},
 	}
 	for _, tt := range tests {
@@ -159,7 +159,7 @@ func TestValidate(t *testing.T) {
 
 func TestLabels_NamedSchedulesDontCollide(t *testing.T) {
 	def, work := sched(), sched(named("work"))
-	if def.Label() != "com.ashtonian.git-mgr" || work.Label() != "com.ashtonian.git-mgr.work" {
+	if def.Label() != "com.ashtonian.gitten" || work.Label() != "com.ashtonian.gitten.work" {
 		t.Errorf("labels = %s, %s", def.Label(), work.Label())
 	}
 	home := "/home/me"
@@ -189,9 +189,9 @@ func TestCaptureEnv(t *testing.T) {
 
 func TestStableBinary(t *testing.T) {
 	const (
-		cellar = "/opt/homebrew/Cellar/git-mgr/1.2.0/bin/git-mgr"
-		link   = "/opt/homebrew/bin/git-mgr"
-		plain  = "/usr/local/bin/git-mgr"
+		cellar = "/opt/homebrew/Cellar/gitten/1.2.0/bin/gitten"
+		link   = "/opt/homebrew/bin/gitten"
+		plain  = "/usr/local/bin/gitten"
 	)
 	// The Homebrew link and the Cellar binary are one file.
 	same := func(a, b string) bool { return a == b || a == link && b == cellar }
@@ -208,10 +208,10 @@ func TestStableBinary(t *testing.T) {
 	}{
 		{"a Homebrew install runs the link on PATH, which survives upgrades", cellar, found(link), link},
 		{"a Cellar path nothing on PATH links to is refused", cellar, notFound, ""},
-		{"a Nix store path is refused", "/nix/store/abc-git-mgr/bin/git-mgr", notFound, ""},
-		{"so is a temporary build", "/tmp/go-build123/b001/exe/git-mgr", notFound, ""},
+		{"a Nix store path is refused", "/nix/store/abc-gitten/bin/gitten", notFound, ""},
+		{"so is a temporary build", "/tmp/go-build123/b001/exe/gitten", notFound, ""},
 		{"a stable binary that isn't the one on PATH runs itself", plain, found(link), plain},
-		{"a store path on PATH (a nix shell) doesn't count", cellar, found("/nix/store/abc/bin/git-mgr"), ""},
+		{"a store path on PATH (a nix shell) doesn't count", cellar, found("/nix/store/abc/bin/gitten"), ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

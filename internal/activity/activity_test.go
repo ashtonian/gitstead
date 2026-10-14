@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	agents "github.com/ashtonian/git-mgr/internal/agent"
+	agents "github.com/ashtonian/gitten/internal/agent"
 )
 
 func TestParseMuxyActivity(t *testing.T) {

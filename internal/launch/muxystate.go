@@ -46,7 +46,7 @@ func (m *Muxy) openState(ctx context.Context, p Plan, app desktopApp, muxy func(
 	for _, id := range m.Projects {
 		ids[id] = true
 	}
-	// A state git-mgr can't read is refused now, not after waiting for it.
+	// A state gitten can't read is refused now, not after waiting for it.
 	if _, err := loadMuxyState(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
@@ -242,7 +242,7 @@ func newMuxyID() string {
 // writeMuxyState saves st over the state file, keeping the previous one
 // beside it, and returns where.
 func writeMuxyState(path string, st map[string]any) (string, error) {
-	backup := path + ".git-mgr-backup"
+	backup := path + ".gitten-backup"
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
@@ -254,7 +254,7 @@ func writeMuxyState(path string, st map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	tmp := path + ".git-mgr-tmp"
+	tmp := path + ".gitten-tmp"
 	if err := os.WriteFile(tmp, append(out, '\n'), 0o600); err != nil {
 		return "", err
 	}

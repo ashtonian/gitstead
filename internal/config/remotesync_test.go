@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/repourl"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -35,12 +35,12 @@ func TestOffsiteNamespace(t *testing.T) {
 	tests := []struct {
 		tmpl, want, err string
 	}{
-		{"refs/git-mgr/{{.Machine}}/{{.Copy}}", "refs/git-mgr/laptop/abc", ""},
+		{"refs/gitten/{{.Machine}}/{{.Copy}}", "refs/gitten/laptop/abc", ""},
 		{"refs/backups/{{.Copy}}/", "refs/backups/abc", ""},
 		{"refs/heads/wip/{{.Copy}}", "", "must stay hidden"},
 		{"refs/tags/{{.Copy}}", "", "must stay hidden"},
-		{"git-mgr/{{.Copy}}", "", "not a valid ref prefix"},
-		{"refs/git-mgr/{{.Host}}/{{.Copy}}", "", "can't evaluate field Host"},
+		{"gitten/{{.Copy}}", "", "not a valid ref prefix"},
+		{"refs/gitten/{{.Host}}/{{.Copy}}", "", "can't evaluate field Host"},
 		{"refs/git mgr/{{.Copy}}", "", "not a valid ref prefix"},
 	}
 	for _, tt := range tests {
@@ -68,7 +68,7 @@ func TestValidate_RemoteSync(t *testing.T) {
 		err  string
 	}{
 		{"defaults", func(*config.Config) {}, ""},
-		{"a namespace every copy shares", func(c *config.Config) { c.RemoteSync.Namespace = "refs/git-mgr/{{.Machine}}" }, "must include {{.Copy}}"},
+		{"a namespace every copy shares", func(c *config.Config) { c.RemoteSync.Namespace = "refs/gitten/{{.Machine}}" }, "must include {{.Copy}}"},
 		{"an account's visible namespace", func(c *config.Config) {
 			c.Accounts = []config.Account{{Name: "work", RemoteSync: &config.RemoteSyncOverride{Namespace: ptr("refs/heads/{{.Copy}}")}}}
 		}, `account "work"`},

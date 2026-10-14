@@ -14,7 +14,7 @@ func TestLogger_FollowsLogSettings(t *testing.T) {
 	old := slog.Default()
 	t.Cleanup(func() { slog.SetDefault(old) })
 	dir := t.TempDir()
-	logFile := filepath.Join(dir, "logs", "git-mgr.log")
+	logFile := filepath.Join(dir, "logs", "gitten.log")
 	cfg := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(cfg, []byte("log:\n  level: warn\n  format: text\n  file: "+logFile+"\n"), 0o600); err != nil {
 		t.Fatal(err)

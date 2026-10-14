@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/gitten/internal/gitops"
 )
 
 // sourceFixture is an upstream with main and feature, and a clone of it, the
@@ -69,15 +69,15 @@ func TestCloneFromSource(t *testing.T) {
 		t.Errorf("origin = %s, want the upstream", got)
 	}
 	if got := mustGit(t, dest, "remote", "get-url", gitops.SourceRemote); got != source {
-		t.Errorf("git-mgr remote = %s, want the source", got)
+		t.Errorf("gitten remote = %s, want the source", got)
 	}
 	refs := mustGit(t, dest, "for-each-ref", "--format=%(refname)", "refs/heads")
 	if refs != "refs/heads/agents/ws/agent-1" {
 		t.Errorf("local branches:\n%s\nwant only the agent's", refs)
 	}
 	refs = mustGit(t, dest, "for-each-ref", "--format=%(refname)")
-	if !strings.Contains(refs, "refs/remotes/git-mgr/mine") {
-		t.Errorf("the git-mgr remote doesn't show the source's branches:\n%s", refs)
+	if !strings.Contains(refs, "refs/remotes/gitten/mine") {
+		t.Errorf("the gitten remote doesn't show the source's branches:\n%s", refs)
 	}
 	if !strings.Contains(refs, "refs/remotes/origin/feature") {
 		t.Errorf("the copy lacks origin's branches:\n%s", refs)
@@ -144,7 +144,7 @@ func TestCloneFromSource_Shared(t *testing.T) {
 		t.Errorf("after repointing, the copy can't read its objects: %v", err)
 	}
 	if got := mustGit(t, dest, "remote", "get-url", gitops.SourceRemote); got != moved {
-		t.Errorf("git-mgr remote = %s, want %s", got, moved)
+		t.Errorf("gitten remote = %s, want %s", got, moved)
 	}
 }
 

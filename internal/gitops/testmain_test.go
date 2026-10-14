@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/testenv"
+	"github.com/ashtonian/gitten/internal/testenv"
 )
 
 // TestMain isolates the tests from the developer's git configuration -- a

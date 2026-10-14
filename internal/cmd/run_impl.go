@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/gitten/internal/gitops"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -16,7 +16,7 @@ import (
 // in a stable order so concurrent runs stay readable.
 func (c *RunCmd) Run(ctx *Context) error {
 	if len(c.Command) == 0 {
-		return errors.New("no command given; usage: git-mgr run [--set/--tag/--repos] -- <command> [args]")
+		return errors.New("no command given; usage: gitten run [--set/--tag/--repos] -- <command> [args]")
 	}
 	cfg, err := ctx.LoadConfig()
 	if err != nil {

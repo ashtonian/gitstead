@@ -14,7 +14,7 @@ import (
 
 // copyIDFile holds a working copy's ID inside its private git directory:
 // .git for a clone, .git/worktrees/<name> for a linked worktree.
-const copyIDFile = "git-mgr-copy-id"
+const copyIDFile = "gitten-copy-id"
 
 // CopyID returns the ID of the working copy at repoPath, creating one on first
 // use. Clones and linked worktrees of one repository each get their own, so
@@ -33,7 +33,7 @@ func CopyID(ctx context.Context, repoPath string) (string, error) {
 	id := hex.EncodeToString(buf)
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, fs.ErrExist) {
-		return readCopyID(path) // another git-mgr process won the race
+		return readCopyID(path) // another gitten process won the race
 	}
 	if err != nil {
 		return "", fmt.Errorf("creating copy ID: %w", err)

@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitten/internal/state"
 )
 
 // Apply records this run's observations, then runs the actions include

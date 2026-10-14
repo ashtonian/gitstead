@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
-	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/gitops"
+	"github.com/ashtonian/gitten/internal/reconcile"
+	"github.com/ashtonian/gitten/internal/repourl"
+	"github.com/ashtonian/gitten/internal/state"
 )
 
 // Kinds of workspace actions.
@@ -146,12 +146,12 @@ func trackReferenced(ctx context.Context, cfg *config.Config, st *state.State, d
 		}
 		id, err := repourl.Parse(c.Origin)
 		if err != nil {
-			blocked = append(blocked, reconcile.Blocked{Target: paths[path], Reason: path + " has no origin remote git-mgr can track it by"})
+			blocked = append(blocked, reconcile.Blocked{Target: paths[path], Reason: path + " has no origin remote gitten can track it by"})
 			continue
 		}
 		key := id.Key()
 		if r := st.Repos[key]; r != nil {
-			blocked = append(blocked, reconcile.Blocked{Target: paths[path], Reason: fmt.Sprintf("%s is a clone of %s, which git-mgr tracks at %s", path, key, r.LocalPath)})
+			blocked = append(blocked, reconcile.Blocked{Target: paths[path], Reason: fmt.Sprintf("%s is a clone of %s, which gitten tracks at %s", path, key, r.LocalPath)})
 			continue
 		}
 		if d, ok := desired[key]; ok && d.Path != path {
@@ -274,7 +274,7 @@ func (pl *planner) block(target, reason string) {
 
 func (pl *planner) workspace(spec *Spec, ws *state.WorkspaceState) {
 	if ws.Isolation != spec.Isolation {
-		pl.block(spec.Name, fmt.Sprintf("isolation changed from %s to %s; remove it (git-mgr ws rm %s --delete) to make it again", ws.Isolation, spec.Isolation, spec.Name))
+		pl.block(spec.Name, fmt.Sprintf("isolation changed from %s to %s; remove it (gitten ws rm %s --delete) to make it again", ws.Isolation, spec.Isolation, spec.Name))
 		return
 	}
 	if changed := settingsChanged(ws, spec); len(changed) > 0 {
@@ -294,7 +294,7 @@ func (pl *planner) workspace(spec *Spec, ws *state.WorkspaceState) {
 	for _, rr := range ws.Replicas {
 		if !rr.Retiring.IsZero() {
 			retiring[rr.Agent] = true
-			pl.block(spec.Name+"/"+rr.Agent, fmt.Sprintf("retiring it began %s and hasn't finished; `git-mgr ws retire %s %s` finishes it",
+			pl.block(spec.Name+"/"+rr.Agent, fmt.Sprintf("retiring it began %s and hasn't finished; `gitten ws retire %s %s` finishes it",
 				rr.Retiring.Local().Format(time.DateTime), spec.Name, rr.Agent))
 		}
 	}
@@ -361,7 +361,7 @@ func (pl *planner) copy(spec *Spec, r Replica, c Copy, rec *state.CopyState) {
 		old := pl.seen.At(rec.Path)
 		switch {
 		case within(rec.Path, c.Path) || within(c.Path, rec.Path):
-			pl.block(target, fmt.Sprintf("its copy would move from %s into %s; remove the copy (git-mgr ws rm) to make it again", rec.Path, c.Path))
+			pl.block(target, fmt.Sprintf("its copy would move from %s into %s; remove the copy (gitten ws rm) to make it again", rec.Path, c.Path))
 		case !old.Exists && pl.isCopy(spec, here, c, rec.CopyID):
 			pl.add(reconcile.Action{Kind: KindMoveCopy, Target: target, From: rec.Path, To: c.Path, Note: "already moved; recording it",
 				Run: recordCopyMove(spec.Name, r, rec.Path, c.Path)})

@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/testenv"
+	"github.com/ashtonian/gitten/internal/testenv"
 )
 
 func TestMain(m *testing.M) {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitten/internal/repourl"
 )
 
 // MirrorOptions are how a mirror is made and kept.
@@ -20,15 +20,15 @@ type MirrorOptions struct {
 	LFS bool
 	// KeepRewritten is how long the old tip of a ref the remote rewrote --
 	// moved to a commit that doesn't descend from it, as a force-push does --
-	// is kept, under refs/git-mgr-rewritten/<time>/; 0 keeps none.
+	// is kept, under refs/gitten-rewritten/<time>/; 0 keeps none.
 	KeepRewritten time.Duration
 	// Now is when an update is made; nil for time.Now.
 	Now func() time.Time
 }
 
 // RewrittenPrefix holds the old tips of refs a mirror's remote rewrote. It
-// is outside refs/git-mgr/, which a remote may hold refs of its own under.
-const RewrittenPrefix = "refs/git-mgr-rewritten/"
+// is outside refs/gitten/, which a remote may hold refs of its own under.
+const RewrittenPrefix = "refs/gitten-rewritten/"
 
 const rewrittenStamp = "20060102T150405Z"
 

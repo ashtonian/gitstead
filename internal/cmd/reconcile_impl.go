@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/discovery"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
-	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/workspace"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/discovery"
+	"github.com/ashtonian/gitten/internal/reconcile"
+	"github.com/ashtonian/gitten/internal/repourl"
+	"github.com/ashtonian/gitten/internal/state"
+	"github.com/ashtonian/gitten/internal/workspace"
 	"golang.org/x/term"
 )
 
@@ -101,7 +101,7 @@ func fullPlan(ctx *Context, cfg *config.Config, st *state.State) (*reconcile.Pla
 }
 
 // reconcileEnv is what plans apply to: st, changed one action at a time under
-// the state lock, so other git-mgr runs keep working while a plan applies.
+// the state lock, so other gitten runs keep working while a plan applies.
 // The caller must not hold the state lock itself.
 func reconcileEnv(cfg *config.Config, st *state.State) *reconcile.Env {
 	keep := []string{config.ExpandHome(cfg.BaseDir), cfg.WorkspaceDefaults.Root}
@@ -206,24 +206,24 @@ func printPlan(p *reconcile.Plan, auto string) {
 			switch {
 			case auto == "all":
 			case a.Disruptive:
-				line += "   [needs git-mgr apply]"
+				line += "   [needs gitten apply]"
 			case a.Serial:
-				line += "   [git-mgr apply or ws ensure]"
+				line += "   [gitten apply or ws ensure]"
 			case bySync(a):
 				automatic++
 			default:
-				line += "   [needs git-mgr apply]"
+				line += "   [needs gitten apply]"
 			}
 			fmt.Println(line)
 		}
 	}
 	printDriftAndBlocked(p)
 	if auto != "all" && len(p.Actions) > 0 {
-		fmt.Printf("\nsync applies %d of %d on its own (reconcile.auto: %s); `git-mgr apply` makes them all.\n", automatic, len(p.Actions), auto)
+		fmt.Printf("\nsync applies %d of %d on its own (reconcile.auto: %s); `gitten apply` makes them all.\n", automatic, len(p.Actions), auto)
 	}
 }
 
-// printPending lists what a run left for `git-mgr apply`, and any drift or
+// printPending lists what a run left for `gitten apply`, and any drift or
 // blocked changes.
 func printPending(p *reconcile.Plan, applied func(reconcile.Action) bool) {
 	var pending []reconcile.Action
@@ -233,7 +233,7 @@ func printPending(p *reconcile.Plan, applied func(reconcile.Action) bool) {
 		}
 	}
 	if len(pending) > 0 {
-		fmt.Println("Waiting for `git-mgr apply`:")
+		fmt.Println("Waiting for `gitten apply`:")
 		for _, a := range pending {
 			fmt.Println(describeAction(a))
 		}
@@ -245,7 +245,7 @@ func printDriftAndBlocked(p *reconcile.Plan) {
 	if len(p.Drift) > 0 {
 		fmt.Println("Changed by hand, left alone (reconcile.drift: overwrite restores them):")
 		for _, d := range p.Drift {
-			fmt.Printf("  ! %s %s: git-mgr set %s, now %s; config wants %s\n", d.Target, d.What, tildify(d.Recorded), tildify(d.Found), tildify(d.Wanted))
+			fmt.Printf("  ! %s %s: gitten set %s, now %s; config wants %s\n", d.Target, d.What, tildify(d.Recorded), tildify(d.Found), tildify(d.Wanted))
 		}
 	}
 	if len(p.Blocked) > 0 {

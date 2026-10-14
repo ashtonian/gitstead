@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/scheduler"
+	"github.com/ashtonian/gitten/internal/scheduler"
 )
 
 // fakeHost records the commands it is asked to run and keeps a crontab.
@@ -66,10 +66,10 @@ func TestCron_KeepsOtherJobs(t *testing.T) {
 	if len(lines) != 4 || !strings.HasPrefix(f.crontab, theirs) {
 		t.Fatalf("crontab:\n%s", f.crontab)
 	}
-	if !strings.HasPrefix(lines[2], "0 * * * *") || !strings.HasSuffix(lines[2], "# com.ashtonian.git-mgr.work") {
+	if !strings.HasPrefix(lines[2], "0 * * * *") || !strings.HasSuffix(lines[2], "# com.ashtonian.gitten.work") {
 		t.Errorf("work line = %s", lines[2])
 	}
-	if !strings.HasPrefix(lines[3], "*/30 * * * *") || !strings.HasSuffix(lines[3], "# com.ashtonian.git-mgr") {
+	if !strings.HasPrefix(lines[3], "*/30 * * * *") || !strings.HasSuffix(lines[3], "# com.ashtonian.gitten") {
 		t.Errorf("default line = %s", lines[3])
 	}
 
@@ -85,7 +85,7 @@ func TestCron_KeepsOtherJobs(t *testing.T) {
 	if _, err := h.Uninstall(sched(kind(scheduler.Cron)), false); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(f.crontab, "git-mgr.work") || strings.Contains(f.crontab, "*/30") {
+	if !strings.Contains(f.crontab, "gitten.work") || strings.Contains(f.crontab, "*/30") {
 		t.Errorf("after removing the default schedule:\n%s", f.crontab)
 	}
 	if ok, _ := h.Installed(sched(kind(scheduler.Cron), named("work"))); !ok {
@@ -107,7 +107,7 @@ func TestCron_UnreadableCrontabIsLeftAlone(t *testing.T) {
 
 	// Having no crontab yet is fine.
 	f = &fakeHost{listErr: errors.New("crontab -l: exit status 1: crontab: no crontab for me")}
-	if _, err := newHost(t, f).Install(sched(kind(scheduler.Cron)), false); err != nil || !strings.Contains(f.crontab, "git-mgr") {
+	if _, err := newHost(t, f).Install(sched(kind(scheduler.Cron)), false); err != nil || !strings.Contains(f.crontab, "gitten") {
 		t.Errorf("install with no crontab: %v\n%s", err, f.crontab)
 	}
 }
@@ -119,8 +119,8 @@ func TestLaunchd_Agent(t *testing.T) {
 	if _, err := h.Install(s, false); err != nil {
 		t.Fatal(err)
 	}
-	plist := filepath.Join(h.Home, "Library", "LaunchAgents", "com.ashtonian.git-mgr.work.plist")
-	if data, err := os.ReadFile(plist); err != nil || !strings.Contains(string(data), "com.ashtonian.git-mgr.work") {
+	plist := filepath.Join(h.Home, "Library", "LaunchAgents", "com.ashtonian.gitten.work.plist")
+	if data, err := os.ReadFile(plist); err != nil || !strings.Contains(string(data), "com.ashtonian.gitten.work") {
 		t.Fatalf("plist: %v\n%s", err, data)
 	}
 	if got := strings.Join(f.calls, "\n"); !strings.Contains(got, "launchctl bootstrap gui/501 "+plist) {
@@ -143,12 +143,12 @@ func TestSystemd_Install(t *testing.T) {
 	if _, err := h.Install(sched(kind(scheduler.Systemd), named("work")), false); err != nil {
 		t.Fatal(err)
 	}
-	for _, unit := range []string{"git-mgr-work.service", "git-mgr-work.timer"} {
+	for _, unit := range []string{"gitten-work.service", "gitten-work.timer"} {
 		if _, err := os.Stat(filepath.Join(h.Home, ".config", "systemd", "user", unit)); err != nil {
 			t.Errorf("%s not written: %v", unit, err)
 		}
 	}
-	if got := strings.Join(f.calls, "\n"); !strings.Contains(got, "systemctl --user enable --now git-mgr-work.timer") {
+	if got := strings.Join(f.calls, "\n"); !strings.Contains(got, "systemctl --user enable --now gitten-work.timer") {
 		t.Errorf("calls:\n%s", got)
 	}
 	if lingering, err := h.Lingering("me"); err != nil || lingering {

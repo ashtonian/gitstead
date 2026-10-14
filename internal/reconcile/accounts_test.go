@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/reconcile"
 )
 
 // An account's folders follow the layout and any base_dir its repos get;

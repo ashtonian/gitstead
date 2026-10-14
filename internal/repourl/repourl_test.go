@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitten/internal/repourl"
 )
 
 func TestParseURL_SSH(t *testing.T) {
@@ -15,7 +15,7 @@ func TestParseURL_SSH(t *testing.T) {
 		name     string
 		fullName string
 	}{
-		{"git@github.com:ashtonian/git-mgr.git", "github.com", "ashtonian", "git-mgr", "ashtonian/git-mgr"},
+		{"git@github.com:ashtonian/gitten.git", "github.com", "ashtonian", "gitten", "ashtonian/gitten"},
 		{"git@ghes.company.com:org/repo.git", "ghes.company.com", "org", "repo", "org/repo"},
 		// GitLab subgroups: owner is the full group path, name is just the repo.
 		{"git@gitlab.com:group/subgroup/project.git", "gitlab.com", "group/subgroup", "project", "group/subgroup/project"},
@@ -48,8 +48,8 @@ func TestParseURL_HTTPS(t *testing.T) {
 		host string
 		name string
 	}{
-		{"https://github.com/ashtonian/git-mgr.git", "github.com", "git-mgr"},
-		{"https://github.com/ashtonian/git-mgr", "github.com", "git-mgr"},
+		{"https://github.com/ashtonian/gitten.git", "github.com", "gitten"},
+		{"https://github.com/ashtonian/gitten", "github.com", "gitten"},
 		{"https://ghes.company.com/org/repo.git", "ghes.company.com", "repo"},
 	}
 

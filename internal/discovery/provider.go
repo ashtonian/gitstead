@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitten/internal/config"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -24,7 +24,7 @@ type Repo struct {
 	Language      string   // primary language (for display/state)
 	Languages     []string // all languages detected in the repo (for filtering)
 	Topics        []string // repo topics from provider (e.g., GitHub topics)
-	Tags          []string // git-mgr tags assigned by discovery rules
+	Tags          []string // gitten tags assigned by discovery rules
 	IsFork        bool
 	IsArchived    bool
 	Visibility    string // "public", "private", "internal"

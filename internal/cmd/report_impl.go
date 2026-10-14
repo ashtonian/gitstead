@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/oplog"
+	"github.com/ashtonian/gitten/internal/oplog"
 )
 
 // Run summarizes operation-log activity over a window: how many clones, backups,
@@ -18,7 +18,7 @@ func (c *ReportCmd) Run(ctx *Context) error {
 		return err
 	}
 	if len(evs) == 0 {
-		fmt.Printf("No git-mgr activity in the last %s.\n", c.Since)
+		fmt.Printf("No gitten activity in the last %s.\n", c.Since)
 	}
 
 	counts := map[string]int{}

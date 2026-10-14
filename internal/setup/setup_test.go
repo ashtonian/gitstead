@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitten/internal/config"
 )
 
 // fakeRunner answers commands from a table keyed by the joined command line.

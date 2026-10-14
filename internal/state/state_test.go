@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitten/internal/state"
 )
 
 func TestLoadSave(t *testing.T) {

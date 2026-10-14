@@ -3,7 +3,7 @@ package discovery
 import (
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitten/internal/config"
 )
 
 func TestRequestedFilters(t *testing.T) {

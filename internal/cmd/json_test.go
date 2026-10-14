@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitten/internal/config"
 )
 
 // A command run as a step of another hands back its document instead of

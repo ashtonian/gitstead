@@ -1,6 +1,6 @@
-// Package jump finds what a short query means among the places git-mgr
+// Package jump finds what a short query means among the places gitten
 // knows: tracked repos, workspaces, agents' replicas and their copies. It
-// backs `git-mgr path`, `cd` and `open`.
+// backs `gitten path`, `cd` and `open`.
 package jump
 
 import (
@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitten/internal/state"
 )
 
 // Kinds of target.

@@ -12,18 +12,18 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/ashtonian/git-mgr/internal/pathutil"
+	"github.com/ashtonian/gitten/internal/pathutil"
 )
 
 // CurrentVersion is the state schema this build reads and writes.
 const CurrentVersion = 3
 
-// ErrLocked reports that another git-mgr run holds the state lock.
-var ErrLocked = errors.New("another git-mgr instance is running")
+// ErrLocked reports that another gitten run holds the state lock.
+var ErrLocked = errors.New("another gitten instance is running")
 
-// ErrNewerState reports a state file written by a newer git-mgr. It is never
+// ErrNewerState reports a state file written by a newer gitten. It is never
 // read or rewritten, so an older binary can't drop fields it doesn't know.
-var ErrNewerState = errors.New("state file is newer than this git-mgr")
+var ErrNewerState = errors.New("state file is newer than this gitten")
 
 // State is the top-level state structure persisted to disk.
 type State struct {
@@ -47,12 +47,12 @@ type State struct {
 	lockFD *os.File `yaml:"-"`
 }
 
-// RepoState is one tracked repo: what git-mgr applied to it, which the
+// RepoState is one tracked repo: what gitten applied to it, which the
 // reconciler compares with what config wants, and what the last run found.
-// Each field carries a json tag matching its yaml tag so `git-mgr status
+// Each field carries a json tag matching its yaml tag so `gitten status
 // --json` emits the same snake_case keys as the state file.
 type RepoState struct {
-	// What git-mgr applied. CloneURL and LocalPath are the origin URL and path
+	// What gitten applied. CloneURL and LocalPath are the origin URL and path
 	// it last set.
 	CloneURL string `yaml:"clone_url" json:"clone_url"`
 	Host     string `yaml:"host" json:"host"`
@@ -77,7 +77,7 @@ type RepoState struct {
 	// workgroup tracking): its path and URL are the ones recorded, never
 	// derived from config.
 	ManuallyAdded bool `yaml:"manually_added,omitempty" json:"manually_added,omitempty"`
-	// ManagedConfig holds the repo-local git config keys git-mgr set, with the
+	// ManagedConfig holds the repo-local git config keys gitten set, with the
 	// values it set, keyed by git's lower-case name (core.sshcommand).
 	ManagedConfig map[string]string `yaml:"managed_config,omitempty" json:"managed_config,omitempty"`
 
@@ -106,7 +106,7 @@ type MirrorStatus struct {
 	LastMirrorError string    `yaml:"last_mirror_error,omitempty" json:"last_mirror_error,omitempty"`
 }
 
-// OffsiteStatus is what git-mgr last left offsite for a working copy, so the
+// OffsiteStatus is what gitten last left offsite for a working copy, so the
 // next run pushes only what changed and deletes only refs it made.
 type OffsiteStatus struct {
 	// OffsiteRemote and OffsiteNamespace are where the refs below are.
@@ -129,7 +129,7 @@ type OffsiteStatus struct {
 	OffsiteSubmodules map[string]OffsiteStatus `yaml:"offsite_submodules,omitempty" json:"offsite_submodules,omitempty"`
 }
 
-// ScheduleState is a background sync git-mgr installed, kept so it can be
+// ScheduleState is a background sync gitten installed, kept so it can be
 // listed, checked by doctor and removed by name.
 type ScheduleState struct {
 	Name     string            `yaml:"name"               json:"name"`
@@ -193,7 +193,7 @@ func Load(path string) (*State, error) {
 	}
 	s.path = path
 	if s.Version > CurrentVersion {
-		return nil, fmt.Errorf("%w: %s is version %d, this build supports up to %d; upgrade git-mgr", ErrNewerState, path, s.Version, CurrentVersion)
+		return nil, fmt.Errorf("%w: %s is version %d, this build supports up to %d; upgrade gitten", ErrNewerState, path, s.Version, CurrentVersion)
 	}
 
 	if s.Repos == nil {

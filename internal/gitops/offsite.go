@@ -17,7 +17,7 @@ import (
 // Branch, so a force-push never touches anyone else's refs.
 type Offsite struct {
 	Remote    string        // a remote name or URL
-	Namespace string        // hidden ref prefix the copy owns, e.g. refs/git-mgr/<machine>/<copy>
+	Namespace string        // hidden ref prefix the copy owns, e.g. refs/gitten/<machine>/<copy>
 	WIP       string        // "ref", "branch" or "off"
 	Branch    string        // the copy's visible WIP branch, for WIP "branch"
 	Unpushed  string        // "push", "bundle" or "off"

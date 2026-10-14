@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/activity"
-	agents "github.com/ashtonian/git-mgr/internal/agent"
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/testenv"
+	"github.com/ashtonian/gitten/internal/activity"
+	agents "github.com/ashtonian/gitten/internal/agent"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/state"
+	"github.com/ashtonian/gitten/internal/testenv"
 )
 
 func TestMain(m *testing.M) {

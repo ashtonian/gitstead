@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitten/internal/config"
 )
 
 func TestDocument_EditsInPlaceKeepingComments(t *testing.T) {

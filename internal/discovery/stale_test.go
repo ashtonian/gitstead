@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/state"
 )
 
 // stalePastGrace builds a state with one tracked repo that went stale an hour

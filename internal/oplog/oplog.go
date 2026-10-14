@@ -1,7 +1,7 @@
-// Package oplog is a tiny append-only operation log: one JSON line per git-mgr
+// Package oplog is a tiny append-only operation log: one JSON line per gitten
 // mutation (clone, sync, backup, remove, workspace create/remove, each applied
 // config change). It exists so
-// `git-mgr report`/`log` can answer "what did the (often scheduled) tool do
+// `gitten report`/`log` can answer "what did the (often scheduled) tool do
 // lately?" without scraping terminal output. Writing is best-effort and never
 // fails the command that emitted the event.
 package oplog
@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/pathutil"
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitten/internal/pathutil"
+	"github.com/ashtonian/gitten/internal/repourl"
 )
 
 // Growth bound: once the log passes maxBytes, trim it to its newest entries,

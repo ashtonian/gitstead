@@ -1,8 +1,8 @@
-# git-mgr: Technical Specification
+# gitten: Technical Specification
 
 ## Overview
 
-`git-mgr` is a CLI tool that discovers, clones, syncs, and backs up git repositories into a structured local directory layout. It is designed to run both interactively (bootstrapping a new machine) and as a background cron job (periodic fetch + transparent backup of uncommitted work).
+`gitten` is a CLI tool that discovers, clones, syncs, and backs up git repositories into a structured local directory layout. It is designed to run both interactively (bootstrapping a new machine) and as a background cron job (periodic fetch + transparent backup of uncommitted work).
 
 **Targets**: macOS, Linux, Docker (multi-arch: amd64 + arm64).
 
@@ -12,7 +12,7 @@
 2. **Clone** repos into a templated directory structure (e.g., `github.com/owner/repo`)
 3. **Sync** (fetch-only) all tracked repos periodically -- safe to run every 15 minutes via cron. Optionally auto-discovers new repos before fetching.
 4. **Backup** uncommitted changes transparently without interfering with any git operations in progress
-5. **Track** all managed repos in a local state file: what git-mgr applied to each (path, URL, managed git config, provider ID), what the last run found, workspaces and the archive catalog. It is this machine's; another machine gets the same repos from the shared config and the manifest of repos added by hand (`manifest:`), not by copying state.
+5. **Track** all managed repos in a local state file: what gitten applied to each (path, URL, managed git config, provider ID), what the last run found, workspaces and the archive catalog. It is this machine's; another machine gets the same repos from the shared config and the manifest of repos added by hand (`manifest:`), not by copying state.
 6. **Adopt** existing locally-cloned repos into management without re-cloning
 7. **Cleanup** stale repos (deleted upstream, removed from org) with configurable policy
 8. **Notify** on errors/completion via native OS notifications (macOS/Linux) or log file
@@ -86,22 +86,22 @@ Notifications are opt-in (`notify.enabled: true`). Failures to notify are logged
 ## CLI Interface
 
 ```
-git-mgr [global flags] <command> [command flags] [args]
+gitten [global flags] <command> [command flags] [args]
 ```
 
 ### Global Flags
 
 | Flag | Default | Description |
 |---|---|---|
-| `--config` | `~/.config/git-mgr/config.yaml` if it exists, else the defaults | Config file path; one given here or by `GIT_MGR_CONFIG` must exist |
-| `--state` | `~/.local/share/git-mgr/state.yaml` | State file path |
+| `--config` | `~/.config/gitten/config.yaml` if it exists, else the defaults | Config file path; one given here or by `GITTEN_CONFIG` must exist |
+| `--state` | `~/.local/share/gitten/state.yaml` | State file path |
 | `--verbose` / `-v` | false | Verbose output |
 | `--quiet` / `-q` | false | Suppress non-error output |
 | `--concurrency` / `-j` | 8 | Max concurrent git operations: fetches, backups, and the clones and other changes of different repos that `sync` and `apply` make |
 
 ### Commands
 
-#### `git-mgr setup [flags]`
+#### `gitten setup [flags]`
 
 Guided, re-runnable setup. Detection (package `internal/setup`) reads `gh auth
 status --json hosts`, `~/.ssh/config` (with `Include`), the keys in `~/.ssh`,
@@ -140,7 +140,7 @@ Answers (`setup.Answers`, the `--answers`/`--save-answers` file): `base_dir`,
 an hour or a day; default `15m`, or the installed schedule's), `linger`,
 `remote_sync`, `update`, `reconcile_auto`, `cleanup`, `workspaces`, `shell`,
 `git_includes`, `clone`. Defaults: the schedule on for a fresh config, else as
-installed; `shell` on unless the startup file already has a `git-mgr shell-init`
+installed; `shell` on unless the startup file already has a `gitten shell-init`
 line; `git_includes` on with several accounts, one of them with a key or
 identity of its own, or when already included; `clone` on with accounts.
 `bootstrap` runs setup leaving the schedule and cloning to its own steps.
@@ -153,7 +153,7 @@ identity of its own, or when already included; `clone` on with accounts.
 | `--dry-run` | Show the diff and checks; change nothing |
 | `--offline` | No `ssh -T` or provider API calls |
 
-#### `git-mgr init`
+#### `gitten init`
 
 Write a starter config without asking: the defaults, plus, when `gh` is logged
 in to github.com, a provider reading its token (`gh auth token --hostname
@@ -161,19 +161,19 @@ github.com --user <login>`) and a rule for the login's own repos; commented
 examples of providers and rules follow. Refuses to overwrite an existing config.
 `setup` is the guided way.
 
-#### `git-mgr discover [flags]`
+#### `gitten discover [flags]`
 
 Run discovery rules and show the plan for the repos they find (see
 [Reconciliation](#reconciliation)).
 
 | Flag | Description |
 |---|---|
-| `--apply` | Make the plan's changes that move and delete nothing: clone new repos, update origin URLs, managed git config and tags (default: preview only). Moves wait for `git-mgr apply`. |
+| `--apply` | Make the plan's changes that move and delete nothing: clone new repos, update origin URLs, managed git config and tags (default: preview only). Moves wait for `gitten apply`. |
 | `--rule <name>` | Run only a specific discovery rule |
 | `--tag <tag>` | Run only rules with this tag |
 
 ```
-$ git-mgr discover
+$ gitten discover
 Discovering repos...
   [github.com] your-login: found 47 repos (3 new, 44 existing, 2 stale)
   [ghes.company.com] my-org: found 23 repos (0 new, 23 existing, 0 stale)
@@ -189,10 +189,10 @@ Stale repos (not found in latest discovery):
   ~ github.com/your-login/old-thing (stale since 2026-04-10)
   ~ github.com/your-login/archived-lib (stale since 2026-04-15)
 
-Use --apply to make the changes that move and delete nothing, or `git-mgr apply` for all of them.
+Use --apply to make the changes that move and delete nothing, or `gitten apply` for all of them.
 ```
 
-#### `git-mgr sync [flags]`
+#### `gitten sync [flags]`
 
 Discover, apply the plan's changes as far as `reconcile.auto` allows (default:
 everything that moves and deletes nothing), fetch all tracked repos and back up
@@ -209,7 +209,7 @@ creates, moves or removes workspace copies; it backs them up.
 | `--force` | Ignore min_fetch_interval, fetch everything |
 
 ```
-$ git-mgr sync
+$ gitten sync
 Discovering repos (auto-discover enabled)...
   [github.com] your-login: 1 new repo
 Syncing 83 repos (concurrency: 8)...
@@ -227,7 +227,7 @@ Syncing 83 repos (concurrency: 8)...
 - Respects `min_fetch_interval` -- skips repos fetched within the window
 - All errors are collected, not fatal -- partial success is fine
 
-#### `git-mgr backup [flags]`
+#### `gitten backup [flags]`
 
 Run only the backup step (no fetch).
 
@@ -242,20 +242,20 @@ Exits non-zero if any selected repo failed to back up; the failure is also
 stored as `last_backup_error` and shown as `failed` in `status`.
 
 ```
-$ git-mgr backup --list --repos '*/git-mgr'
-github.com/ashtonian/git-mgr:
+$ gitten backup --list --repos '*/gitten'
+github.com/ashtonian/gitten:
   20261012T150000.000Z  snapshot, patch
   20261012T155117.905Z  snapshot, patch, 1 untracked path(s) left out
 
-$ git-mgr backup --restore 20261012T155117.905Z --repos '*/git-mgr'
-To restore backup 20261012T155117.905Z of github.com/ashtonian/git-mgr (onto a clean tree):
-  cd ~/projects/github.com/ashtonian/git-mgr
-  git stash apply --index refs/git-mgr/backups/8ed3b5a3e9e769c3/20261012T155117.905Z
+$ gitten backup --restore 20261012T155117.905Z --repos '*/gitten'
+To restore backup 20261012T155117.905Z of github.com/ashtonian/gitten (onto a clean tree):
+  cd ~/projects/github.com/ashtonian/gitten
+  git stash apply --index refs/gitten/backups/8ed3b5a3e9e769c3/20261012T155117.905Z
   (not in this backup: huge.bin (3.0 MiB is over the 1.0 MiB file limit))
-  tar -xzf ~/.local/share/git-mgr/patches/.../untracked.tar.gz
+  tar -xzf ~/.local/share/gitten/patches/.../untracked.tar.gz
 ```
 
-#### `git-mgr status [flags]`
+#### `gitten status [flags]`
 
 Show state of all managed repos.
 
@@ -269,9 +269,9 @@ Show state of all managed repos.
 | `--errors` | Only show repos in error state |
 
 ```
-$ git-mgr status
+$ gitten status
 REPO                                  STATUS   BRANCH   LAST FETCH   BACKUP   TAGS
-github.com/ashtonian/git-mgr         dirty    main     2m ago       2m ago   personal
+github.com/ashtonian/gitten         dirty    main     2m ago       2m ago   personal
 github.com/your-login/dotfiles       clean    main     2m ago       -        personal
 ghes.company.com/org/api             clean    main     15m ago      -        work,backend
 ghes.company.com/org/infra           error    main     failed       -        work,infra
@@ -281,7 +281,7 @@ github.com/your-login/old-thing      stale    main     3d ago       -        per
 83 repos (2 dirty, 1 error, 1 stale, 79 clean)
 ```
 
-#### `git-mgr adopt <path> [flags]`
+#### `gitten adopt <path> [flags]`
 
 Import an existing locally-cloned repo into management without re-cloning.
 
@@ -292,11 +292,11 @@ Import an existing locally-cloned repo into management without re-cloning.
 | `--dry-run` | Show what would be adopted without changing state |
 
 ```
-$ git-mgr adopt ~/old-projects/cool-lib
+$ gitten adopt ~/old-projects/cool-lib
 Detected: github.com/someone/cool-lib (from remote origin)
 Adopted: github.com/someone/cool-lib -> ~/old-projects/cool-lib
 
-$ git-mgr adopt --scan ~/legacy-repos --tag legacy --dry-run
+$ gitten adopt --scan ~/legacy-repos --tag legacy --dry-run
 Would adopt 14 repos:
   ~/legacy-repos/api -> github.com/company/api
   ~/legacy-repos/frontend -> github.com/company/frontend
@@ -309,7 +309,7 @@ Would adopt 14 repos:
 3. Write managed git config that isn't already set (a value you set yourself is kept and reported as drift), record its copy ID, add it to state with `manually_added: true`
 4. `--scan` walks directory tree looking for `.git` dirs, adopts each
 
-#### `git-mgr clone <url> [flags]`
+#### `gitten clone <url> [flags]`
 
 Add a single repo by hand and clone it, at its templated path or `--path`. It
 is planned like any other repo, so a clone already at that path is adopted
@@ -321,12 +321,12 @@ instead, and it keeps that path and URL from then on.
 | `--path <override>` | Override the templated path |
 
 ```
-$ git-mgr clone git@github.com:someone/cool-lib.git --tag libs
+$ gitten clone git@github.com:someone/cool-lib.git --tag libs
 Cloned to ~/projects/github.com/someone/cool-lib
 Added to state with tags: [libs]
 ```
 
-#### `git-mgr remove <repo-pattern> [flags]`
+#### `gitten remove <repo-pattern> [flags]`
 
 Stop tracking repos.
 
@@ -336,7 +336,7 @@ Stop tracking repos.
 | `--archive` | Also move the clone, whole, to `backup.archive_dir/<id>/` and catalog it; `archives restore` puts it back. A clone with linked worktrees is kept and stays tracked, and the command exits non-zero. Exclusive with `--delete`. |
 | `--yes` | Skip confirmation prompt |
 
-#### `git-mgr hooks post-clone|post-create`
+#### `gitten hooks post-clone|post-create`
 
 Runs hooks again, printing their output as well as logging it.
 
@@ -347,9 +347,9 @@ Runs hooks again, printing their output as well as logging it.
 
 Exits non-zero (3) when any hook fails.
 
-#### `git-mgr archives ls|show|restore|rm`
+#### `gitten archives ls|show|restore|rm`
 
-The catalog of archives git-mgr made before taking copies and repos away:
+The catalog of archives gitten made before taking copies and repos away:
 verified bundles of unique work, and whole clones moved by `remove --archive`
 or `cleanup.policy: archive`. Each archive is `<archive_dir>/<id>.bundle`
 or the directory `<archive_dir>/<id>/`, with `<id>.json` describing it.
@@ -361,14 +361,14 @@ or the directory `<archive_dir>/<id>/`, with `<id>.json` describing it.
 | `restore <id> [--to path] [--base path]` | Put an archive back where it was (or `--to`). An archived clone is moved back and dropped from the catalog; a bundle is rebuilt into a clone -- branches, tags, remotes, HEAD, stash list, index, working tree, untracked files, LFS objects, submodules' archives -- and stays in the catalog. A bundle that leans on a base is restored into a clone of it (`--base` names another, such as a restored archive of that repo), or of origin when it is gone. A repo's archive is then tracked by hand (`adopt`), so it is never judged stale again; a workspace copy's is not tracked. Refuses an occupied destination and -- without `--to` -- a repo tracked again meanwhile; with `--to` such a repo's archive is restored untracked. |
 | `rm <id>... [--yes]` | Delete archives for good -- bundle or clone, description, LFS objects, submodules' archives -- and drop them from the catalog. Only files named for the archive, beside it, are deleted. Asks first; without a terminal, needs `--yes`. |
 
-#### `git-mgr accounts ls|gitconfig`
+#### `gitten accounts ls|gitconfig`
 
 | Subcommand | Description |
 |---|---|
 | `ls` | Each account: hosts and owners, email, SSH key, signing mode, and its folders (`reconcile.AccountFolders`: per host and owner, the base_dir-joined leading part of the path template that doesn't depend on the repo name, or for a host-wide account the owner; none under a template starting with one). |
-| `gitconfig [--write] [--install]` | Prints, or with `--write` writes, `$XDG_CONFIG_HOME/git-mgr/accounts/<name>-<digest>.gitconfig` (`pathutil.FileName` of the name plus 8 hex digits of its SHA-256, so names that map to one file name -- or differ only in case -- get distinct files; a clash anyway is refused; the account's `reconcile.AccountGitConfig`: identity, signing, `core.sshCommand`) and `$XDG_CONFIG_HOME/git-mgr/accounts.gitconfig` with an `[includeIf "gitdir:<folder>/"] path = <file>` per folder, shallower folders first, `*?[\` in the folder backslash-escaped. Both are written by `git config --file` and read back with `git config --list -z`, which must give exactly the entries meant, before anything is written. Folders two accounts claim are left out with a warning; accounts setting nothing or with no folders are skipped with the reason. `--install` also runs `git config --global --add include.path <file>` unless it is already there. |
+| `gitconfig [--write] [--install]` | Prints, or with `--write` writes, `$XDG_CONFIG_HOME/gitten/accounts/<name>-<digest>.gitconfig` (`pathutil.FileName` of the name plus 8 hex digits of its SHA-256, so names that map to one file name -- or differ only in case -- get distinct files; a clash anyway is refused; the account's `reconcile.AccountGitConfig`: identity, signing, `core.sshCommand`) and `$XDG_CONFIG_HOME/gitten/accounts.gitconfig` with an `[includeIf "gitdir:<folder>/"] path = <file>` per folder, shallower folders first, `*?[\` in the folder backslash-escaped. Both are written by `git config --file` and read back with `git config --list -z`, which must give exactly the entries meant, before anything is written. Folders two accounts claim are left out with a warning; accounts setting nothing or with no folders are skipped with the reason. `--install` also runs `git config --global --add include.path <file>` unless it is already there. |
 
-#### `git-mgr mirror [--repos g] [--tag t] [--set s] [--force]`
+#### `gitten mirror [--repos g] [--tag t] [--set s] [--force]`
 
 Make or update the mirrors that are due -- of each selected repo mirroring
 is on for, not stale, last updated more than `mirror.interval` ago or failing
@@ -380,14 +380,14 @@ in a staging directory, renamed into place; present, it must have
 recorded URL as origin, and fetches `origin` (`+refs/*:refs/*`, with
 `--no-prune --no-prune-tags`, overriding `fetch.prune` and the like). A ref
 the fetch moved to a commit that doesn't descend from its old tip (a
-force-push) keeps that tip as `refs/git-mgr-rewritten/<UTC time>/<ref>`, and
+force-push) keeps that tip as `refs/gitten-rewritten/<UTC time>/<ref>`, and
 such refs older than `mirror.keep_rewritten` are deleted; with `lfs`,
 `git lfs fetch --all origin`. Each within
 `sync.clone_timeout`, with the repo's SSH key over SSH. Records `mirror_path`,
 `last_mirror`, or `last_mirror_error`. `sync` runs the same after its
 fetches unless `--no-fetch`. Mirrors are never deleted.
 
-#### `git-mgr remote-sync [flags]`
+#### `gitten remote-sync [flags]`
 
 Back up each selected working copy and take it offsite now, under the
 `remote_sync` policy it resolves to (enabled or not); with no selection,
@@ -404,12 +404,12 @@ workspace copies too.
 Algorithm, per copy (`gitops.PlanOffsite`/`PushOffsite`):
 
 ```
-namespace = render(remote_sync.namespace, Machine, Copy)   # refs/git-mgr/<machine>/<copy>
+namespace = render(remote_sync.namespace, Machine, Copy)   # refs/gitten/<machine>/<copy>
 last      = state's offsite record (reset if remote or namespace changed)
 latest    = this run's backup (snapshot commit, backup ID); unknown if none ran
 wip: ref     push +<snapshot>:<ns>/wip/<id> unless already pushed;
              delete <ns>/wip/<older id> past keep (never the current one)
-wip: branch  push +<commit of W's tree on HEAD>:refs/heads/git-mgr/wip/<machine>/<copy>;
+wip: branch  push +<commit of W's tree on HEAD>:refs/heads/gitten/wip/<machine>/<copy>;
              delete it when the copy is clean
 unpushed     branches with commits no refs/remotes/* reach (a linked worktree:
              only its own branch; a detached HEAD as "HEAD")
@@ -429,7 +429,7 @@ A dry run plans from the latest backup and the backups of submodules it
 names. `--list` lists each repo's refs and, under `submodules`, each
 checked-out submodule's on its own remote.
 
-#### `git-mgr config [flags]`
+#### `gitten config [flags]`
 
 Print resolved configuration.
 
@@ -439,7 +439,7 @@ Print resolved configuration.
 | `--validate` | Validate config and exit |
 | `--path` | Print config file path |
 
-#### `git-mgr cd|path|open <query>`
+#### `gitten cd|path|open <query>`
 
 Find a tracked repo, workspace, agent's folder or copy from part of its name
 (`internal/jump`). Each candidate is matched by key, `owner/name`, name and
@@ -452,26 +452,26 @@ listed with exit 1. `path` prints the folder; `cd` does too, unless the
 else `$VISUAL`, else `$EDITOR`, with the path as its last argument, in that
 folder, and `open --web` opens the repo's page on its host.
 
-#### `git-mgr shell-init bash|zsh|fish`
+#### `gitten shell-init bash|zsh|fish`
 
-Print the shell integration, which the startup file evaluates (`eval "$(git-mgr
-shell-init zsh)"`; fish: `git-mgr shell-init fish | source`): a `git-mgr`
-function that runs `cd` as `cd "$(command git-mgr path ...)"` and hands
+Print the shell integration, which the startup file evaluates (`eval "$(gitten
+shell-init zsh)"`; fish: `gitten shell-init fish | source`): a `gitten`
+function that runs `cd` as `cd "$(command gitten path ...)"` and hands
 everything else to the binary, and tab completion -- `complete -o default -C
-<this binary> git-mgr` (zsh: through `bashcompinit`, loading `compinit` first
-when `compdef` isn't defined; fish: a `complete -c git-mgr` function setting
+<this binary> gitten` (zsh: through `bashcompinit`, loading `compinit` first
+when `compdef` isn't defined; fish: a `complete -c gitten` function setting
 `COMP_LINE`). The binary answers completion requests (`COMP_LINE` set)
 through kongplete's predictors: repo keys, tags, sets, workspaces, fleets,
 jump targets. `install-completions` prints the completion part alone, for
 the login shell kongplete detects.
 
-#### `git-mgr version`
+#### `gitten version`
 
 Print version, commit, build date.
 
 ```
-$ git-mgr version
-git-mgr v1.42 (abc1234, built 2026-04-17)
+$ gitten version
+gitten v1.42 (abc1234, built 2026-04-17)
 ```
 
 ### Operate layer
@@ -505,7 +505,7 @@ the repo's `base_dir`, and replaces `path_template` for it. After a hand
 addition is applied (`addByHand`: clone, adopt, manifest import), the repo's
 entry is upserted -- URL, user tags, `config.PortablePath` of its path
 (`""` when templated) -- and `remove` drops the entries of what it untracked.
-Writes hold an flock (30s wait) on a lock file in git-mgr's cache directory (`$XDG_CACHE_HOME/git-mgr/locks/manifest-<hash of its path>.lock`), never beside the manifest, and replace the file
+Writes hold an flock (30s wait) on a lock file in gitten's cache directory (`$XDG_CACHE_HOME/gitten/locks/manifest-<hash of its path>.lock`), never beside the manifest, and replace the file
 through a synced temp file and rename. Entries match by repo key, so a URL's
 transport may differ. Config itself is never written, with one exception:
 without `manifest:`, `manifest import` keeps an entry's `account` or
@@ -524,13 +524,13 @@ entries.
 
 ## Configuration
 
-**File**: `$XDG_CONFIG_HOME/git-mgr/config.yaml`, else `~/.config/git-mgr/config.yaml` (overridable with `--config` or `GIT_MGR_CONFIG`). State, the operation log, backups, archives and mirrors default to `$XDG_DATA_HOME/git-mgr`, else `~/.local/share/git-mgr`; workspace caches to `$XDG_CACHE_HOME/git-mgr`, else `~/.cache/git-mgr`.
+**File**: `$XDG_CONFIG_HOME/gitten/config.yaml`, else `~/.config/gitten/config.yaml` (overridable with `--config` or `GITTEN_CONFIG`). State, the operation log, backups, archives and mirrors default to `$XDG_DATA_HOME/gitten`, else `~/.local/share/gitten`; workspace caches to `$XDG_CACHE_HOME/gitten`, else `~/.cache/gitten`.
 
-**Loading precedence** (koanf, highest wins): CLI flags -> env vars (`GIT_MGR_*`) -> config file -> defaults.
+**Loading precedence** (koanf, highest wins): CLI flags -> env vars (`GITTEN_*`) -> config file -> defaults.
 
 ```yaml
 # ============================================================================
-# git-mgr configuration
+# gitten configuration
 # ============================================================================
 
 # Accounts: one identity on one or more hosts. Its ssh_key and git identity are
@@ -556,7 +556,7 @@ base_dir: "~/repos"
 path_template: "{{.Host}}/{{.Owner}}/{{.Name}}"
 
 # Git transport for clone/fetch: "ssh" (default, uses SSH agent/keys) or "https"
-# (auth via git's own credential helper; git-mgr stores no credentials).
+# (auth via git's own credential helper; gitten stores no credentials).
 # Overridable per repo set under `overrides:`.
 clone_protocol: "ssh"
 
@@ -606,7 +606,7 @@ workspace_defaults:
     post_create: []          # after the repo's post_create; a workspace's own replaces it
   ports: {base: 41000, count: 10}   # each agent's block; base 0 = none; workspaces[].ports overrides
   env: {}                    # templates of AgentVars; a workspace's env adds to it, name by name
-  cache_root: ""             # "" = $XDG_CACHE_HOME/git-mgr/workspaces; <cache_root>/<workspace> is shared
+  cache_root: ""             # "" = $XDG_CACHE_HOME/gitten/workspaces; <cache_root>/<workspace> is shared
 
 workspaces:
   - name: app
@@ -661,7 +661,7 @@ providers:
 # ============================================================================
 
 # Each rule discovers repos from a named provider instance.
-# Repos matching ANY rule are included. All rules run during `git-mgr discover`.
+# Repos matching ANY rule are included. All rules run during `gitten discover`.
 discovery:
   - name: "my-github"
     provider: "github.com"        # References a provider by name from above
@@ -754,8 +754,8 @@ overrides:
 # ============================================================================
 
 sync:
-  # Run discovery before sync (auto-clone new repos). When true, `git-mgr sync`
-  # also runs the equivalent of `git-mgr discover --apply` before fetching.
+  # Run discovery before sync (auto-clone new repos). When true, `gitten sync`
+  # also runs the equivalent of `gitten discover --apply` before fetching.
   auto_discover: true
 
   # Minimum time between fetches for the same repo. Prevents redundant work on
@@ -792,7 +792,7 @@ reconcile:
   # What sync and discover --apply change on their own: "safe" (everything that
   # moves and deletes nothing), "all" (also move repos), "none" (only report).
   auto: "safe"
-  # Values git-mgr set that were changed by hand: "report" or "overwrite".
+  # Values gitten set that were changed by hand: "report" or "overwrite".
   drift: "report"
 
 # ============================================================================
@@ -803,7 +803,7 @@ reconcile:
 # by any discovery rule (deleted upstream, removed from org, etc.).
 cleanup:
   # Policy: "mark_stale" (default), "remove", "archive", "remove_and_delete", "ignore"
-  # - mark_stale: set status to "stale" in state. No disk changes. Visible in `git-mgr status --stale`.
+  # - mark_stale: set status to "stale" in state. No disk changes. Visible in `gitten status --stale`.
   # - remove: remove from state after grace_period. Keep files on disk.
   # - archive: remove from state after grace_period and move the clone, whole,
   #   to backup.archive_dir/<id>/, catalogued; `archives restore` puts it back.
@@ -821,8 +821,8 @@ cleanup:
   # temporary API failures or org permission changes.
   grace_period: "30d"
 
-  # Never judge repos added by hand: `git-mgr clone`, `git-mgr adopt` and
-  # `repos:` entries (rule "_manual"). They stay tracked until `git-mgr remove`.
+  # Never judge repos added by hand: `gitten clone`, `gitten adopt` and
+  # `repos:` entries (rule "_manual"). They stay tracked until `gitten remove`.
   protect_manual: true
 
 # ============================================================================
@@ -834,7 +834,7 @@ backup:
   enabled: true
 
   # Strategy: where each snapshot (index, working tree, untracked files) is kept.
-  # - stash-ref: a stash-format commit at refs/git-mgr/backups/<copy>/<id>.
+  # - stash-ref: a stash-format commit at refs/gitten/backups/<copy>/<id>.
   # - patch: the same snapshot as patches + a tarball under patch_dir; outlives the repo.
   # - both: both (recommended).
   strategy: "both"
@@ -853,12 +853,12 @@ backup:
   max_per_copy: 100
 
   # Directory for patch file storage. Supports ~ expansion.
-  # Default: ~/.local/share/git-mgr/patches/
+  # Default: ~/.local/share/gitten/patches/
   patch_dir: ""
 
-  # Where git-mgr archives unique work (a verified git bundle plus a .json
+  # Where gitten archives unique work (a verified git bundle plus a .json
   # restore note) before deleting a clone or worktree.
-  # Default: ~/.local/share/git-mgr/archive/
+  # Default: ~/.local/share/gitten/archive/
   archive_dir: ""
 
 # ============================================================================
@@ -869,7 +869,7 @@ backup:
 # ({enabled, lfs}), the most specific winning.
 mirror:
   enabled: false
-  dir: ""                         # "" = ~/.local/share/git-mgr/mirrors; <dir>/<key>.git
+  dir: ""                         # "" = ~/.local/share/gitten/mirrors; <dir>/<key>.git
   interval: "24h"                 # sync updates a mirror at most this often (a failing one every sync)
   lfs: false                      # git lfs fetch --all into the mirror
   keep_rewritten: "2160h"         # keep the old tips of rewritten refs; 0 keeps none
@@ -880,7 +880,7 @@ mirror:
 
 remote_sync:
   # Take each working copy offsite during sync: uncommitted work and commits
-  # no remote has, pushed under a hidden namespace the copy owns. `git-mgr
+  # no remote has, pushed under a hidden namespace the copy owns. `gitten
   # remote-sync` does it on demand either way. Any key below can be set per
   # account (accounts[].remote_sync) or per repo (overrides[].remote_sync).
   enabled: false
@@ -894,7 +894,7 @@ remote_sync:
 
   # Uncommitted work: "ref" pushes each new backup to <namespace>/wip/<id>
   # (untracked files and the staged/unstaged split included); "branch" pushes
-  # a visible branch git-mgr/wip/<machine>/<copy> (tracked changes only, on
+  # a visible branch gitten/wip/<machine>/<copy> (tracked changes only, on
   # top of HEAD); "off" pushes none.
   wip: "ref"
 
@@ -906,7 +906,7 @@ remote_sync:
 
   # The hidden ref prefix each copy owns on the remote. Must stay under refs/,
   # outside branches and tags, and include {{.Copy}}.
-  namespace: "refs/git-mgr/{{.Machine}}/{{.Copy}}"
+  namespace: "refs/gitten/{{.Machine}}/{{.Copy}}"
 
   # How long a pushed WIP ref stays; the current one always stays.
   keep: "720h"
@@ -915,7 +915,7 @@ remote_sync:
 # Hooks
 # ============================================================================
 
-# Commands run with /bin/sh -c in a checkout git-mgr just made; also
+# Commands run with /bin/sh -c in a checkout gitten just made; also
 # accounts[].hooks and overrides[].hooks (most specific list wins, [] = none),
 # and workspace_defaults.hooks / workspaces[].hooks for post_create.
 hooks:
@@ -954,16 +954,16 @@ log:
 
   # Log file path. Empty = stderr only. Useful for cron.
   # Logs always go to stderr; this adds a file output in addition.
-  file: ""                        # e.g., "~/.local/share/git-mgr/git-mgr.log"
+  file: ""                        # e.g., "~/.local/share/gitten/gitten.log"
 ```
 
 ---
 
 ## State File
 
-**File**: `~/.local/share/git-mgr/state.yaml` (XDG-compliant, overridable with `--state` or `GIT_MGR_STATE` env var)
+**File**: `~/.local/share/gitten/state.yaml` (XDG-compliant, overridable with `--state` or `GITTEN_STATE` env var)
 
-The state file records what git-mgr applied to each repo and workspace -- what
+The state file records what gitten applied to each repo and workspace -- what
 the reconciler compares with config to turn a config edit into moves, URL and
 git config changes -- and what the last run found, which `status` shows without
 touching any repo. It is one YAML file, read and written atomically under flock.
@@ -974,7 +974,7 @@ small (see [Reconciliation](#reconciliation)).
 
 ```yaml
 # State schema version. Older files are migrated on load; a file newer than the
-# running git-mgr is refused rather than rewritten.
+# running gitten is refused rather than rewritten.
 version: 3
 
 # Last time any sync operation completed.
@@ -987,22 +987,22 @@ machine: mac-1a2b3c
 # never carries a port, whether it came from a provider's URL or a clone's
 # origin, so a repo discovered and the same repo adopted share one key.
 repos:
-  github.com/ashtonian/git-mgr:
-    # --- What git-mgr applied ---
-    clone_url: "git@github.com:ashtonian/git-mgr.git"
+  github.com/ashtonian/gitten:
+    # --- What gitten applied ---
+    clone_url: "git@github.com:ashtonian/gitten.git"
     host: "github.com"
     owner: "your-login"
-    name: "git-mgr"
-    full_name: "ashtonian/git-mgr"
+    name: "gitten"
+    full_name: "ashtonian/gitten"
     provider_id: "4242"            # the host's repo ID; survives renames and transfers
-    copy_id: "8ed3b5a3e9e769c3"    # the working copy's ID (also in .git/git-mgr-copy-id)
-    local_path: "/Users/me/repos/github.com/ashtonian/git-mgr"
+    copy_id: "8ed3b5a3e9e769c3"    # the working copy's ID (also in .git/gitten-copy-id)
+    local_path: "/Users/me/repos/github.com/ashtonian/gitten"
     cloned: true
     discovered_by: "my-github"     # the rule that finds it; absent for one added by hand
     tags: ["personal", "oss"]      # rule tags + user_tags
     user_tags: ["oss"]             # given by hand (clone/adopt --tag, manifest)
     manually_added: false          # added by hand (clone, adopt, manifest import): path and URL are pinned
-    managed_config:                # repo-local keys git-mgr set, and the values it set
+    managed_config:                # repo-local keys gitten set, and the values it set
       core.sshcommand: "ssh -i '/Users/me/.ssh/id_work' -o IdentitiesOnly=yes"
       user.email: "you@acme.com"
     is_archived: false             # for repo sets with exclude_archived
@@ -1013,13 +1013,13 @@ repos:
     current_branch: "feat/backup"
     last_fetch: "2026-04-17T10:30:00Z"
     last_fetch_error: ""
-    mirror_path: "/Volumes/backup/git-mirrors/github.com/ashtonian/git-mgr.git"   # where its mirror is
+    mirror_path: "/Volumes/backup/git-mirrors/github.com/ashtonian/gitten.git"   # where its mirror is
     last_mirror: "2026-10-13T06:00:00Z"
     last_mirror_error: ""
     last_backup: "2026-04-17T10:30:00Z"   # last time the current state was known to be saved
     last_backup_error: ""
     offsite_remote: origin                # what remote_sync last left offsite, so the next push
-    offsite_namespace: refs/git-mgr/mac-1a2b3c/8ed3b5a3e9e769c3   # sends only what changed and
+    offsite_namespace: refs/gitten/mac-1a2b3c/8ed3b5a3e9e769c3   # sends only what changed and
     offsite_wip: ["20260417T103000.000Z"]                         # deletes only refs it made
     offsite_heads: {feat/backup: 0123abcd...}
     last_offsite: "2026-04-17T10:30:00Z"
@@ -1027,7 +1027,7 @@ repos:
     offsite_submodules:                   # the same, for each checked-out submodule, by path
       lib:
         offsite_remote: origin            # the submodule's own origin
-        offsite_namespace: refs/git-mgr/mac-1a2b3c/1f2e3d4c5b6a7980
+        offsite_namespace: refs/gitten/mac-1a2b3c/1f2e3d4c5b6a7980
         offsite_heads: {HEAD: 4567cdef...}   # a commit on its detached HEAD no remote has
 
 # Workspaces. declared: true means config declares it, so removing the
@@ -1046,15 +1046,15 @@ workspaces:
       - agent: agent-1
         path: "/Users/me/workspaces/app/agent-1"
         copies:                  # one per repo; the replica itself when there is one repo
-          - repo: github.com/ashtonian/git-mgr   # the tracked repo it is made from; "" if untracked
+          - repo: github.com/ashtonian/gitten   # the tracked repo it is made from; "" if untracked
             path: "/Users/me/workspaces/app/agent-1"
             branch: agents/app/agent-1
             copy_id: "1f2e3d4c5b6a7980"
             pending: false       # recorded before it was made and not made yet (a workspace made from flags records its copies first); doesn't keep its repo from being removed
-            url: ""              # a clone's origin, as git-mgr set it
+            url: ""              # a clone's origin, as gitten set it
             managed_config: {}   # a clone's managed git config
             published: 2026-10-12T17:00:00Z    # when ws publish last pushed the branch
-            pr: https://github.com/ashtonian/git-mgr/pull/42
+            pr: https://github.com/ashtonian/gitten/pull/42
             last_backup: 2026-10-12T14:00:00Z   # backup and offsite status, as for repos
         retiring: ""             # when a retire began; set until it finishes
         port: 41000              # the agent's block of ports, given on first need, kept for the replica's life
@@ -1080,16 +1080,16 @@ fleets:
 # work, and whole clones (clone: true; path is the clone's directory).
 archives:
   - id: github.com_acme_old-lib-20261013T060000.000000000Z
-    path: /Users/me/.local/share/git-mgr/archive/github.com_acme_old-lib-20261013T060000.000000000Z
+    path: /Users/me/.local/share/gitten/archive/github.com_acme_old-lib-20261013T060000.000000000Z
     clone: true
     repo: github.com/acme/old-lib
     source: /Users/me/repos/github.com/acme/old-lib
     branch: main
     work: the whole clone, with 1 unpushed commit
     created: 2026-10-13T06:00:00Z
-  - id: app-agent-3-git-mgr-20261012T170000.000000000Z
-    path: /Users/me/.local/share/git-mgr/archive/app-agent-3-git-mgr-20261012T170000.000000000Z.bundle
-    repo: github.com/ashtonian/git-mgr
+  - id: app-agent-3-gitten-20261012T170000.000000000Z
+    path: /Users/me/.local/share/gitten/archive/app-agent-3-gitten-20261012T170000.000000000Z.bundle
+    repo: github.com/ashtonian/gitten
     workspace: app
     agent: agent-3
     source: /Users/me/workspaces/app/agent-3
@@ -1099,8 +1099,8 @@ archives:
 
 # Copies retired, newest last (the newest 500 are kept).
 tombstones:
-  - {workspace: app, agent: agent-3, repo: github.com/ashtonian/git-mgr, path: /Users/me/workspaces/app/agent-3,
-     branch: agents/app/agent-3, pr: "", retired: 2026-10-12T17:00:00Z, archive: app-agent-3-git-mgr-20261012T170000.000000000Z}
+  - {workspace: app, agent: agent-3, repo: github.com/ashtonian/gitten, path: /Users/me/workspaces/app/agent-3,
+     branch: agents/app/agent-3, pr: "", retired: 2026-10-12T17:00:00Z, archive: app-agent-3-gitten-20261012T170000.000000000Z}
 
 # Background syncs `install-agent` installed, so doctor can check them and
 # --uninstall can remove them by name.
@@ -1109,11 +1109,11 @@ schedules:
     name: work
     kind: launchd
     interval: 5m0s
-    bin: /opt/homebrew/bin/git-mgr
-    global: [--config, /Users/me/.config/git-mgr/config.yaml, --state, /Users/me/.local/share/git-mgr/state.yaml]
+    bin: /opt/homebrew/bin/gitten
+    global: [--config, /Users/me/.config/gitten/config.yaml, --state, /Users/me/.local/share/gitten/state.yaml]
     sync: [--tag, work]
     env: {PATH: "/opt/homebrew/bin:/usr/bin:/bin"}
-    log_path: /Users/me/.local/share/git-mgr/git-mgr.log
+    log_path: /Users/me/.local/share/gitten/gitten.log
     installed: 2026-10-12T14:00:00Z
 ```
 
@@ -1129,13 +1129,13 @@ run compares, for every repo and workspace:
   overrides), origin URL (`clone_protocol`), SSH key (override, `repos:` entry,
   rule, provider), tags (rule tags ∪ `user_tags`), rule, provider ID, managed
   git config; `workspace.Desired` derives each workspace's replicas and copies;
-- **recorded** -- what git-mgr set, from state;
+- **recorded** -- what gitten set, from state;
 - **on disk** -- `reconcile.Observe`: whether the path exists and is a repo,
   and with one `git config --local --list` its origin and local config, plus its
   copy ID and common git dir.
 
 Desired against recorded gives the plan's actions; on disk against recorded
-gives drift (a value git-mgr set was changed by hand), which is reported and
+gives drift (a value gitten set was changed by hand), which is reported and
 left unless `reconcile.drift: overwrite`.
 
 | Action | Disruptive | Effect |
@@ -1146,13 +1146,13 @@ left unless `reconcile.drift: overwrite`.
 | `url` | no | `git remote set-url origin`. |
 | `config`, `copy-config` | no | Set or unset a managed key (`core.sshcommand`, `user.name`, `user.email`, the signing keys) in a repo or workspace clone, or start/stop managing one already set to the wanted value. |
 | `tags` | no | Update tags and discovering rule in state. |
-| `move` | yes | Rename the directory (same filesystem only), remove now-empty parents below `base_dir`, then reconnect what was made from it: `git worktree repair`, and each workspace clone's `git-mgr` remote and alternates. A move already done by hand or before an interruption is just recorded. |
+| `move` | yes | Rename the directory (same filesystem only), remove now-empty parents below `base_dir`, then reconnect what was made from it: `git worktree repair`, and each workspace clone's `gitten` remote and alternates. A move already done by hand or before an interruption is just recorded. |
 | `create-workspace` | no | Record a declared workspace (and, shared, its agents). |
 | `create-copy` | no | Make an agent's copy from the repo's clone (worktree, local clone or `--shared` clone), write a clone's managed config, record it with its copy ID; or record one already there. |
 | `copy` | no | Record which tracked repo a copy is of (a copy migrated or adopted without one). |
 | `move-copy` | yes | `git worktree move`, or a rename for a clone. |
 | `remove-copy`, `remove-workspace` | yes | Archive unique work to `backup.archive_dir`, then remove; a copy that can't be archived is kept. |
-| `forget-copy`, `copy-url`, `copy-source`, `workspace` | no | Drop a copy gone from disk; a clone's origin URL; a clone's `git-mgr` remote after its repo moved; a workspace's own settings. |
+| `forget-copy`, `copy-url`, `copy-source`, `workspace` | no | Drop a copy gone from disk; a clone's origin URL; a clone's `gitten` remote after its repo moved; a workspace's own settings. |
 
 Repos added by hand are pinned: their path and URL are the recorded ones. A
 repo whose rule failed, or that a filtered run didn't cover, is not judged.
@@ -1189,9 +1189,9 @@ workspace actions. `apply` applies everything.
 ### State File Locking
 
 ```
-State lock:    <state_file>.lock       (e.g. ~/.local/share/git-mgr/state.yaml.lock)
+State lock:    <state_file>.lock       (e.g. ~/.local/share/gitten/state.yaml.lock)
 Sync run lock: <state_file>.sync.lock
-Repo lock:     <repo's git common dir>/git-mgr.lock, shared or exclusive
+Repo lock:     <repo's git common dir>/gitten.lock, shared or exclusive
 Mechanism:     flock(fd, LOCK_EX | LOCK_NB), retried every 100ms (repo lock: 50ms)
 ```
 
@@ -1249,7 +1249,7 @@ branches or stash list changes.
 The snapshot is stored in up to two forms, chosen by `backup.strategy`:
 
 1. **Snapshot ref** (`stash-ref`, `both`) -- a commit in the layout `git stash`
-   uses, kept at `refs/git-mgr/backups/<copy-id>/<backup-id>`.
+   uses, kept at `refs/gitten/backups/<copy-id>/<backup-id>`.
 2. **Patch backup** (`patch`, `both`) -- the same snapshot exported to files in
    `<patch_dir>/<copy-id>/<backup-id>/`, which outlive the repository.
 
@@ -1257,7 +1257,7 @@ The snapshot is stored in up to two forms, chosen by `backup.strategy`:
 
 Every clone and every linked worktree is a **working copy** with its own copy
 ID: 16 hex characters stored in the copy's private git directory
-(`.git/git-mgr-copy-id`, or `.git/worktrees/<name>/git-mgr-copy-id`). Linked
+(`.git/gitten-copy-id`, or `.git/worktrees/<name>/gitten-copy-id`). Linked
 worktrees share one ref namespace, so the copy ID keeps their backups, and their
 retention, apart. The ID moves with the copy (`git worktree move`, `mv` of a
 clone).
@@ -1269,7 +1269,7 @@ up first, with its own copy ID, refs (in its own git dir) and patch folder.
 The parent's backup records the submodules' backups that go with it, as
 `{<path>: {copy_id, id}}`: in `metadata.json` (`submodules`) for a patch
 backup, and for a snapshot ref in a blob at
-`refs/git-mgr/backup-submodules/<copy-id>/<backup-id>`, written before the
+`refs/gitten/backup-submodules/<copy-id>/<backup-id>`, written before the
 snapshot ref and pruned with it. A dirty submodule makes its parent's backup
 dirty even when the parent has no work of its own, and a changed submodule
 backup makes a new parent backup. A submodule's backups aren't pruned by their
@@ -1302,7 +1302,7 @@ parent records first), found by its recorded copy ID. Untracked paths a submodul
 
 `git stash apply --index W` restores the staged and unstaged changes and the
 untracked files exactly. Snapshot commits carry a fixed identity
-(`git-mgr <git-mgr@localhost>`), are never signed, and are dated with B's commit
+(`gitten <gitten@localhost>`), are never signed, and are dated with B's commit
 date, so an unchanged state always produces the same W. A backup whose W equals
 the copy's latest backup is not saved again (outcome `unchanged`).
 
@@ -1328,7 +1328,7 @@ func Backup(copy, cfg) (result, error):
         return unchanged(latest.ID)
 
     id = UTC time "20060102T150405.000Z", later than the latest ID
-    stash-ref: update-ref refs/git-mgr/backups/<copyID>/<id> W "" (create only)
+    stash-ref: update-ref refs/gitten/backups/<copyID>/<id> W "" (create only)
     patch:     build <patch_dir>/<copyID>/<id>.partial/, rename to <id>/
     prune each form that just succeeded, by retention
     any requested form that failed -> error (the result still names what was saved)
@@ -1337,7 +1337,7 @@ func Backup(copy, cfg) (result, error):
 ### Patch backup layout
 
 ```
-~/.local/share/git-mgr/patches/
+~/.local/share/gitten/patches/
 └── 8ed3b5a3e9e769c3/                  # copy ID
     ├── copy.json                      # copy ID, path, remotes
     ├── 20261012T155117.905Z/
@@ -1603,7 +1603,7 @@ func IsLocked(repoPath string) (bool, string) {
 func Sync(ctx context.Context, cfg *config.Config, state *state.State, opts SyncOptions) (*SyncResult, error) {
     lock, err := acquireLock(cfg.StateFile + ".lock")
     if err != nil {
-        return nil, fmt.Errorf("another git-mgr instance is running")
+        return nil, fmt.Errorf("another gitten instance is running")
     }
     defer lock.Release()
 
@@ -1698,7 +1698,7 @@ func PushBackupRefs(ctx context.Context, repoPath, remoteName, sshKeyPath string
     if err != nil {
         return fmt.Errorf("remote %q not found", remoteName)
     }
-    refspec := "refs/git-mgr/*:refs/git-mgr/*"
+    refspec := "refs/gitten/*:refs/gitten/*"
     _, err = gitops.GitWithSSHKey(ctx, repoPath, sshKeyPath, "push", remoteName, refspec)
     return err
 }
@@ -1714,8 +1714,8 @@ func PushBackupRefs(ctx context.Context, repoPath, remoteName, sshKeyPath string
 type RepoData struct {
     Host     string // "github.com", "ghes.company.com"
     Owner    string // "your-login"
-    Name     string // "git-mgr"
-    FullName string // "ashtonian/git-mgr"
+    Name     string // "gitten"
+    FullName string // "ashtonian/gitten"
 }
 
 func Resolve(tmpl string, data RepoData) (string, error) {
@@ -1740,7 +1740,7 @@ func Resolve(tmpl string, data RepoData) (string, error) {
 ## Project Structure
 
 ```
-git-mgr/
+gitten/
 ├── main.go                 # entry point: signal handling, kong wiring
 ├── config.example.yaml     # annotated reference config (loaded by a test)
 ├── e2e/                    # end-to-end tests: Forgejo in Docker, plus local ones
@@ -1783,8 +1783,8 @@ gitlab.com/gitlab-org/api/client-go        # GitLab
 
 # Terminal
 charm.land/huh/v2                          # setup wizard and pickers
-charm.land/bubbletea/v2                    # git-mgr top
-charm.land/lipgloss/v2                     # git-mgr top's styling
+charm.land/bubbletea/v2                    # gitten top
+charm.land/lipgloss/v2                     # gitten top's styling
 golang.org/x/term                          # is this a terminal, and how wide
 
 # Concurrency and the OS
@@ -1836,12 +1836,12 @@ ARG VERSION=dev
 ARG COMMIT=none
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build \
     -ldflags="-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    -o git-mgr .
+    -o gitten .
 
 FROM alpine:3.21
 RUN apk add --no-cache git openssh-client
-COPY --from=builder /app/git-mgr /usr/local/bin/git-mgr
-ENTRYPOINT ["git-mgr"]
+COPY --from=builder /app/gitten /usr/local/bin/gitten
+ENTRYPOINT ["gitten"]
 ```
 
 Key: Alpine final image includes `git` and `openssh-client` (required for SSH clone/fetch).
@@ -1902,8 +1902,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
-            ashtonian/git-mgr:latest
-            ashtonian/git-mgr:${{ steps.version.outputs.version }}
+            ashtonian/gitten:latest
+            ashtonian/gitten:${{ steps.version.outputs.version }}
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
             COMMIT=${{ github.sha }}
@@ -1922,7 +1922,7 @@ jobs:
 ## Cron Integration
 
 ```cron
-*/15 * * * * /usr/local/bin/git-mgr sync --quiet 2>> ~/.local/share/git-mgr/git-mgr.log
+*/15 * * * * /usr/local/bin/gitten sync --quiet 2>> ~/.local/share/gitten/gitten.log
 ```
 
 The tool is cron-safe because:
@@ -1949,7 +1949,7 @@ The tool is cron-safe because:
 | 1 | The command failed: bad config, unreadable state, every target failed, or it has no `--json` output or needs `--yes`. |
 | 2 | A check ran and found problems: `doctor`, `ws check`. |
 | 3 | Partial failure: some repos, copies or changes failed and the rest succeeded. Each failure is printed to stderr. |
-| 75 | Another git-mgr run holds the state lock or a repo's lock, and every target failed for that reason alone; try again (EX_TEMPFAIL). Commands aggregating targets keep each failure's error (`outcomeOf`): some busy and the rest done is 3, some busy and the rest failed otherwise is 1. |
+| 75 | Another gitten run holds the state lock or a repo's lock, and every target failed for that reason alone; try again (EX_TEMPFAIL). Commands aggregating targets keep each failure's error (`outcomeOf`): some busy and the rest done is 3, some busy and the rest failed otherwise is 1. |
 | 80 | Usage error: unknown command or flag. |
 
    `--json` (global) prints one document on stdout: `main` keeps the real
@@ -2014,13 +2014,13 @@ refs and terminal session names.
   branch, else tracking origin's branch of that name, else a new branch at
   `base_ref` (default `origin/HEAD`, else `HEAD`).
 - **clone** — staged like any clone: `git clone --local --no-checkout --origin
-  git-mgr <source>` (objects hardlinked; git copies them across filesystems),
+  gitten <source>` (objects hardlinked; git copies them across filesystems),
   `origin` added as the upstream URL, origin's refs fetched from the source with
   the refspec on the command line (`+refs/remotes/origin/*:refs/remotes/origin/*`;
   as a remote's refspec it would make git refuse to track origin's branches),
   `origin/HEAD` copied, the branch checked out as for a worktree, and the
-  source's checked-out branch dropped. The `git-mgr` remote keeps git's default
-  refspec, showing the source's branches as `git-mgr/*`.
+  source's checked-out branch dropped. The `gitten` remote keeps git's default
+  refspec, showing the source's branches as `gitten/*`.
 - **reference-clone** — the same with `--shared` (alternates); the source gets
   `gc.pruneExpire=never` first.
 - **shared** — no copies; agents work in `path`, or the one repo's clone.
@@ -2031,8 +2031,8 @@ A new copy's `post_create` hooks -- the repo's (`hooks`, `accounts[].hooks`,
 made and its managed config written, as do a new clone's `post_clone` hooks
 in the clone action (never on adopt). Each command: `/bin/sh -c` in the
 checkout, stdin empty, its own session (no terminal), git's batch
-environment plus `GIT_MGR_EVENT`, `GIT_MGR_PATH`, `GIT_MGR_REPO`,
-`GIT_MGR_SOURCE`, `GIT_MGR_WORKSPACE`, `GIT_MGR_AGENT`, `GIT_MGR_BRANCH`,
+environment plus `GITTEN_EVENT`, `GITTEN_PATH`, `GITTEN_REPO`,
+`GITTEN_SOURCE`, `GITTEN_WORKSPACE`, `GITTEN_AGENT`, `GITTEN_BRANCH`,
 killed with its process group at `hooks.timeout`; output replaces
 `<state dir>/hooks/<name>.<event>.log`. The first failure stops the rest and
 returns `hook.Error` (command, log path, last 10 lines); the action still
@@ -2063,7 +2063,7 @@ gets worktrees, and `plan` blocks clones of it: a clone's fetches through it
 fail, since upload-pack refuses lazy fetches. A shallow source is
 cloned through git's local transport (git ignores `--local`). When a source
 moves, the `move` action repairs its worktrees and repoints its clones'
-`git-mgr` remotes and alternates; `ws fetch` and a refresh read the source's
+`gitten` remotes and alternates; `ws fetch` and a refresh read the source's
 path from state, never from the remote.
 
 ### Desired state vs recorded
@@ -2075,7 +2075,7 @@ undeclared), and recorded undeclared ones, kept as they are. It adds an
 then plans workspaces against the state as it will be. Recorded copies match
 wanted ones by agent and repo, or by path for a copy with no repo, judged on
 disk by copy ID, else (worktree) a common git dir equal to the source's, else
-(clone) a `git-mgr` remote at the source or an origin of the repo.
+(clone) a `gitten` remote at the source or an origin of the repo.
 
 ### Health
 
@@ -2098,10 +2098,10 @@ from:
    launcher, terminal session). Held by another run, refuse. The kernel drops
    the lock when the holder exits, so a held lease always means a live run.
 3. Record the run in the replica's `run:` (profile, command, pid, start time,
-   and the terminal: launcher from `GIT_MGR_LAUNCHER`, else tmux, Muxy or iTerm
-   as their variables show; session from `GIT_MGR_SESSION`, else `TMUX_PANE`,
+   and the terminal: launcher from `GITTEN_LAUNCHER`, else tmux, Muxy or iTerm
+   as their variables show; session from `GITTEN_SESSION`, else `TMUX_PANE`,
    `MUXY_SESSION_ID`, `ITERM_SESSION_ID` or `TERM_SESSION_ID`; for tmux the
-   server's socket, from `$TMUX`), so `git-mgr top` can read its activity.
+   server's socket, from `$TMUX`), so `gitten top` can read its activity.
 4. Run `$SHELL -i -c <command>` in the replica, with the profile's `env` and
    then the agent's environment (below). The command is the
    profile's `resume` when the replica has a run on record (unless `--fresh`).
@@ -2119,7 +2119,7 @@ While the agent runs in a tmux pane, a watcher looks at the pane every 2s
 or more of output, then none for `notify.waiting_after`, records `waiting`
 ("its pane has been quiet for 30s") unless a wait is already recorded; output
 again clears it. `ws waiting` -- for agents' own hooks -- takes the workspace
-and agent from `--workspace`/`--agent` or `GIT_MGR_WORKSPACE`/`GIT_MGR_AGENT`
+and agent from `--workspace`/`--agent` or `GITTEN_WORKSPACE`/`GITTEN_AGENT`
 (none: exit 0, silently), the message from `--message`, a JSON argument
 (Codex: `type: agent-turn-complete`, `last-assistant-message`) or JSON on
 stdin, read for at most 2s (Claude Code: `message`, or `hook_event_name:
@@ -2134,14 +2134,14 @@ state of its own, so launchers and plugins that look for `running` see it.
 
 Every command run as an agent -- its run and the shell left after it, `ws
 exec`, `post_create` hooks, `ws env` -- gets `workspace.AgentEnv`:
-`GIT_MGR_WORKSPACE`, `GIT_MGR_AGENT`, `GIT_MGR_AGENT_N` (its place among the
+`GITTEN_WORKSPACE`, `GITTEN_AGENT`, `GITTEN_AGENT_N` (its place among the
 names `agent_name` gives the workspace, else among its agents by name),
-`GIT_MGR_REPLICA`, `GIT_MGR_PORT` and `GIT_MGR_PORTS` when it has ports,
-`GIT_MGR_CACHE`; then the workspace's `env` (workspace_defaults' with the
+`GITTEN_REPLICA`, `GITTEN_PORT` and `GITTEN_PORTS` when it has ports,
+`GITTEN_CACHE`; then the workspace's `env` (workspace_defaults' with the
 workspace's own added name by name) rendered as Go templates of the same
 (`{{add .Port 1}}`), sorted by name. Config validation renders every template
 for a sample agent and rejects names that aren't variable names or start with
-`GIT_MGR_`.
+`GITTEN_`.
 
 Ports: an agent without a block gets one under the state lock -- the lowest
 `count` ports from `base` that overlap no recorded agent's block and that
@@ -2175,9 +2175,9 @@ A fleet (`fleets:`) is workspaces opened side by side with one launcher;
    for its agent's copies before taking the lease, unless `--no-check`.
 3. Builds the launch plan (`launch.Build`): per workspace its directory, and
    per agent its replica, title (`launchers.title`), profile, state, and
-   command: `<git-mgr> --config <c> --state <s> ws run <ws> <agent>
+   command: `<gitten> --config <c> --state <s> ws run <ws> <agent>
    [--profile p | --command c] [--fresh] [--no-check] [--no-shell]`, quoted
-   only where a shell needs it. With `host:`, the plan comes from git-mgr on
+   only where a shell needs it. With `host:`, the plan comes from gitten on
    the host instead: `ssh -o BatchMode=yes <host> <remote_command> fleet plan
    <name> --json [...]`, over a shared ssh connection (ControlMaster) that the
    launcher's later commands reuse.
@@ -2187,12 +2187,12 @@ A fleet (`fleets:`) is workspaces opened side by side with one launcher;
 5. Records the fleet's last open (launcher, time, Muxy projects) under
    `fleets:` in state.
 
-The plan is the plugin protocol: `git-mgr-launch-<name>` on PATH gets it as
+The plan is the plugin protocol: `gitten-launch-<name>` on PATH gets it as
 JSON on stdin, with `options` from `launchers.plugins.<name>`.
 
 | Launcher | Opens | How |
 | --- | --- | --- |
-| tmux | A session per fleet, a window per workspace (or agent), a pane per agent, spilling past `max_panes` into `<ws>-2`… | `new-session`/`new-window`/`split-window -e GIT_MGR_LAUNCHER=tmux -c <replica> <command>`; each pane gets the option `@git-mgr-agent=<ws>/<agent>`, its title (`select-pane -T`, `allow-set-title off`) and `remain-on-exit`. An existing session is attached, filled with the agents it lacks (found by that option), or rebuilt (`on_exists`). Attach replaces git-mgr (`tmux attach`, `-CC` in iTerm under `control_mode: auto`), or switches the client inside tmux; with `host:`, both run through `ssh -t`. |
+| tmux | A session per fleet, a window per workspace (or agent), a pane per agent, spilling past `max_panes` into `<ws>-2`… | `new-session`/`new-window`/`split-window -e GITTEN_LAUNCHER=tmux -c <replica> <command>`; each pane gets the option `@gitten-agent=<ws>/<agent>`, its title (`select-pane -T`, `allow-set-title off`) and `remain-on-exit`. An existing session is attached, filled with the agents it lacks (found by that option), or rebuilt (`on_exists`). Attach replaces gitten (`tmux attach`, `-CC` in iTerm under `control_mode: auto`), or switches the client inside tmux; with `host:`, both run through `ssh -t`. |
 | iTerm | A window, a tab per workspace (or agent), a split per agent | One AppleScript through `osascript`: create the window (or a tab in the current one), split each tab in √n columns read left to right (or `columns`/`rows`), name each session, wait `type_delay`, write the badge escape (`OSC 1337 SetBadgeFormat`) and the command, through `ssh -t <host>` for a remote fleet. |
 | Muxy | A project per workspace, a tab per agent | `muxy [--host h] project add <dir> --name <n> --reuse --json`, `project set-color`, then by `open`: `layout` writes `.muxy/layouts/<name>.json` (`{"tabs": [{"name", "command"}]}`) through `muxy exec`; `sessions` runs `session create <project> --directory <replica> -- <command>` for each agent not running; `state` waits for the app to list the projects, quits it (asking under `restart: ask`), adds tabs to projects with none in `~/Library/Application Support/Muxy 2/desktop-state.json` (format 3 only; each pane's command in `startup_commands`), saves the old file beside it, relaunches the app and waits for the sessions. `prune_projects` deletes the projects recorded for workspaces no longer in the fleet. |
 | plugin | Whatever it does | The plan on stdin; its exit status is the launch's. |
@@ -2224,7 +2224,7 @@ recorded as the copy's `pr`.
 `workspace.Retire` is the one way a copy is deleted -- `ws retire`, `ws rm
 --delete`, `ws prune`, `remove-copy` and `remove-workspace` on apply:
 
-1. Take the agent's lease (`git-mgr retire` as its holder), so no `ws run`
+1. Take the agent's lease (`gitten retire` as its holder), so no `ws run`
    starts. Held by a run: with `--stop`, `agent.Stop` it and take the lease;
    otherwise keep every copy.
 2. Per copy, `RemoveCopy`: `gitops.InspectUniqueWork` (working tree, index,
@@ -2264,6 +2264,6 @@ made again.
   untracked or deleted (`remove`, stale cleanup) until they are gone.
 - Every archive -- of a retired copy, of a repo `remove --delete` or stale
   cleanup deleted, or of a clone `remove --archive` or `cleanup.policy:
-  archive` moved whole -- is catalogued under `archives:` in state; `git-mgr
+  archive` moved whole -- is catalogued under `archives:` in state; `gitten
   archives ls|show` lists them and prints their restore steps, `archives
   restore` moves an archived clone back, `archives rm` deletes archives.

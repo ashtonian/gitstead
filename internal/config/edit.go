@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/ashtonian/git-mgr/internal/pathutil"
+	"github.com/ashtonian/gitten/internal/pathutil"
 )
 
 // Document is a config file edited in place: changes go into its YAML tree,

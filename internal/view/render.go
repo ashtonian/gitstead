@@ -8,7 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/ashtonian/git-mgr/internal/activity"
+	"github.com/ashtonian/gitten/internal/activity"
 )
 
 // RenderOptions shape a rendering.
@@ -55,7 +55,7 @@ func Render(s Snapshot, o RenderOptions) string {
 	if waiting > 0 {
 		agentsLine += fmt.Sprintf(", %d waiting for you", waiting)
 	}
-	line := fmt.Sprintf("git-mgr top  %s  ·  %s, %s  ·  %s, %d need attention",
+	line := fmt.Sprintf("gitten top  %s  ·  %s, %s  ·  %s, %d need attention",
 		s.Taken.Local().Format("15:04:05"), count(len(s.Copies), "copy", "copies"), agentsLine,
 		count(len(s.Repos), "repo", "repos"), attention)
 	if o.Width > 0 {

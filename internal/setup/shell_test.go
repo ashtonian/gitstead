@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitten/internal/config"
 )
 
 func TestDetectShellRC(t *testing.T) {
@@ -100,7 +100,7 @@ func TestShellRC_InstallFollowsALink(t *testing.T) {
 	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("%s is no longer a link: %v", link, err)
 	}
-	if data, _ := os.ReadFile(target); !strings.Contains(string(data), "git-mgr shell-init zsh") {
+	if data, _ := os.ReadFile(target); !strings.Contains(string(data), "gitten shell-init zsh") {
 		t.Errorf("the link's target:\n%s", data)
 	}
 }
@@ -111,7 +111,7 @@ func TestShellRC_InstallMakesTheFile(t *testing.T) {
 	if err := rc.Install(); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(rc.Path); !strings.Contains(string(data), "git-mgr shell-init fish | source") {
+	if data, _ := os.ReadFile(rc.Path); !strings.Contains(string(data), "gitten shell-init fish | source") {
 		t.Errorf("config.fish:\n%s", data)
 	}
 }
@@ -134,7 +134,7 @@ func TestDefaults_BeyondTheConfig(t *testing.T) {
 	}{
 		{name: "a fresh machine", det: Detected{ShellRC: rc, GH: two[:1]}, shell: true, clone: true, schedule: true, interval: "15m"},
 		{name: "shell integrated already", det: Detected{ShellRC: rc, ShellIntegrated: true}, schedule: true, interval: "15m"},
-		{name: "a shell git-mgr doesn't know", det: Detected{}, schedule: true, interval: "15m"},
+		{name: "a shell gitten doesn't know", det: Detected{}, schedule: true, interval: "15m"},
 		{name: "two accounts, one with a key of its own", det: Detected{GH: two, SSHKeys: key}, includes: true, clone: true, schedule: true, interval: "15m"},
 		{name: "two accounts with nothing of their own", det: Detected{GH: two}, clone: true, schedule: true, interval: "15m"},
 		{name: "included already", det: Detected{GitIncludes: true, GH: two[:1]}, includes: true, clone: true, schedule: true, interval: "15m"},

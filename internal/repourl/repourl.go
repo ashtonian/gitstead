@@ -1,5 +1,5 @@
 // Package repourl parses git remote URLs into the host/owner/name identity
-// git-mgr keys repositories by. It is pure: no git, no filesystem.
+// gitten keys repositories by. It is pure: no git, no filesystem.
 package repourl
 
 import (
@@ -14,9 +14,9 @@ import (
 type Identity struct {
 	Host     string // "github.com"
 	Owner    string // "ashtonian"
-	Name     string // "git-mgr"
-	FullName string // "ashtonian/git-mgr"
-	SSHURL   string // canonical "git@github.com:ashtonian/git-mgr.git"
+	Name     string // "gitten"
+	FullName string // "ashtonian/gitten"
+	SSHURL   string // canonical "git@github.com:ashtonian/gitten.git"
 	URL      string // the original input URL, verbatim (preserves scheme/port)
 }
 
@@ -203,7 +203,7 @@ func WithoutCredentials(raw string) string {
 }
 
 // CheckNoCredentials returns an error naming the URL, redacted, when it embeds
-// a credential. git-mgr keeps URLs in state and logs, so it never accepts one.
+// a credential. gitten keeps URLs in state and logs, so it never accepts one.
 func CheckNoCredentials(raw string) error {
 	if HasCredentials(raw) {
 		return fmt.Errorf("%s embeds a credential; remove it from the URL and let git's credential helper supply it", Redact(raw))

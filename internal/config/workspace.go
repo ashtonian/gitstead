@@ -10,7 +10,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitten/internal/repourl"
 )
 
 // Isolation modes: how each agent's copies are made.
@@ -64,7 +64,7 @@ type WorkspaceDefaults struct {
 	// Ports gives each agent a block of ports of its own.
 	Ports PortsConfig `koanf:"ports" yaml:"ports"`
 	// CacheRoot holds a directory per workspace that its agents share for
-	// build caches; empty for $XDG_CACHE_HOME/git-mgr/workspaces.
+	// build caches; empty for $XDG_CACHE_HOME/gitten/workspaces.
 	CacheRoot string `koanf:"cache_root" yaml:"cache_root,omitempty"`
 }
 

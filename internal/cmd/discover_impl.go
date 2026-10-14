@@ -5,8 +5,8 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/ashtonian/git-mgr/internal/discovery"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
+	"github.com/ashtonian/gitten/internal/discovery"
+	"github.com/ashtonian/gitten/internal/reconcile"
 )
 
 func (c *DiscoverCmd) Run(ctx *Context) error {
@@ -100,7 +100,7 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 	}
 
 	if !c.Apply {
-		fmt.Println("\nUse --apply to make the changes that move and delete nothing, or `git-mgr apply` for all of them.")
+		fmt.Println("\nUse --apply to make the changes that move and delete nothing, or `gitten apply` for all of them.")
 		return ctx.finish(doc, nil)
 	}
 	fmt.Printf("State updated: %d repos tracked.\n", len(st.Repos))

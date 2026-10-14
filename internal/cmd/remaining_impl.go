@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/ctxutil"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/shellutil"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/ctxutil"
+	"github.com/ashtonian/gitten/internal/gitops"
+	"github.com/ashtonian/gitten/internal/shellutil"
+	"github.com/ashtonian/gitten/internal/state"
 	"gopkg.in/yaml.v3"
 )
 
@@ -111,7 +111,7 @@ func (c *RemoveCmd) Run(ctx *Context) error {
 				return timedOut(err)
 			}
 			if entry != nil {
-				fmt.Printf("  Moved %s to %s (git-mgr archives restore %s)\n", repo.LocalPath, entry.Path, entry.ID)
+				fmt.Printf("  Moved %s to %s (gitten archives restore %s)\n", repo.LocalPath, entry.Path, entry.ID)
 				archives = append(archives, *entry)
 			}
 		}
@@ -290,7 +290,7 @@ func (c *InitCmd) Run(ctx *Context) error {
 	cfg := config.Defaults()
 
 	// If the gh CLI is logged in, prefill a ready GitHub provider + discovery
-	// rule so `git-mgr discover --apply` works with zero editing -- the
+	// rule so `gitten discover --apply` works with zero editing -- the
 	// zero-setup path for the GitHub + gh majority.
 	detected := ""
 	if !c.NoDetect {
@@ -326,9 +326,9 @@ func (c *InitCmd) Run(ctx *Context) error {
 	fmt.Printf("Config written to %s\n", path)
 	if detected != "" {
 		fmt.Printf("Detected GitHub login %q via gh -- added a ready provider + discovery rule.\n", detected)
-		fmt.Println("Run 'git-mgr discover --apply' to clone your repos (or 'git-mgr bootstrap').")
+		fmt.Println("Run 'gitten discover --apply' to clone your repos (or 'gitten bootstrap').")
 	} else {
-		fmt.Println("Uncomment and edit the provider + discovery stubs, then run 'git-mgr discover'.")
+		fmt.Println("Uncomment and edit the provider + discovery stubs, then run 'gitten discover'.")
 	}
 	return ctx.finish(map[string]string{"path": path, "github_login": detected}, nil)
 }

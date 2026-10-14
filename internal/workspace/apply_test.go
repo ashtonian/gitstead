@@ -9,15 +9,15 @@ import (
 	"testing"
 	"time"
 
-	agents "github.com/ashtonian/git-mgr/internal/agent"
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/discovery"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/hook"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/testenv"
-	"github.com/ashtonian/git-mgr/internal/workspace"
+	agents "github.com/ashtonian/gitten/internal/agent"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/discovery"
+	"github.com/ashtonian/gitten/internal/gitops"
+	"github.com/ashtonian/gitten/internal/hook"
+	"github.com/ashtonian/gitten/internal/reconcile"
+	"github.com/ashtonian/gitten/internal/state"
+	"github.com/ashtonian/gitten/internal/testenv"
+	"github.com/ashtonian/gitten/internal/workspace"
 )
 
 func TestMain(m *testing.M) {
@@ -259,7 +259,7 @@ func TestApply_CloneIsolation(t *testing.T) {
 		t.Errorf("origin = %s", got)
 	}
 	if got := mustGit(t, copyPath, "remote", "get-url", gitops.SourceRemote); got != source {
-		t.Errorf("git-mgr remote = %s, want %s", got, source)
+		t.Errorf("gitten remote = %s, want %s", got, source)
 	}
 	if got := mustGit(t, copyPath, "config", "--local", "user.email"); got != "me@work" {
 		t.Errorf("user.email = %q", got)
@@ -292,11 +292,11 @@ func TestApply_ReferenceCloneFollowsTheRepo(t *testing.T) {
 	w.converge()
 	mustGit(t, copyPath, "log", "--oneline", "-1", "origin/main")
 	if got := mustGit(t, copyPath, "remote", "get-url", gitops.SourceRemote); got != filepath.Join(w.cfg.BaseDir, "app") {
-		t.Errorf("git-mgr remote = %s", got)
+		t.Errorf("gitten remote = %s", got)
 	}
 }
 
-// A workspace naming a local repo git-mgr doesn't track adopts it where it
+// A workspace naming a local repo gitten doesn't track adopts it where it
 // is, and its copies are made from it.
 func TestApply_AdoptsARepoNamedByPath(t *testing.T) {
 	root := t.TempDir()
@@ -456,7 +456,7 @@ func TestPlan_BlocksAnOccupiedPath(t *testing.T) {
 	}
 }
 
-// A workspace naming a URL git-mgr doesn't track clones it where config puts
+// A workspace naming a URL gitten doesn't track clones it where config puts
 // repos, then makes the copies from that clone.
 func TestApply_ClonesARepoNamedByURL(t *testing.T) {
 	root := t.TempDir()
@@ -657,7 +657,7 @@ func TestApply_PostCreateHooks(t *testing.T) {
 	remote := bareRemote(t, root, "app")
 	w := newWorld(t, root)
 	repoHook := []string{`echo repo >> order`}
-	wsHook := []string{`echo workspace >> order`, `cp "$GIT_MGR_SOURCE/.env" .env`}
+	wsHook := []string{`echo workspace >> order`, `cp "$GITTEN_SOURCE/.env" .env`}
 	w.cfg.Repos = []config.ManualRepo{{URL: remote}}
 	w.cfg.Overrides = []config.Override{{Repos: []string{"local/remotes/app"}, Hooks: &config.HooksOverride{PostCreate: &repoHook}}}
 	// The repo's clone is made first; its .env is what agents get.

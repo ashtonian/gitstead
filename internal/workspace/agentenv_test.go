@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitten/internal/state"
 )
 
 func TestAllocatePorts(t *testing.T) {
@@ -60,13 +60,13 @@ func TestAgentEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(env, "\n")
-	for _, want := range []string{"GIT_MGR_AGENT=agent-2", "GIT_MGR_AGENT_N=2", "DB=app_2", "GIT_MGR_REPLICA=/w/app/agent-2", "GIT_MGR_CACHE=" + s.CacheDir} {
+	for _, want := range []string{"GITTEN_AGENT=agent-2", "GITTEN_AGENT_N=2", "DB=app_2", "GITTEN_REPLICA=/w/app/agent-2", "GITTEN_CACHE=" + s.CacheDir} {
 		if !slices.Contains(env, want) {
 			t.Errorf("missing %s in\n%s", want, joined)
 		}
 	}
 	port := st.Workspaces["app"].Replica("agent-2").Port
-	if port < 41000 || !slices.Contains(env, "PORT="+strconv.Itoa(port)) || !slices.Contains(env, "GIT_MGR_PORT="+strconv.Itoa(port)) {
+	if port < 41000 || !slices.Contains(env, "PORT="+strconv.Itoa(port)) || !slices.Contains(env, "GITTEN_PORT="+strconv.Itoa(port)) {
 		t.Errorf("port %d not given or not told:\n%s", port, joined)
 	}
 	if _, err := os.Stat(s.CacheDir); err != nil {
@@ -75,7 +75,7 @@ func TestAgentEnv(t *testing.T) {
 
 	// The agent keeps its block; the next agent gets another.
 	again, _ := AgentEnv(st, update, s, "app", "agent-2")
-	if !slices.Contains(again, "GIT_MGR_PORT="+strconv.Itoa(port)) {
+	if !slices.Contains(again, "GITTEN_PORT="+strconv.Itoa(port)) {
 		t.Errorf("the port changed:\n%s", strings.Join(again, "\n"))
 	}
 	if _, err := AgentEnv(st, update, s, "app", "agent-1"); err != nil {

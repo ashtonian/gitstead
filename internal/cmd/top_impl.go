@@ -10,13 +10,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
 
-	"github.com/ashtonian/git-mgr/internal/activity"
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/view"
+	"github.com/ashtonian/gitten/internal/activity"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/state"
+	"github.com/ashtonian/gitten/internal/view"
 )
 
-// TopCmd is a live view of everything git-mgr manages: each workspace copy
+// TopCmd is a live view of everything gitten manages: each workspace copy
 // with its agent's state and terminal activity, and each repo that needs a
 // look -- dirty, ahead, behind, or failing to fetch or back up.
 type TopCmd struct {
@@ -150,7 +150,7 @@ func (m *topModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *topModel) View() tea.View {
 	v := tea.NewView("")
 	v.AltScreen = true
-	v.WindowTitle = "git-mgr top"
+	v.WindowTitle = "gitten top"
 	if !m.have {
 		v.SetContent("Looking at every repo and workspace…")
 		return v
@@ -160,7 +160,7 @@ func (m *topModel) View() tea.View {
 	room := m.height - 2
 	if room > 0 && len(lines) > room {
 		hidden := len(lines) - room + 1
-		lines = append(lines[:room-1], fmt.Sprintf("… %d more lines; make the window taller, or use git-mgr top --once", hidden))
+		lines = append(lines[:room-1], fmt.Sprintf("… %d more lines; make the window taller, or use gitten top --once", hidden))
 	}
 	toggle := "a show every repo"
 	if m.all {

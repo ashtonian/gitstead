@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/gitten/internal/gitops"
 )
 
 // The whole clone is moved, nested repository and all, and described beside.
@@ -52,7 +52,7 @@ func TestArchiveClone_MovesTheWholeClone(t *testing.T) {
 	if !strings.HasPrefix(meta.Work, "the whole clone, with ") || !strings.Contains(meta.Work, "1 unpushed commit") {
 		t.Errorf("work = %q", meta.Work)
 	}
-	if meta.Remotes["origin"] == "" || !strings.Contains(meta.Restore, "git-mgr archives restore "+id) {
+	if meta.Remotes["origin"] == "" || !strings.Contains(meta.Restore, "gitten archives restore "+id) {
 		t.Errorf("remotes %v, restore %q", meta.Remotes, meta.Restore)
 	}
 }

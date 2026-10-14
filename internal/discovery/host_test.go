@@ -3,7 +3,7 @@ package discovery
 import (
 	"testing"
 
-	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/gitten/internal/repourl"
 )
 
 // A repo's key is the same discovered as adopted from a clone of it, over

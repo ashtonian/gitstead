@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitten/internal/config"
 )
 
 func TestProfiles_DetectedWhenNoneDeclared(t *testing.T) {
@@ -91,7 +91,7 @@ func TestLease(t *testing.T) {
 // TestHelperRun is not a test: run as a subprocess, it holds a lease as
 // `ws run` does, optionally ignoring SIGTERM, and runs a long command.
 func TestHelperRun(t *testing.T) {
-	path := os.Getenv("GIT_MGR_TEST_LEASE")
+	path := os.Getenv("GITTEN_TEST_LEASE")
 	if path == "" {
 		t.Skip("helper process")
 	}
@@ -100,7 +100,7 @@ func TestHelperRun(t *testing.T) {
 		os.Exit(2)
 	}
 	defer l.Release()
-	if os.Getenv("GIT_MGR_TEST_STUBBORN") != "" {
+	if os.Getenv("GITTEN_TEST_STUBBORN") != "" {
 		signal.Ignore(syscall.SIGTERM)
 		time.Sleep(time.Minute)
 	}
@@ -111,9 +111,9 @@ func TestHelperRun(t *testing.T) {
 func startHelper(t *testing.T, path string, stubborn bool) *exec.Cmd {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperRun$")
-	cmd.Env = append(os.Environ(), "GIT_MGR_TEST_LEASE="+path)
+	cmd.Env = append(os.Environ(), "GITTEN_TEST_LEASE="+path)
 	if stubborn {
-		cmd.Env = append(cmd.Env, "GIT_MGR_TEST_STUBBORN=1")
+		cmd.Env = append(cmd.Env, "GITTEN_TEST_STUBBORN=1")
 	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)

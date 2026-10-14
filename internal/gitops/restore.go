@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/shellutil"
+	"github.com/ashtonian/gitten/internal/shellutil"
 )
 
 // Files of a patch backup directory, and the record of the copy it belongs to.
@@ -97,7 +97,7 @@ func (b BackupInfo) RestoreCommands() []string {
 		cmds = append(cmds, "tar -xzkf "+shellutil.Quote(p)+"   # untracked files; -k keeps existing ones")
 	}
 	for _, path := range slices.Sorted(maps.Keys(b.Submodules)) {
-		cmds = append(cmds, fmt.Sprintf("# submodule %s: its own backup %s (copy %s), which git-mgr restore applies too", path, b.Submodules[path].ID, b.Submodules[path].CopyID))
+		cmds = append(cmds, fmt.Sprintf("# submodule %s: its own backup %s (copy %s), which gitten restore applies too", path, b.Submodules[path].ID, b.Submodules[path].CopyID))
 	}
 	return cmds
 }
@@ -453,7 +453,7 @@ func restoreInto(ctx context.Context, repoPath string, b BackupInfo, into string
 func checkoutBase(ctx context.Context, repoPath, base string) error {
 	args := []string{"checkout", "-q", "--detach", base}
 	if base == "" {
-		args = []string{"switch", "-q", "--orphan", "git-mgr-restore"}
+		args = []string{"switch", "-q", "--orphan", "gitten-restore"}
 	}
 	if _, err := Git(ctx, repoPath, args...); err != nil {
 		return fmt.Errorf("checking out the backup's base: %w", err)

@@ -10,7 +10,7 @@ import (
 	"syscall"
 
 	"github.com/alecthomas/kong"
-	"github.com/ashtonian/git-mgr/internal/cmd"
+	"github.com/ashtonian/gitten/internal/cmd"
 	"github.com/willabides/kongplete"
 )
 
@@ -23,8 +23,8 @@ var (
 func main() {
 	cli := &cmd.CLI{}
 	options := []kong.Option{
-		kong.Name("git-mgr"),
-		kong.Description("Discover, clone, sync, and back up git repositories; run agent fleets."),
+		kong.Name("gitten"),
+		kong.Description("Every git repo you work on, cloned, in sync and backed up, across accounts and forges."),
 		kong.UsageOnError(),
 		kong.Vars{
 			"version": fmt.Sprintf("%s (%s, built %s)", version, commit, date),

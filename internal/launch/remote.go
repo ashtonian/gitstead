@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/shellutil"
+	"github.com/ashtonian/gitten/internal/shellutil"
 )
 
 // commandTimeout bounds each command a launcher runs and waits for.
@@ -65,7 +65,7 @@ func sshOptions() []string {
 	return []string{
 		"-o", "BatchMode=yes",
 		"-o", "ControlMaster=auto",
-		"-o", "ControlPath=" + filepath.Join(os.TempDir(), "git-mgr-ssh-%C"),
+		"-o", "ControlPath=" + filepath.Join(os.TempDir(), "gitten-ssh-%C"),
 		"-o", "ControlPersist=60",
 	}
 }
@@ -80,12 +80,12 @@ func remoteLine(name string, args ...string) string {
 	return strings.Join(parts, " ")
 }
 
-// RemotePlan gets a fleet's launch plan from git-mgr on host: the
+// RemotePlan gets a fleet's launch plan from gitten on host: the
 // workspaces live there, so it knows their paths and how to run them.
-// remoteCommand runs git-mgr there, with any flags it needs, as written.
+// remoteCommand runs gitten there, with any flags it needs, as written.
 func RemotePlan(ctx context.Context, host, remoteCommand, fleet string, args ...string) (Plan, error) {
 	if remoteCommand == "" {
-		remoteCommand = "git-mgr"
+		remoteCommand = "gitten"
 	}
 	line := remoteCommand + " " + remoteLine("fleet", append([]string{"plan", fleet, "--json"}, args...)...)
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)

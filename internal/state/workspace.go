@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// WorkspaceState is a workspace git-mgr created: one replica per agent, each
+// WorkspaceState is a workspace gitten created: one replica per agent, each
 // holding the agent's copies of the workspace's repos. Like RepoState, each
 // field's json tag mirrors its yaml tag.
 type WorkspaceState struct {
@@ -74,11 +74,11 @@ type RunState struct {
 // CopyState is one checkout of a repo in a replica.
 type CopyState struct {
 	// Repo is the tracked repo this is a copy of; "" for a copy of a repo
-	// git-mgr doesn't track, such as one adopted with its directory.
+	// gitten doesn't track, such as one adopted with its directory.
 	Repo   string `yaml:"repo,omitempty" json:"repo,omitempty"`
 	Path   string `yaml:"path" json:"path"`
 	Branch string `yaml:"branch,omitempty" json:"branch,omitempty"`
-	// URL is the origin URL git-mgr set in a clone; worktrees share their
+	// URL is the origin URL gitten set in a clone; worktrees share their
 	// repo's.
 	URL    string `yaml:"url,omitempty" json:"url,omitempty"`
 	CopyID string `yaml:"copy_id,omitempty" json:"copy_id,omitempty"`
@@ -91,7 +91,7 @@ type CopyState struct {
 	// or merge request it opened or found.
 	Published time.Time `yaml:"published,omitempty" json:"published,omitzero"`
 	PR        string    `yaml:"pr,omitempty" json:"pr,omitempty"`
-	// ManagedConfig holds the git config keys git-mgr set in a clone, as
+	// ManagedConfig holds the git config keys gitten set in a clone, as
 	// RepoState.ManagedConfig does for a repo. Worktrees share their repo's.
 	ManagedConfig map[string]string `yaml:"managed_config,omitempty" json:"managed_config,omitempty"`
 	BackupStatus  `yaml:",inline"`
@@ -195,7 +195,7 @@ func (s *State) CopiesOf(key string) []string {
 // are made from the tracked repo key.
 func (s *State) CheckRemovable(key string) error {
 	if copies := s.CopiesOf(key); len(copies) > 0 {
-		return fmt.Errorf("%w (%s); remove them first with git-mgr ws rm --delete, or drop the repo from their workspaces", ErrHasCopies, strings.Join(copies, ", "))
+		return fmt.Errorf("%w (%s); remove them first with gitten ws rm --delete, or drop the repo from their workspaces", ErrHasCopies, strings.Join(copies, ", "))
 	}
 	return nil
 }
@@ -220,7 +220,7 @@ func (s *State) RenameRepo(from, to string) {
 	}
 }
 
-// ArchiveEntry is an archive git-mgr made before taking a copy or a repo
+// ArchiveEntry is an archive gitten made before taking a copy or a repo
 // away: a bundle of its unique work, or the whole clone, moved.
 type ArchiveEntry struct {
 	// ID is the archive's file name, without its extension.

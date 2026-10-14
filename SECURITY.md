@@ -3,7 +3,7 @@
 ## Reporting a Vulnerability
 
 Please report security vulnerabilities privately via GitHub's
-[security advisories](https://github.com/ashtonian/git-mgr/security/advisories/new)
+[security advisories](https://github.com/ashtonian/gitten/security/advisories/new)
 rather than opening a public issue.
 
 Include where possible: affected version, reproduction steps, and impact.
@@ -16,7 +16,7 @@ are not maintained — upgrade to the latest release.
 
 ## Security Model
 
-`git-mgr` handles credentials and runs unattended, so a few properties are worth
+`gitten` handles credentials and runs unattended, so a few properties are worth
 calling out:
 
 - **Tokens** come from the one source a provider configures: `token`,
@@ -33,11 +33,11 @@ calling out:
   credentials redacted as a second line of defence.
 - **SSH keys** are referenced by path and passed to `git` via `GIT_SSH_COMMAND`
   with `IdentitiesOnly=yes`, and written into each repo they apply to as
-  `core.sshCommand`. git-mgr never reads key material itself.
+  `core.sshCommand`. gitten never reads key material itself.
 - **git never prompts.** Every git command runs without a terminal, with
   `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never` and
   `SSH_ASKPASS_REQUIRE=never`, so a missing credential fails instead of
-  waiting, and nothing typed is ever collected. When git-mgr passes a key
+  waiting, and nothing typed is ever collected. When gitten passes a key
   itself, ssh runs with `BatchMode=yes` and `StrictHostKeyChecking=accept-new`:
   an unknown host's key is recorded on first use, and a changed one fails the
   connection. Pre-populate `~/.ssh/known_hosts` if first use must be verified
@@ -48,7 +48,7 @@ calling out:
 - **The discover/sync/backup subsystem is read-only** with respect to your
   working tree — it never pulls, merges, or commits. The opt-in workspace
   subsystem does mutate on request.
-- **Backups** of uncommitted work are stored under `refs/git-mgr/backups/*` and
+- **Backups** of uncommitted work are stored under `refs/gitten/backups/*` and
   in the patch directory; treat those as containing potentially sensitive
   source just like the repos themselves.
 - **Offsite copies** (`remote_sync`) push uncommitted work -- untracked files
@@ -57,6 +57,6 @@ calling out:
   fetch them, so an untracked `.env` in a working copy reaches everyone with
   read access. Exclude such files with `.gitignore` (ignored files are never
   backed up), set `remote_sync.enabled: false` for those repos, or point
-  `remote_sync.remote` at a private backup remote. git-mgr force-pushes only
+  `remote_sync.remote` at a private backup remote. gitten force-pushes only
   inside each copy's own namespace (and, with `wip: branch`, its own
-  `git-mgr/wip/<machine>/<copy>` branch).
+  `gitten/wip/<machine>/<copy>` branch).

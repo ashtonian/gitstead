@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitten/internal/config"
 )
 
 // FilterRepos applies inclusion and exclusion rules client-side. Filters listed

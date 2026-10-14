@@ -1,10 +1,10 @@
-// Module git-mgr-e2e holds git-mgr's end-to-end tests. It is deliberately a
+// Module gitten-e2e holds gitten's end-to-end tests. It is deliberately a
 // SEPARATE module so that heavy test-only dependencies (testcontainers, the
-// Docker client, Forgejo image plumbing) stay out of the root git-mgr module's
-// dependency graph. The tests drive the compiled git-mgr binary as a
-// subprocess rather than importing git-mgr's internal packages, so there is no
+// Docker client, Forgejo image plumbing) stay out of the root gitten module's
+// dependency graph. The tests drive the compiled gitten binary as a
+// subprocess rather than importing gitten's internal packages, so there is no
 // code coupling between the two modules.
-module github.com/ashtonian/git-mgr-e2e
+module github.com/ashtonian/gitten-e2e
 
 go 1.26.2
 

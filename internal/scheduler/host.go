@@ -19,7 +19,7 @@ type Host struct {
 	Home string
 	UID  int
 	Run  Runner
-	// BackupDir receives a copy of the crontab before git-mgr changes it.
+	// BackupDir receives a copy of the crontab before gitten changes it.
 	BackupDir string
 	Now       func() time.Time
 }
@@ -147,7 +147,7 @@ func (h Host) installDaemon(s Schedule, dryRun bool) ([]string, error) {
 	if dryRun {
 		return actions, nil
 	}
-	tmp, err := os.CreateTemp("", "git-mgr-*.plist")
+	tmp, err := os.CreateTemp("", "gitten-*.plist")
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +223,7 @@ func (h Host) editCrontab(edit func([]string) []string) error {
 	if content != "" {
 		content += "\n"
 	}
-	f, err := os.CreateTemp("", "git-mgr-crontab-*")
+	f, err := os.CreateTemp("", "gitten-crontab-*")
 	if err != nil {
 		return err
 	}

@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	agents "github.com/ashtonian/git-mgr/internal/agent"
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/discovery"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/workspace"
+	agents "github.com/ashtonian/gitten/internal/agent"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/discovery"
+	"github.com/ashtonian/gitten/internal/gitops"
+	"github.com/ashtonian/gitten/internal/repourl"
+	"github.com/ashtonian/gitten/internal/state"
+	"github.com/ashtonian/gitten/internal/workspace"
 )
 
 // WSRetireCmd retires agents: their runs stopped (with --stop), their
@@ -278,7 +278,7 @@ func (c *WSPublishCmd) openPR(ctx context.Context, cfg *config.Config, st *state
 		}
 	}
 	if id.Host == "" {
-		return "", errors.New("its origin isn't a URL git-mgr can open a request against")
+		return "", errors.New("its origin isn't a URL gitten can open a request against")
 	}
 	base := c.Base
 	if base == "" {
@@ -439,7 +439,7 @@ func lastURL(text string) string {
 func agentsStop(stateDir, workspace, agent string, timeout time.Duration) (bool, error) {
 	ended, err := agents.Stop(agents.LeasePath(stateDir, workspace, agent), timeout, false)
 	if err == nil && !ended {
-		err = fmt.Errorf("%s/%s is still running after %s; git-mgr ws stop --kill ends it", workspace, agent, timeout)
+		err = fmt.Errorf("%s/%s is still running after %s; gitten ws stop --kill ends it", workspace, agent, timeout)
 	}
 	return ended, err
 }

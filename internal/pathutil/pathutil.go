@@ -1,4 +1,4 @@
-// Package pathutil holds the filesystem primitives the rest of git-mgr
+// Package pathutil holds the filesystem primitives the rest of gitten
 // relies on not to lose data: guarded deletion (SafeRemoveAll), safe file
 // names, renames that never replace (RenameNoReplace), whole-tree moves that
 // fall back to copy-then-delete across filesystems (Move), and durable

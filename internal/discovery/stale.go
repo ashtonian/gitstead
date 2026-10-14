@@ -5,8 +5,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/state"
 )
 
 // CleanupResult summarizes a stale pass.

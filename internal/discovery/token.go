@@ -9,14 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitten/internal/config"
 )
 
 // tokenCommandTimeout bounds token_command, which may prompt or hang.
 const tokenCommandTimeout = 30 * time.Second
 
-// ResolveToken returns the token git-mgr would use for a provider's API, or
-// "" for none. Exported for diagnostics (git-mgr doctor).
+// ResolveToken returns the token gitten would use for a provider's API, or
+// "" for none. Exported for diagnostics (gitten doctor).
 func ResolveToken(cfg config.Provider) (string, error) {
 	return resolveToken(cfg, defaultTokenEnvs(cfg.Type)...)
 }

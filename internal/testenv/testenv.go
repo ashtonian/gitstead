@@ -16,7 +16,7 @@ import (
 // Main isolates the environment, runs the tests and returns their exit code;
 // call it from TestMain as os.Exit(testenv.Main(m)).
 func Main(m *testing.M) int {
-	root, err := os.MkdirTemp("", "git-mgr-test-")
+	root, err := os.MkdirTemp("", "gitten-test-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "testenv:", err)
 		return 1

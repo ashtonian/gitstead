@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ashtonian/git-mgr/internal/gitops"
+	"github.com/ashtonian/gitten/internal/gitops"
 )
 
 // Targets lists what commands act on in a workspace: every copy, or with

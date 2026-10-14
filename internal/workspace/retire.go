@@ -8,10 +8,10 @@ import (
 	"slices"
 	"time"
 
-	agents "github.com/ashtonian/git-mgr/internal/agent"
-	"github.com/ashtonian/git-mgr/internal/ctxutil"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/state"
+	agents "github.com/ashtonian/gitten/internal/agent"
+	"github.com/ashtonian/gitten/internal/ctxutil"
+	"github.com/ashtonian/gitten/internal/gitops"
+	"github.com/ashtonian/gitten/internal/state"
 )
 
 // RetireOptions shape a retirement.
@@ -120,20 +120,20 @@ func takeLease(opts RetireOptions, workspace, agent string) (*agents.Lease, erro
 		return nil, nil
 	}
 	path := agents.LeasePath(opts.StateDir, workspace, agent)
-	holder := agents.Holder{PID: os.Getpid(), Command: "git-mgr retire", Started: time.Now()}
+	holder := agents.Holder{PID: os.Getpid(), Command: "gitten retire", Started: time.Now()}
 	lease, err := agents.Acquire(path, holder)
 	if !errors.Is(err, agents.ErrRunning) {
 		return lease, err
 	}
 	if !opts.Stop {
-		return nil, fmt.Errorf("%s/%s is running; stop it first (git-mgr ws stop %s %s), or retire with --stop", workspace, agent, workspace, agent)
+		return nil, fmt.Errorf("%s/%s is running; stop it first (gitten ws stop %s %s), or retire with --stop", workspace, agent, workspace, agent)
 	}
 	ended, err := agents.Stop(path, opts.StopTimeout, false)
 	if err != nil {
 		return nil, err
 	}
 	if !ended {
-		return nil, fmt.Errorf("%s/%s is still running after %s; git-mgr ws stop --kill ends it", workspace, agent, opts.StopTimeout)
+		return nil, fmt.Errorf("%s/%s is still running after %s; gitten ws stop --kill ends it", workspace, agent, opts.StopTimeout)
 	}
 	return agents.Acquire(path, holder)
 }

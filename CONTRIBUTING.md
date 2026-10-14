@@ -1,6 +1,6 @@
-# Contributing to git-mgr
+# Contributing to gitten
 
-Thanks for your interest in improving git-mgr.
+Thanks for your interest in improving gitten.
 
 ## Development setup
 
@@ -10,8 +10,8 @@ from a pkg checkout beside this one:
 
 ```bash
 git clone https://github.com/ashtonian/pkg
-git clone https://github.com/ashtonian/git-mgr
-cd git-mgr
+git clone https://github.com/ashtonian/gitten
+cd gitten
 go build ./...
 ```
 
@@ -31,7 +31,7 @@ gofmt -l .                 # must print nothing
 go test -race ./...
 
 # Linting (matches CI)
-go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 golangci-lint run
 
 # E2E: a module of its own. Most tests need only git; the provider tests
@@ -58,3 +58,7 @@ cd e2e && go test ./...
 
 Open a GitHub issue with reproduction steps and your config (redact tokens).
 For security issues, see [SECURITY.md](SECURITY.md).
+
+## Releasing
+
+See [docs/RELEASING.md](docs/RELEASING.md).

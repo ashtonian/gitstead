@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/pathutil"
-	"github.com/ashtonian/git-mgr/internal/state"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/pathutil"
+	"github.com/ashtonian/gitten/internal/state"
 )
 
 // AgentSettings are what config says of a workspace's agents' commands.
@@ -51,7 +51,7 @@ func SettingsFor(cfg *config.Config, name string) AgentSettings {
 type Update func(change func(*state.State) error) error
 
 // AgentEnv returns the environment agent's commands in workspace ws run
-// with: its GIT_MGR_* variables, then the workspace's env. An agent without
+// with: its GITTEN_* variables, then the workspace's env. An agent without
 // ports is given its block first, through update, which keeps it for the
 // replica's life; the shared cache directory is made.
 func AgentEnv(st *state.State, update Update, s AgentSettings, ws, agent string) ([]string, error) {
@@ -170,7 +170,7 @@ const portProbe = 200 * time.Millisecond
 
 // portFree reports whether nothing on this machine listens on port. It
 // connects rather than binds: binding would make macOS's firewall ask
-// whether git-mgr may accept incoming connections.
+// whether gitten may accept incoming connections.
 func portFree(port int) bool {
 	for _, host := range []string{"127.0.0.1", "::1"} {
 		c, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), portProbe)

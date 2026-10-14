@@ -9,7 +9,7 @@ import (
 	"github.com/google/go-github/v88/github"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 
-	"github.com/ashtonian/git-mgr/internal/config"
+	"github.com/ashtonian/gitten/internal/config"
 )
 
 // Owner is an account or organization whose repos a rule can track.

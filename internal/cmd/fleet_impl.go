@@ -12,13 +12,13 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/launch"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
-	"github.com/ashtonian/git-mgr/internal/shellutil"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/workspace"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/gitops"
+	"github.com/ashtonian/gitten/internal/launch"
+	"github.com/ashtonian/gitten/internal/reconcile"
+	"github.com/ashtonian/gitten/internal/shellutil"
+	"github.com/ashtonian/gitten/internal/state"
+	"github.com/ashtonian/gitten/internal/workspace"
 )
 
 // FleetCmd groups the fleet subcommands.
@@ -89,7 +89,7 @@ func (c *FleetOpenCmd) agent(f *config.Fleet) string {
 	return f.Agent
 }
 
-// planArgs pass the flags that shape the plan to the host's git-mgr.
+// planArgs pass the flags that shape the plan to the host's gitten.
 func (c *FleetOpenCmd) planArgs(f *config.Fleet) []string {
 	var args []string
 	if a := c.agent(f); a != "" {
@@ -105,7 +105,7 @@ func (c *FleetOpenCmd) planArgs(f *config.Fleet) []string {
 }
 
 // ensureFleet makes what is missing of the fleet's workspaces declared in
-// config, as `ws ensure` does; moves and removals wait for `git-mgr apply`.
+// config, as `ws ensure` does; moves and removals wait for `gitten apply`.
 func ensureFleet(ctx *Context, cfg *config.Config, st *state.State, names []string) error {
 	scope := workspace.Scope{Only: func(n string) bool { return slices.Contains(names, n) }}
 	plan := workspace.Compute(ctx.GoCtx(), cfg, st, scope)
@@ -165,7 +165,7 @@ func checkSigning(ctx *Context, cfg *config.Config, st *state.State, copies []st
 	return errors.Join(errs...)
 }
 
-// selfInvocation is how a terminal runs this git-mgr, with this run's
+// selfInvocation is how a terminal runs this gitten, with this run's
 // config and state.
 func selfInvocation(ctx *Context) (launch.Invocation, error) {
 	bin, err := os.Executable()
@@ -462,12 +462,12 @@ func (c *FleetStopCmd) Run(ctx *Context) error {
 	return ctx.finish(doc, errors.Join(errs...))
 }
 
-// onHost runs git-mgr with args on the fleet's host, on this terminal; under
+// onHost runs gitten with args on the fleet's host, on this terminal; under
 // --json, without one, its JSON passed through as this command's.
 func onHost(ctx *Context, f *config.Fleet, args ...string) error {
 	remote := f.RemoteCommand
 	if remote == "" {
-		remote = "git-mgr"
+		remote = "gitten"
 	}
 	if ctx.JSON {
 		args = append(args, "--json")

@@ -11,12 +11,12 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/gitops"
-	"github.com/ashtonian/git-mgr/internal/reconcile"
-	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/state"
-	"github.com/ashtonian/git-mgr/internal/workspace"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/gitops"
+	"github.com/ashtonian/gitten/internal/reconcile"
+	"github.com/ashtonian/gitten/internal/repourl"
+	"github.com/ashtonian/gitten/internal/state"
+	"github.com/ashtonian/gitten/internal/workspace"
 )
 
 // WorkspaceCmd groups the workspace subcommands.
@@ -36,7 +36,7 @@ type WorkspaceCmd struct {
 	Open     WSOpenCmd     `cmd:"" help:"Open the workspace's agents with a launcher: tmux, iTerm, Muxy or a plugin."`
 	Run      WSRunCmd      `cmd:"" help:"Run an agent in its replica, in this terminal: what each pane of 'ws open' runs."`
 	Env      WSEnvCmd      `cmd:"" help:"Print an agent's environment -- its ports, cache and workspace env -- as shell exports."`
-	Waiting  WSWaitingCmd  `cmd:"" help:"Tell git-mgr an agent is waiting for you: for agents' own notification hooks."`
+	Waiting  WSWaitingCmd  `cmd:"" help:"Tell gitten an agent is waiting for you: for agents' own notification hooks."`
 	Stop     WSStopCmd     `cmd:"" help:"End agents' runs, as closing their terminals would."`
 	Publish  WSPublishCmd  `cmd:"" help:"Push agents' branches, and with --pr open a pull request per repo."`
 	Retire   WSRetireCmd   `cmd:"" help:"Retire agents: archive their copies' unique work, remove the copies, keep tombstones."`
@@ -134,10 +134,10 @@ func (c *WSCreateCmd) create(ctx *Context) error {
 		return ensureWorkspaces(ctx, cfg, st, c.Name, nil, true)
 	}
 	if declared {
-		return fmt.Errorf("workspace %q is declared in config; edit it there and run 'git-mgr ws ensure %s', or --save --force to replace it", c.Name, c.Name)
+		return fmt.Errorf("workspace %q is declared in config; edit it there and run 'gitten ws ensure %s', or --save --force to replace it", c.Name, c.Name)
 	}
 	if st.Workspaces[c.Name] != nil {
-		return fmt.Errorf("workspace %q already exists; 'git-mgr ws ensure %s' makes what is missing of it", c.Name, c.Name)
+		return fmt.Errorf("workspace %q already exists; 'gitten ws ensure %s' makes what is missing of it", c.Name, c.Name)
 	}
 	logEvent(ctx, "ws_create", c.Name, "")
 	return ensureWorkspaces(ctx, cfg, st, c.Name, []config.Workspace{w}, true)
@@ -166,7 +166,7 @@ func (c *WSEnsureCmd) Run(ctx *Context) error {
 // ensureWorkspaces makes what is missing of the named workspace, or of all of
 // them: workspaces declared in config or given in extra, agents and repos
 // added to them, copies gone from disk, and the repos they name that aren't
-// tracked yet. Moves and removals wait for `git-mgr apply`.
+// tracked yet. Moves and removals wait for `gitten apply`.
 func ensureWorkspaces(ctx *Context, cfg *config.Config, st *state.State, name string, extra []config.Workspace, sayIfNothing bool) error {
 	scope := workspace.Scope{Extra: extra}
 	if name != "" {
@@ -323,7 +323,7 @@ func (c *WSListCmd) Run(ctx *Context) error {
 		return ctx.Emit(rows)
 	}
 	if len(rows) == 0 {
-		fmt.Println("No workspaces. Declare one in config, or create one with 'git-mgr ws create <name> --repo <repo>'.")
+		fmt.Println("No workspaces. Declare one in config, or create one with 'gitten ws create <name> --repo <repo>'.")
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -516,7 +516,7 @@ func operationalSpec(ctx *Context, name string) (*workspace.Spec, *state.State, 
 	}
 	ws, ok := st.Workspaces[name]
 	if !ok {
-		return nil, nil, fmt.Errorf("workspace %q is not created; run 'git-mgr ws create %s' first", name, name)
+		return nil, nil, fmt.Errorf("workspace %q is not created; run 'gitten ws create %s' first", name, name)
 	}
 	cfg, _ := ctx.LoadConfig()
 	return workspace.FromState(cfg, st, ws), st, nil

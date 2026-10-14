@@ -11,13 +11,13 @@ import (
 	"charm.land/huh/v2"
 	"golang.org/x/term"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/jump"
-	"github.com/ashtonian/git-mgr/internal/repourl"
-	"github.com/ashtonian/git-mgr/internal/shellutil"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/jump"
+	"github.com/ashtonian/gitten/internal/repourl"
+	"github.com/ashtonian/gitten/internal/shellutil"
 )
 
-// targetFlags pick a place git-mgr knows from a short query.
+// targetFlags pick a place gitten knows from a short query.
 type targetFlags struct {
 	Query []string `arg:"" help:"Part of a repo, workspace or agent name: app, acme/api, app 2." predictor:"target"`
 	Kind  string   `help:"Only consider this kind: repo, workspace, agent or copy." enum:",repo,workspace,agent,copy" default:""`
@@ -34,7 +34,7 @@ func (f targetFlags) resolve(ctx *Context) (jump.Target, error) {
 	best := jump.Best(jump.Find(jump.OfKind(jump.Targets(st), f.Kind), query))
 	switch {
 	case len(best) == 0:
-		return jump.Target{}, fmt.Errorf("nothing matches %q; `git-mgr status` and `git-mgr ws ls` list what git-mgr knows", query)
+		return jump.Target{}, fmt.Errorf("nothing matches %q; `gitten status` and `gitten ws ls` list what gitten knows", query)
 	case len(best) == 1:
 		return best[0].Target, nil
 	}
@@ -59,7 +59,7 @@ func (f targetFlags) resolve(ctx *Context) (jump.Target, error) {
 	return best[chosen].Target, nil
 }
 
-// PathCmd prints the path of a place git-mgr knows.
+// PathCmd prints the path of a place gitten knows.
 type PathCmd struct {
 	targetFlags
 }
@@ -76,12 +76,12 @@ func (c *PathCmd) Run(ctx *Context) error {
 	return nil
 }
 
-// targetJSON is a place git-mgr knows, as path --json prints it.
+// targetJSON is a place gitten knows, as path --json prints it.
 func targetJSON(t jump.Target) map[string]string {
 	return map[string]string{"label": t.Label, "kind": t.Kind, "path": t.Path, "repo": t.Repo}
 }
 
-// CdCmd changes the shell's directory to a place git-mgr knows. A program
+// CdCmd changes the shell's directory to a place gitten knows. A program
 // can't change its shell's directory, so the function shell-init prints does
 // it; without that function this prints the path, and says how to set it up.
 type CdCmd struct {
@@ -98,12 +98,12 @@ func (c *CdCmd) Run(ctx *Context) error {
 	}
 	fmt.Println(t.Path)
 	if term.IsTerminal(int(os.Stdout.Fd())) {
-		fmt.Fprintf(os.Stderr, "git-mgr can't change your shell's directory itself; add `eval \"$(git-mgr shell-init %s)\"` to your shell's rc file and `git-mgr cd` will.\n", shellName())
+		fmt.Fprintf(os.Stderr, "gitten can't change your shell's directory itself; add `eval \"$(gitten shell-init %s)\"` to your shell's rc file and `gitten cd` will.\n", shellName())
 	}
 	return nil
 }
 
-// OpenCmd opens a place git-mgr knows in your editor, or its repo's page in
+// OpenCmd opens a place gitten knows in your editor, or its repo's page in
 // a browser.
 type OpenCmd struct {
 	targetFlags
@@ -151,7 +151,7 @@ func editorFor(cfg *config.Config) string {
 // shell command, so "code -n" works; the path goes in as an argument of its
 // own, never read by the shell.
 func runEditor(editor, path, dir string) error {
-	cmd := exec.Command("/bin/sh", "-c", editor+` "$1"`, "git-mgr-edit", path)
+	cmd := exec.Command("/bin/sh", "-c", editor+` "$1"`, "gitten-edit", path)
 	cmd.Dir = dir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -183,9 +183,9 @@ func (c *OpenCmd) openWeb(ctx *Context, t jump.Target) error {
 	return nil
 }
 
-// ShellInitCmd prints the shell integration: a git-mgr function whose cd
+// ShellInitCmd prints the shell integration: a gitten function whose cd
 // changes the shell's directory, and which hands everything else to the
-// program, and tab completion of git-mgr's commands, flags and arguments.
+// program, and tab completion of gitten's commands, flags and arguments.
 type ShellInitCmd struct {
 	Shell string `arg:"" help:"Your shell: bash, zsh or fish." enum:"bash,zsh,fish"`
 }
@@ -198,27 +198,27 @@ func (c *ShellInitCmd) Run(ctx *Context) error {
 	// COMP_LINE (see kongplete.Complete in main).
 	bin, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("finding the git-mgr binary for completion: %w", err)
+		return fmt.Errorf("finding the gitten binary for completion: %w", err)
 	}
 	bin = shellutil.Quote(bin)
 	switch c.Shell {
 	case "fish":
-		fmt.Printf(`# git-mgr shell integration: git-mgr cd <query> changes directory.
-function git-mgr
+		fmt.Printf(`# gitten shell integration: gitten cd <query> changes directory.
+function gitten
     if test (count $argv) -gt 0; and test $argv[1] = cd
-        set -l dir (command git-mgr path $argv[2..-1]); and cd $dir
+        set -l dir (command gitten path $argv[2..-1]); and cd $dir
     else
-        command git-mgr $argv
+        command gitten $argv
     end
 end
 # Tab completion.
-function __complete_git_mgr
+function __complete_gitten
     set -lx COMP_LINE (commandline -cp)
     test -z (commandline -ct)
     and set COMP_LINE "$COMP_LINE "
     %s
 end
-complete -f -c git-mgr -a "(__complete_git_mgr)"
+complete -f -c gitten -a "(__complete_gitten)"
 `, bin)
 	default:
 		compinit := ""
@@ -227,18 +227,18 @@ complete -f -c git-mgr -a "(__complete_git_mgr)"
 			// the completion system (compinit) loaded first.
 			compinit = "(( $+functions[compdef] )) || { autoload -U +X compinit && compinit }\nautoload -U +X bashcompinit && bashcompinit\n"
 		}
-		fmt.Printf(`# git-mgr shell integration: git-mgr cd <query> changes directory.
-git-mgr() {
+		fmt.Printf(`# gitten shell integration: gitten cd <query> changes directory.
+gitten() {
   if [ "$1" = cd ]; then
     shift
     local dir
-    dir=$(command git-mgr path "$@") && [ -n "$dir" ] && cd -- "$dir"
+    dir=$(command gitten path "$@") && [ -n "$dir" ] && cd -- "$dir"
   else
-    command git-mgr "$@"
+    command gitten "$@"
   fi
 }
 # Tab completion.
-%scomplete -o default -C %s git-mgr
+%scomplete -o default -C %s gitten
 `, compinit, bin)
 	}
 	return nil

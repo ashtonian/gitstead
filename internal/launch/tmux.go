@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ashtonian/git-mgr/internal/config"
-	"github.com/ashtonian/git-mgr/internal/shellutil"
+	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/shellutil"
 )
 
 // agentOption marks each pane with the agent it runs, as workspace/agent, so
 // opening a fleet again finds what is already open.
-const agentOption = "@git-mgr-agent"
+const agentOption = "@gitten-agent"
 
 // Tmux opens a fleet as a tmux session: a window per workspace (or per
 // agent), a pane per agent, spilling into another window past MaxPanes.
@@ -155,7 +155,7 @@ func (t *Tmux) build(tmux func(...string) (string, error), session string, exist
 				continue
 			}
 			name := t.windowFor(windows, ws.Name, a.Name)
-			env := []string{"-e", "GIT_MGR_LAUNCHER=tmux", "-c", a.Dir}
+			env := []string{"-e", "GITTEN_LAUNCHER=tmux", "-c", a.Dir}
 			format := []string{"-P", "-F", "#{window_id}\t#{pane_id}"}
 			var args []string
 			switch w := windows[name]; {
