@@ -10,7 +10,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	code.gitea.io/sdk/gitea v0.25.1
 	github.com/alecthomas/kong v1.16.1
-	github.com/ashtonian/pkg/config v0.1.0
+	github.com/ashtonian/pkg/config v0.3.0
 	github.com/ashtonian/pkg/config/kongprovider v0.1.0
 	github.com/go-playground/validator/v10 v10.30.5
 	github.com/google/go-github/v88 v88.0.0

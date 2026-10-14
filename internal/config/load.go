@@ -122,6 +122,7 @@ func loadError(path string, err error) error {
 	var (
 		readErr  *fs.PathError
 		parseErr *pkgconfig.ParseError
+		unknown  *pkgconfig.UnknownKeysError
 		fields   validator.ValidationErrors
 		invalid  *invalidError
 		step     *stepError
@@ -137,6 +138,8 @@ func loadError(path string, err error) error {
 		// secret. It is shown here: the file is the user's own, and the
 		// message says what is wrong where.
 		return fmt.Errorf("%s does not parse: %w", where, parseErr.Err)
+	case errors.As(err, &unknown):
+		return invalidConfig(where, describeUnknown(unknown))
 	case errors.As(err, &fields):
 		return invalidConfig(where, describeFields(fields))
 	case errors.As(err, &invalid):
@@ -145,6 +148,19 @@ func loadError(path string, err error) error {
 		return step.err
 	}
 	return fmt.Errorf("%s: %w", where, err)
+}
+
+// describeUnknown lists the keys that are not settings, each on a line of
+// its own with the setting it most likely misspells.
+func describeUnknown(e *pkgconfig.UnknownKeysError) error {
+	msgs := make([]string, len(e.Keys))
+	for i, k := range e.Keys {
+		msgs[i] = fmt.Sprintf("%q is not a setting", k.Key)
+		if k.Suggestion != "" {
+			msgs[i] += fmt.Sprintf(" (did you mean %q?)", k.Suggestion)
+		}
+	}
+	return fmt.Errorf("\n  %s", strings.Join(msgs, "\n  "))
 }
 
 // invalidConfig reports the problems with the config at where, a list of
