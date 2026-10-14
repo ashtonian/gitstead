@@ -203,15 +203,15 @@ func TestTmux_ControlModeAndRemote(t *testing.T) {
 		Getenv: func(k string) string { return map[string]string{"TERM_PROGRAM": "iTerm.app"}[k] },
 		Exec:   func(argv []string) error { attached = argv; return nil }}}
 	p := testPlan()
-	p.Host = "me@studio"
+	p.Host = "me@buildbox"
 	if err := tm.Open(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"ssh", "-t", "me@studio", "tmux -CC attach-session -t '=git-mgr-daily'"}; !slices.Equal(attached, want) {
+	if want := []string{"ssh", "-t", "me@buildbox", "tmux -CC attach-session -t '=git-mgr-daily'"}; !slices.Equal(attached, want) {
 		t.Errorf("attach = %q", attached)
 	}
 	out, err := tm.Print(p)
-	if err != nil || !strings.Contains(out, "ssh me@studio 'tmux new-session") {
+	if err != nil || !strings.Contains(out, "ssh me@buildbox 'tmux new-session") {
 		t.Errorf("Print = %s, %v", out, err)
 	}
 	tm.Opts.Socket = "agents"
@@ -247,7 +247,7 @@ func TestGridSplits(t *testing.T) {
 func TestITerm_Script(t *testing.T) {
 	it := &ITerm{Opts: launchers().ITerm}
 	p := testPlan()
-	p.Host = "me@studio"
+	p.Host = "me@buildbox"
 	p.Workspaces[0].Agents[0].Title = `say "hi"`
 	script, err := it.Script(p)
 	if err != nil {
@@ -259,7 +259,7 @@ func TestITerm_Script(t *testing.T) {
 		`tell s1 to set s3 to (split horizontally with profile "Default")`,
 		`tell w to set t to (create tab with profile "Default")`, // lib's tab
 		`set name to "say \"hi\""`,
-		"write text \"printf '\\\\033]1337;SetBadgeFormat=%s\\\\007' YWdlbnQtMQ==; ssh -t me@studio 'git-mgr ws run app agent-1'\"",
+		"write text \"printf '\\\\033]1337;SetBadgeFormat=%s\\\\007' YWdlbnQtMQ==; ssh -t me@buildbox 'git-mgr ws run app agent-1'\"",
 		"delay 0.150",
 	} {
 		if !strings.Contains(script, want) {
@@ -307,7 +307,7 @@ func TestMuxy_LayoutsSessionsAndPruning(t *testing.T) {
 	fake := &fakeMuxy{projects: map[string]string{}}
 	var out bytes.Buffer
 	m := &Muxy{Opts: launchers().Muxy, cli: fake.cli, Env: Env{Stdout: &out}, Recorded: map[string]string{"gone": "p9"}}
-	m.Opts.Host, m.Opts.PruneProjects = "me@studio", true
+	m.Opts.Host, m.Opts.PruneProjects = "me@buildbox", true
 
 	if err := m.Open(context.Background(), testPlan()); err != nil {
 		t.Fatal(err)
@@ -315,7 +315,7 @@ func TestMuxy_LayoutsSessionsAndPruning(t *testing.T) {
 	if m.Projects["app"] != "p1" || m.Projects["lib"] != "p2" {
 		t.Errorf("projects = %v", m.Projects)
 	}
-	if got := fake.find("--host me@studio project add /ws/app --name app --reuse --json"); len(got) != 1 {
+	if got := fake.find("--host me@buildbox project add /ws/app --name app --reuse --json"); len(got) != 1 {
 		t.Errorf("project add: %v", fake.calls)
 	}
 	if got := fake.find("project set-color p1 #4F8EF7"); len(got) != 1 {

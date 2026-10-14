@@ -512,12 +512,12 @@ accounts:
   - name: personal
     hosts: [github.com]                # every github.com owner no other account claims
     ssh_key: ~/.ssh/id_personal
-    git: {name: Ashton Kinslow, email: me@example.com}
+    git: {name: Your Name, email: you@example.com}
   - name: work
     hosts: [github.com]
     owners: [acme, acme-labs]          # these owners, and their GitLab subgroups
     ssh_key: ~/.ssh/id_work
-    git: {name: Ashton Kinslow, email: you@acme.com}
+    git: {name: Your Name, email: you@acme.com}
     signing:
       mode: required                   # inherit (default) | required | off
       key: ~/.ssh/id_work.pub          # .pub or key:: means SSH signing; a key ID means GPG
@@ -1204,7 +1204,7 @@ git-mgr ws open app --agent claude                     # tmux session, a pane pe
 `git-mgr ws run <workspace> <agent>` runs an agent in its replica, in the
 current terminal; every pane `ws open` makes runs it. It checks the agent's
 copies, then types the agent profile's command into an interactive shell there
-(`$SHELL -i -c`), so shell functions such as a `claudemore` wrapper work, with
+(`$SHELL -i -c`), so shell functions such as a wrapper around `claude` work, with
 the profile's `env` and then the agent's environment set (see below). When the
 agent ran in the replica before, the profile's `resume` command
 is typed instead (`--fresh` to start over). When the agent exits, its exit

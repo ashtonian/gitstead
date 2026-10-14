@@ -299,7 +299,7 @@ func TestRender_Workspaces(t *testing.T) {
 	write(t, path, "agents:\n  - name: mine\n    command: mine --fast # keep\n")
 	a := sampleAnswers()
 	a.Workspaces = &Workspaces{Root: "~/agents", Agents: 4, Launcher: "tmux", Agent: "claude", Profiles: []config.AgentProfile{
-		{Name: "claude", Command: "claudemore", Resume: "claudemore --continue"}, {Name: "codex", Command: "codex"},
+		{Name: "claude", Command: "claude-wrapper", Resume: "claude-wrapper --continue"}, {Name: "codex", Command: "codex"},
 	}}
 	first := render(t, path, a)
 	if second := render(t, path, a); second != first {
@@ -313,7 +313,7 @@ func TestRender_Workspaces(t *testing.T) {
 	if d.Root != config.ExpandHome("~/agents") || d.Agents != 4 || d.Agent != "claude" || cfg.Launchers.Default != "tmux" {
 		t.Errorf("workspace_defaults = %+v, launcher %s", d, cfg.Launchers.Default)
 	}
-	if len(cfg.Agents) != 3 || cfg.FindAgent("mine") == nil || cfg.FindAgent("claude").Resume != "claudemore --continue" {
+	if len(cfg.Agents) != 3 || cfg.FindAgent("mine") == nil || cfg.FindAgent("claude").Resume != "claude-wrapper --continue" {
 		t.Errorf("agents = %+v; a profile setup doesn't manage is kept", cfg.Agents)
 	}
 
