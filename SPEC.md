@@ -117,19 +117,26 @@ more), one account per gh login with its token pinned
 (`gh auth token --hostname H --user U`), its key, and the recommended features.
 
 Asking, each account's owners come from the provider (`discovery.ListOwners`:
-the login and its organizations or groups), and each owner's filters are name
-globs, languages and topics. With network access it then runs discovery for
-the account's rules (`setup.Account.Discovery`, the provider and rules that
-render) and lists, per owner, how many repos match and the first dozen names;
-the user keeps that or chooses again, and nothing is written yet. The clone
-question then names the total.
+the login and its organizations or groups), and each owner's filters are names
+(words or globs, `config.NameMatches`), languages and topics. With network
+access it then runs discovery for the account's rules (`setup.Account.Discovery`,
+the provider and rules that render) and lists, per rule, how many repos match,
+with several names how many each matched, and the first dozen names. The user
+keeps them all, picks from the list -- a checklist with every match ticked,
+the unticked going in the rule's `skip` -- or chooses again; nothing is
+written yet. The clone question then names the total, and isn't asked when
+nothing matches.
 
 Answers render into the config with `config.Document`: a YAML tree edit that
 keeps comments and order, sets `base_dir`, `layout` (dropping `path_template`)
 and the feature keys, and upserts by name each account, its provider (same
-name, `account:` set) and one rule per tracked owner (`<account>` for its own
-repos, `<account>/<org>` per organization), removing that provider's rules for
-owners no longer tracked. Before writing it shows the diff, what it will do
+name, `account:` set) and its rules. A track is one rule: one setup names
+(`<account>` for its own repos, `<account>/<org>` per organization), or one
+already in config, by its own name -- an owner can have several, such as a
+rule `clone --save` added. Setup manages the provider's rules for an
+organization, a group or the account's own repos (`setup.Account.Manages`),
+removing those no longer tracked; a search, another user's repos or a GitHub
+rule widened beyond the token's own stay as they are. Before writing it shows the diff, what it will do
 beyond the config, and the checks (`setup.Checker`: tokens, keys, `ssh -T`, a
 test signature, which `doctor` also uses offline; with the schedule on,
 `setup.ScheduleChecks`: a `token_env` the schedule's captured environment
@@ -146,8 +153,9 @@ login whose token gh has from an environment variable (`tokenSource`) gets
 lists both for one login, the stored one wins.
 
 Answers (`setup.Answers`, the `--answers`/`--save-answers` file): `base_dir`,
-`layout`, `accounts` (each owner tracked as `track: [{owner, kind, languages,
-topics, names, name_pattern}]`, the filters becoming its rule's), `adopt`, `backups`, `schedule`, `schedule_interval` (divides
+`layout`, `accounts` (each tracked rule as `track: [{owner, kind, rule,
+languages, topics, names, name_pattern, skip}]`, the filters becoming its
+rule's), `adopt`, `backups`, `schedule`, `schedule_interval` (divides
 an hour or a day; default `15m`, or the installed schedule's), `linger`,
 `remote_sync`, `update`, `reconcile_auto`, `cleanup`, `workspaces`, `shell`,
 `git_includes`, `clone`. Defaults: the schedule on for a fresh config, else as
@@ -170,7 +178,8 @@ Run discovery rules and show the plan for the repos they find (see
 [Reconciliation](#reconciliation)). Without `--apply` it changes nothing and
 ends saying so: how many repos would be cloned, how many of the changes
 `discover --apply` makes and that `apply` makes them all, `setup` to change
-what is tracked, and the installed background syncs (state's `schedules`) with
+what is tracked and `clone --org ... --save` to track more, and the installed
+background syncs (state's `schedules`) with
 how many of the changes they make on their next run under `reconcile.auto`, or
 that none is installed.
 
@@ -337,7 +346,10 @@ repos are recorded as that rule's. Otherwise (`--no-save`, or no terminal)
 they are recorded as added by hand (`manually_added`, the rule's tags as
 their own) and put in the shared manifest when there is one. The rule is
 named by `--save`, or after the owner (`mine` for `--mine`, `search` for
-`--query`), languages, topics and name globs, made unique among config's rules.
+`--query`), languages, topics and names, made unique among config's rules.
+On a terminal, before cloning, it asks: all of them, pick from the list
+(a checklist, everything ticked), or none; repos picked off go in the rule's
+`skip`. Without a terminal or with `--json` it clones the whole selection.
 
 | Flag | Description |
 |---|---|
@@ -709,7 +721,9 @@ discovery:
     visibility: "all"             # "all", "public", "private", "internal"
     languages: []                 # e.g., ["Go", "Rust"] -- any of the repo's languages, case-insensitive
     topics: []                    # e.g., ["backend"] -- repo must have ALL listed topics
-    names: []                     # e.g., ["api-*", "*-worker"] -- globs on the repo name, any of them, ignoring case
+    names: []                     # e.g., ["billing", "svc-*"] -- any of them, ignoring case: a word matches
+                                  # whole words of the name (config.NameMatches), a pattern with * ? [...] is a glob
+    skip: []                      # e.g., ["billing-legacy"] -- repos left out by exact name
     name_pattern: ""              # Regex filter on repo name (e.g., "^api-"); with names, both must match
 
     # Tags assigned to repos discovered by this rule. Used for filtering in commands.
@@ -747,8 +761,8 @@ discovery:
 exclude:
   # Regex on the repo's name
   - name_pattern: ""              # e.g., "^deprecated-"
-  # Globs on the repo's name, any of them, ignoring case
-  - names: []                     # e.g., ["*-sandbox", "*-experiment"]
+  # Words in the repo's name, or globs, as discovery rules' names
+  - names: []                     # e.g., ["sandbox", "*-experiment"]
   # Repo keys, or globs over them as in overrides
   - repos: []                     # e.g., ["github.com/my-org/legacy-*"]
 

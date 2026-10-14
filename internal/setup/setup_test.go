@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -183,7 +184,7 @@ func sampleAnswers() Answers {
 		Accounts: []Account{{
 			Name: "work", Type: "github", Host: "github.com", Login: "me-at-acme",
 			TokenCommand: "gh auth token --hostname github.com --user me-at-acme",
-			Track: []Track{{Owner: "me-at-acme", Kind: "self"}, {Owner: "acme", Kind: "org", Names: []string{"*billing*", "*payments*"}},
+			Track: []Track{{Owner: "me-at-acme", Kind: "self"}, {Owner: "acme", Kind: "org", Names: []string{"billing", "payments"}, Skip: []string{"billing-sandbox"}},
 				{Owner: "acme-labs", Kind: "org", Languages: []string{"Go"}, Topics: []string{"service"}, NamePattern: "^svc-"}},
 			SSHKey: "~/.ssh/id_work", Protocol: "ssh",
 			Git:     config.GitIdentity{Name: "Me", Email: "me@acme.com"},
@@ -263,6 +264,9 @@ func TestDefaults_ReadBackWhatRenderWrote(t *testing.T) {
 	}
 	got := Defaults(Detected{}, cfg, "/nonexistent-home")
 	want.Accounts[0].BaseDir = "" // kept in the override, not read back
+	for i, rule := range []string{"work", "work/acme", "work/acme-labs"} {
+		want.Accounts[0].Track[i].Rule = rule // each owner's rule, by name
+	}
 	if !reflect.DeepEqual(got.Accounts, want.Accounts) {
 		t.Errorf("accounts read back =\n%+v\nwant\n%+v", got.Accounts, want.Accounts)
 	}
@@ -278,6 +282,57 @@ func TestDefaults_ReadBackWhatRenderWrote(t *testing.T) {
 	}
 	if cfg.Sync.Update != "ff-only-clean" || !Defaults(Detected{}, cfg, "/nonexistent-home").Update {
 		t.Errorf("sync.update = %q", cfg.Sync.Update)
+	}
+}
+
+// Rules added after setup -- a search, another user's repos, a second rule
+// for an organization it tracks -- survive a re-run: setup edits the rules
+// it manages, each by its own name, and leaves the rest as they are.
+func TestRender_KeepsRulesItDoesNotManage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	render(t, path, sampleAnswers())
+	doc, err := config.OpenDocument(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []config.DiscoveryRule{
+		{Name: "acme-ledger", Provider: "work", Org: "acme", Names: []string{"ledger"}},
+		{Name: "search", Provider: "work", Query: "org:acme payments in:readme"},
+		{Name: "someone", Provider: "work", User: "someone"},
+	} {
+		if err := doc.Upsert("discovery", config.Named(r.Name), r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := doc.Save(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a := Defaults(Detected{}, cfg, "/nonexistent-home")
+	var tracks []string
+	for _, tr := range a.Accounts[0].Track {
+		tracks = append(tracks, tr.Owner+":"+tr.Rule+":"+strings.Join(tr.Names, ","))
+	}
+	if got := strings.Join(tracks, " "); got != "me-at-acme:work: acme:work/acme:billing,payments acme-labs:work/acme-labs: acme:acme-ledger:ledger" {
+		t.Errorf("tracks read back = %s", got)
+	}
+
+	// Untrack acme-labs and re-render: its rule goes, the rest stay.
+	a.Accounts[0].Track = slices.DeleteFunc(a.Accounts[0].Track, func(tr Track) bool { return tr.Owner == "acme-labs" })
+	render(t, path, a)
+	if cfg, err = config.Load(t.Context(), path); err != nil {
+		t.Fatal(err)
+	}
+	var rules []string
+	for _, r := range cfg.Discovery {
+		rules = append(rules, r.Name)
+	}
+	if got := strings.Join(rules, " "); got != "work work/acme acme-ledger search someone" {
+		t.Errorf("rules after the re-run = %s", got)
 	}
 }
 
