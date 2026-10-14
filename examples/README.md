@@ -30,7 +30,7 @@ config.yaml                      provider APIs                  your disk
 discovery:                       GitHub, GitLab,                ~/code/
   - org: acme          ------->  Gitea/Forgejo      ------->      acme/svc-billing   (account: work)
     languages: [Go]              list + filter                    acme/svc-orders
-    name_pattern: ^svc-          (or search)                      you/dotfiles       (account: personal)
+    names: [svc-*]               (or search)                      you/dotfiles       (account: personal)
   - affiliation: [owner]
                                        |
           gitten discover  -> shows the plan: what's new, where it goes
@@ -67,7 +67,7 @@ Changes:
 with no config at all, once:
 
 ```
-$ gitten clone --org charmbracelet --language go --name '^bubble' --dry-run
+$ gitten clone --org charmbracelet --language go --name 'bubble*' --dry-run
 3 repos match:
   + github.com/charmbracelet/bubbles
   + github.com/charmbracelet/bubbletea
@@ -81,7 +81,7 @@ Without `--dry-run` it clones them and offers to save the selection as a rule.
 ```
 acme (GitHub org, 240 repos)
  |
- |-- acme-services:  language Go, topic "service", name ^svc-      ->  svc-billing, svc-orders, ...
+ |-- acme-services:  language Go, topic "service", names svc-*     ->  svc-billing, svc-orders, ...
  |-- acme-terraform: language HCL, private, name ^terraform-       ->  terraform-network, ...
  `-- exclude:        names ending -sandbox or -experiment, svc-legacy-*
 ```

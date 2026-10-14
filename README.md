@@ -117,16 +117,20 @@ gitten status    # what it tracks
 gitten cd api    # jump to a repo (a new terminal picks up the shell integration)
 ```
 
-`setup` starts every answer at what it finds on your machine, so on a typical
-machine you mostly press Enter:
+`setup` (or `gitten init`, the same command) starts every answer at what it
+finds on your machine, so on a typical machine you mostly press Enter:
 
 1. **Layout** — where repos live and how they're arranged (`owner/name`,
    `host/owner/name` or `name`), guessed from where your own repos already sit.
 2. **Accounts** — every account `gh` is logged in to, plus any you add by hand
    (GitLab, Gitea/Forgejo, another GitHub). For each: whose repos to track
    (your own, including private ones, and your organizations, listed from the
-   provider) and, if you like, only those in some languages, with some topics
-   or with names matching a pattern; how git reaches the host (an SSH key — setup asks each host which
+   provider) and, if you like, only those with names like some globs
+   (`*billing*, *payments*`), in some languages or with some topics. It then
+   looks up what that finds and lists it -- `acme, named *billing* or
+   *payments*: 14 repos` and their names -- and asks whether to track them or
+   change the choice, before anything is written or cloned. Then: how git
+   reaches the host (an SSH key — setup asks each host which
    account your keys sign in as — or HTTPS), the commit identity (from your
    global git config or `includeIf` files), signing, and optionally a separate
    base dir.
@@ -149,7 +153,7 @@ machine you mostly press Enter:
    `~/.bashrc` -- `~/.bash_profile` on macOS -- or fish's `config.fish`);
    give each account's identity to repos you clone yourself under its folders
    ([`accounts gitconfig --install`](#accounts), on with several accounts);
-   clone what your accounts track now (on).
+   clone what your accounts track now (on; it says how many repos that is).
 7. **Review** — the diff of your config file, everything else it will do, and
    checks: each token works, each key signs in as the right account, signing
    works without a terminal, and the background sync will have each token (one
@@ -195,17 +199,15 @@ gitten ws create app --repo ~/code/myrepo --agents 4 --open --cmd claude
 your dotfiles, a home-manager module, `setup --save-answers` from another
 machine: it runs `setup --yes` only if there's no config yet, then `doctor`,
 `discover --apply`, `sync`, and installs the background sync (`--profile`
-scopes all of it to a tag). `gitten init` writes a starter config without
-asking anything or touching anything else.
+scopes all of it to a tag).
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `gitten setup` | Set up gitten, or change your setup: layout, accounts, what to track, features. `--yes`, `--answers`, `--save-answers`, `--dry-run`, `--offline`. |
-| `gitten init` | Write a config with sensible defaults, without asking. |
+| `gitten setup` (`init`) | Set up gitten, or change your setup: layout, accounts, what to track (showing what it finds), features. `--yes`, `--answers`, `--save-answers`, `--dry-run`, `--offline`. |
 | `gitten bootstrap` | Set up a fresh machine in one command: setup → doctor → discover --apply → sync → install agent. `--profile`, `--no-agent`, `--dry-run`. |
-| `gitten discover` | Discover repos from providers and show the plan; `--apply` makes the changes that move and delete nothing (clone new repos, update URLs, managed git config, tags). `--rule`, `--tag` to scope. |
+| `gitten discover` | Discover repos from providers and show the plan, changing nothing; `--apply` makes the changes that move and delete nothing (clone new repos, update URLs, managed git config, tags). `--rule`, `--tag` to scope. |
 | `gitten sync` | Discover, apply config changes as far as `reconcile.auto` allows, fetch all repos, back up uncommitted changes and, with `remote_sync.enabled`, take them offsite (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`. |
 | `gitten plan` | Show what config would change on disk and in state, without changing anything. `--json`. See [Config changes](#config-changes-plan-and-apply). |
 | `gitten apply` | Make repos and workspaces match config, including the moves and removals sync leaves for you. Asks first; `--yes`. |
@@ -451,7 +453,8 @@ discovery:
     visibility: "all"                 # all | public | private | internal
     languages: ["Go", "Rust"]         # any of these, case-insensitive
     topics: ["service"]               # repo must have ALL listed topics
-    name_pattern: "^svc-"             # regex on repo name
+    names: ["svc-*", "*-worker"]      # globs on the name, any of them, ignoring case
+    # name_pattern: "^svc-"           # or a regular expression; with names, both must match
     include_forks: false
     include_archived: false
     tags: ["work", "services"]
@@ -463,6 +466,13 @@ applied locally otherwise (per-repo language/topic lookups happen only for repos
 that pass the cheaper filters). When a provider genuinely can't honor a filter,
 `discover` prints a warning rather than silently returning nothing.
 
+`gitten discover` on its own is a preview: it lists what each rule found and
+what would change, then says so -- nothing was cloned or changed, how many
+repos would be cloned, the commands that would make the changes (`discover
+--apply`, `apply`), and whether a background sync is installed that will make
+them on its next run. With no background sync, nothing changes until you run
+one of those.
+
 ### Cloning a selection
 
 To clone a set of repos now, without writing a rule first, give `clone` a
@@ -472,7 +482,8 @@ what matches, and clones what isn't tracked yet:
 ```bash
 gitten clone --org acme --dry-run                       # everything in acme: list only
 gitten clone --org acme --language go --topic service  # acme's Go services
-gitten clone --user someone --name '^terraform-'        # someone's public terraform-* repos
+gitten clone --user someone --name 'terraform-*'        # someone's public terraform-* repos
+gitten clone --org acme --name '*billing*,*payments*'   # acme's repos with billing or payments in the name
 gitten clone --mine --language rust                     # your own Rust repos, private ones included
 gitten clone --query "org:acme payments in:name,description,readme archived:false"
 ```
@@ -484,7 +495,8 @@ gitten clone --query "org:acme payments in:name,description,readme archived:fals
 | `--query` | What the provider's own search finds; no other filter applies. |
 | `--language` | Only repos in one of these languages (repeat it, or comma-separate). |
 | `--topic` | Only repos with all of these topics. |
-| `--name` | Only repos whose name matches this regular expression. |
+| `--name` | Only repos whose name matches one of these globs, ignoring case (`'svc-*'`, `'*billing*'`); repeat it, or comma-separate. |
+| `--name-pattern` | Only repos whose name matches this regular expression. |
 | `--visibility`, `--forks`, `--archived` | Public, private or internal only; include forks; include archived repos. |
 | `--provider` | Which configured provider to search: the only one by default. With none configured, github.com, with gh's token when gh is logged in there and `GITHUB_TOKEN` isn't set. |
 | `--tag` | Tags for what it clones. |
@@ -744,8 +756,9 @@ repos:
 
 # Skip repos even if a rule matched them.
 exclude:
-  - name_pattern: "^deprecated-"
-  - repos: ["my-org/legacy-monolith"]
+  - name_pattern: "^deprecated-"                # a regular expression on the name
+  - names: ["*-sandbox", "*-experiment"]         # globs on the name, ignoring case
+  - repos: ["github.com/my-org/legacy-*"]        # repo keys or globs over them, as in overrides
 
 # Override any setting per repo or glob (later entries win).
 overrides:

@@ -11,12 +11,6 @@ import (
 	"github.com/ashtonian/gitten/internal/state"
 )
 
-// InitCmd creates a config file with sensible defaults.
-// Run method is in remaining_impl.go
-type InitCmd struct {
-	NoDetect bool `help:"Don't auto-detect a logged-in gh CLI to prefill a GitHub provider." default:"false" name:"no-detect"`
-}
-
 // DiscoverCmd discovers repos from configured providers.
 // Run method is in discover_impl.go
 type DiscoverCmd struct {
@@ -284,21 +278,22 @@ type CloneCmd struct {
 	Tag  string `help:"Assign tags (comma-separated)." default:""`
 	Path string `help:"Clone the one repo here instead of where config puts it." default:""`
 
-	Org        string   `help:"Select the repos of this organization (GitHub, Gitea/Forgejo)." group:"Selecting many"`
-	User       string   `help:"Select this user's public repos." group:"Selecting many"`
-	Group      string   `help:"Select the projects of this GitLab group." group:"Selecting many"`
-	Mine       bool     `help:"Select the repos your token's account owns, private ones included." group:"Selecting many"`
-	Query      string   `help:"Select what this provider search finds, e.g. \"org:acme language:go stars:>50\"; no other filter applies." group:"Selecting many"`
-	Language   []string `help:"Only repos in one of these languages." group:"Selecting many"`
-	Topic      []string `help:"Only repos with all of these topics." group:"Selecting many"`
-	Name       string   `help:"Only repos whose name matches this regular expression." group:"Selecting many"`
-	Visibility string   `help:"Only public, private or internal repos." enum:",all,public,private,internal" default:"" group:"Selecting many"`
-	Forks      bool     `help:"Include forks." group:"Selecting many"`
-	Archived   bool     `help:"Include archived repos." group:"Selecting many"`
-	Provider   string   `help:"The configured provider to search; the only one by default, github.com when none is configured." group:"Selecting many"`
-	Save       string   `help:"Save the selection as a discovery rule with this name, so every sync clones what newly matches." group:"Selecting many"`
-	NoSave     bool     `help:"Don't offer to save the selection as a discovery rule." name:"no-save" group:"Selecting many"`
-	DryRun     bool     `help:"List what the selection finds; clone nothing." name:"dry-run" group:"Selecting many"`
+	Org         string   `help:"Select the repos of this organization (GitHub, Gitea/Forgejo)." group:"Selecting many"`
+	User        string   `help:"Select this user's public repos." group:"Selecting many"`
+	Group       string   `help:"Select the projects of this GitLab group." group:"Selecting many"`
+	Mine        bool     `help:"Select the repos your token's account owns, private ones included." group:"Selecting many"`
+	Query       string   `help:"Select what this provider search finds, e.g. \"org:acme language:go stars:>50\"; no other filter applies." group:"Selecting many"`
+	Language    []string `help:"Only repos in one of these languages." group:"Selecting many"`
+	Topic       []string `help:"Only repos with all of these topics." group:"Selecting many"`
+	Name        []string `help:"Only repos whose name matches one of these globs, ignoring case: 'billing-*', '*payments*'. Repeat or comma-separate." group:"Selecting many"`
+	NamePattern string   `help:"Only repos whose name matches this regular expression." name:"name-pattern" group:"Selecting many"`
+	Visibility  string   `help:"Only public, private or internal repos." enum:",all,public,private,internal" default:"" group:"Selecting many"`
+	Forks       bool     `help:"Include forks." group:"Selecting many"`
+	Archived    bool     `help:"Include archived repos." group:"Selecting many"`
+	Provider    string   `help:"The configured provider to search; the only one by default, github.com when none is configured." group:"Selecting many"`
+	Save        string   `help:"Save the selection as a discovery rule with this name, so every sync clones what newly matches." group:"Selecting many"`
+	NoSave      bool     `help:"Don't offer to save the selection as a discovery rule." name:"no-save" group:"Selecting many"`
+	DryRun      bool     `help:"List what the selection finds; clone nothing." name:"dry-run" group:"Selecting many"`
 }
 
 // AdoptCmd imports existing local repos into management.

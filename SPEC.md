@@ -101,9 +101,11 @@ gitten [global flags] <command> [command flags] [args]
 
 ### Commands
 
-#### `gitten setup [flags]`
+#### `gitten setup [flags]` (alias `init`)
 
-Guided, re-runnable setup. Detection (package `internal/setup`) reads `gh auth
+Guided, re-runnable setup; `gitten init` is the same command. It asks on a
+terminal and refuses without one unless `--yes` or `--answers` gives the
+answers. Detection (package `internal/setup`) reads `gh auth
 status --json hosts`, `~/.ssh/config` (with `Include`), the keys in `~/.ssh`,
 the global git identity and `includeIf` files, and clones under `~/src`,
 `~/code`, `~/projects`, `~/repos`, `~/work`, `~/dev`, `~/git`, `~/go/src` and the
@@ -113,6 +115,14 @@ from the existing config when there is one, otherwise from detection: the base
 dir and layout that place your own repos where they are (deeper layouts weigh
 more), one account per gh login with its token pinned
 (`gh auth token --hostname H --user U`), its key, and the recommended features.
+
+Asking, each account's owners come from the provider (`discovery.ListOwners`:
+the login and its organizations or groups), and each owner's filters are name
+globs, languages and topics. With network access it then runs discovery for
+the account's rules (`setup.Account.Discovery`, the provider and rules that
+render) and lists, per owner, how many repos match and the first dozen names;
+the user keeps that or chooses again, and nothing is written yet. The clone
+question then names the total.
 
 Answers render into the config with `config.Document`: a YAML tree edit that
 keeps comments and order, sets `base_dir`, `layout` (dropping `path_template`)
@@ -137,7 +147,7 @@ lists both for one login, the stored one wins.
 
 Answers (`setup.Answers`, the `--answers`/`--save-answers` file): `base_dir`,
 `layout`, `accounts` (each owner tracked as `track: [{owner, kind, languages,
-topics, name_pattern}]`, the filters becoming its rule's), `adopt`, `backups`, `schedule`, `schedule_interval` (divides
+topics, names, name_pattern}]`, the filters becoming its rule's), `adopt`, `backups`, `schedule`, `schedule_interval` (divides
 an hour or a day; default `15m`, or the installed schedule's), `linger`,
 `remote_sync`, `update`, `reconcile_auto`, `cleanup`, `workspaces`, `shell`,
 `git_includes`, `clone`. Defaults: the schedule on for a fresh config, else as
@@ -154,18 +164,15 @@ identity of its own, or when already included; `clone` on with accounts.
 | `--dry-run` | Show the diff and checks; change nothing |
 | `--offline` | No `ssh -T` or provider API calls |
 
-#### `gitten init`
-
-Write a starter config without asking: the defaults, plus, when `gh` is logged
-in to github.com, a provider reading its token (`gh auth token --hostname
-github.com --user <login>`) and a rule for the login's own repos; commented
-examples of providers and rules follow. Refuses to overwrite an existing config.
-`setup` is the guided way.
-
 #### `gitten discover [flags]`
 
 Run discovery rules and show the plan for the repos they find (see
-[Reconciliation](#reconciliation)).
+[Reconciliation](#reconciliation)). Without `--apply` it changes nothing and
+ends saying so: how many repos would be cloned, how many of the changes
+`discover --apply` makes and that `apply` makes them all, `setup` to change
+what is tracked, and the installed background syncs (state's `schedules`) with
+how many of the changes they make on their next run under `reconcile.auto`, or
+that none is installed.
 
 | Flag | Description |
 |---|---|
@@ -330,14 +337,14 @@ repos are recorded as that rule's. Otherwise (`--no-save`, or no terminal)
 they are recorded as added by hand (`manually_added`, the rule's tags as
 their own) and put in the shared manifest when there is one. The rule is
 named by `--save`, or after the owner (`mine` for `--mine`, `search` for
-`--query`), languages and topics, made unique among config's rules.
+`--query`), languages, topics and name globs, made unique among config's rules.
 
 | Flag | Description |
 |---|---|
 | `--tag <tag>` | Assign tags (comma-separated) |
 | `--path <override>` | Override the templated path (one repo) |
 | `--org`, `--user`, `--group`, `--mine`, `--query` | The selection: an organization, a user, a GitLab group, the token's own repos (`affiliation: [owner]` on GitHub), or a raw search |
-| `--language`, `--topic`, `--name`, `--visibility`, `--forks`, `--archived` | Its filters, as a rule's `languages`, `topics`, `name_pattern`, `visibility`, `include_forks`, `include_archived` |
+| `--language`, `--topic`, `--name`, `--name-pattern`, `--visibility`, `--forks`, `--archived` | Its filters, as a rule's `languages`, `topics`, `names` (globs; repeat or comma-separate), `name_pattern` (a regular expression), `visibility`, `include_forks`, `include_archived` |
 | `--provider <name>` | The provider to search |
 | `--save <name>`, `--no-save` | Keep the selection as a rule with this name, or don't ask |
 | `--dry-run` | List what matches (`{rule, provider, new, tracked}` under `--json`); clone nothing |
@@ -702,7 +709,8 @@ discovery:
     visibility: "all"             # "all", "public", "private", "internal"
     languages: []                 # e.g., ["Go", "Rust"] -- any of the repo's languages, case-insensitive
     topics: []                    # e.g., ["backend"] -- repo must have ALL listed topics
-    name_pattern: ""              # Regex filter on repo name (e.g., "^api-")
+    names: []                     # e.g., ["api-*", "*-worker"] -- globs on the repo name, any of them, ignoring case
+    name_pattern: ""              # Regex filter on repo name (e.g., "^api-"); with names, both must match
 
     # Tags assigned to repos discovered by this rule. Used for filtering in commands.
     tags: []                      # e.g., ["personal", "oss"]
@@ -737,10 +745,12 @@ discovery:
 
 # Repos matching ANY exclude rule are skipped, even if a discovery rule matched them.
 exclude:
-  # Regex on full repo name (owner/name)
+  # Regex on the repo's name
   - name_pattern: ""              # e.g., "^deprecated-"
-  # Explicit repo list (owner/name)
-  - repos: []                    # e.g., ["my-org/legacy-monolith"]
+  # Globs on the repo's name, any of them, ignoring case
+  - names: []                     # e.g., ["*-sandbox", "*-experiment"]
+  # Repo keys, or globs over them as in overrides
+  - repos: []                     # e.g., ["github.com/my-org/legacy-*"]
 
 # ============================================================================
 # Per-Repo Overrides

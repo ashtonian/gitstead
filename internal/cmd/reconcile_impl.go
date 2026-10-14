@@ -42,7 +42,9 @@ func (c *PlanCmd) Run(ctx *Context) error {
 	if ctx.JSON {
 		return ctx.Emit(plan)
 	}
-	printPlan(plan, cfg.Reconcile.Auto)
+	if automatic := printPlan(plan, cfg.Reconcile.Auto); len(plan.Actions) > 0 {
+		fmt.Printf("\nsync applies %d of %d on its own (reconcile.auto: %s); `gitten apply` makes them all.\n", automatic, len(plan.Actions), cfg.Reconcile.Auto)
+	}
 	return nil
 }
 
@@ -191,14 +193,14 @@ func confirm(question string) bool {
 }
 
 // printPlan lists the plan, marking what sync won't apply on its own under
-// reconcile.auto (pass "all" when the caller applies everything).
-func printPlan(p *reconcile.Plan, auto string) {
+// reconcile.auto (pass "all" when the caller applies everything), and
+// returns how many of its actions sync applies on its own.
+func printPlan(p *reconcile.Plan, auto string) (automatic int) {
 	if p.Empty() {
 		fmt.Println("Nothing to change: disk and state match config.")
-		return
+		return 0
 	}
 	bySync := reconcile.AutoFilter(auto)
-	automatic := 0
 	if len(p.Actions) > 0 {
 		fmt.Println("Changes:")
 		for _, a := range p.Actions {
@@ -218,9 +220,7 @@ func printPlan(p *reconcile.Plan, auto string) {
 		}
 	}
 	printDriftAndBlocked(p)
-	if auto != "all" && len(p.Actions) > 0 {
-		fmt.Printf("\nsync applies %d of %d on its own (reconcile.auto: %s); `gitten apply` makes them all.\n", automatic, len(p.Actions), auto)
-	}
+	return automatic
 }
 
 // printPending lists what a run left for `gitten apply`, and any drift or

@@ -83,35 +83,19 @@ func renderAccount(doc *config.Document, acct Account) error {
 	if err := doc.Upsert("accounts", config.Named(acct.Name), account); err != nil {
 		return err
 	}
-	provider := config.Provider{
-		Name: acct.Name, Type: acct.Type, URL: acct.URL, Account: acct.Name,
-		TokenCommand: acct.TokenCommand, TokenEnv: acct.TokenEnv, CloneProtocol: acct.Protocol,
-	}
+	provider, rules := acct.Discovery()
 	if err := doc.Upsert("providers", config.Named(acct.Name), provider); err != nil {
 		return err
 	}
-
-	var rules []string
-	for _, t := range acct.Track {
-		rule := config.DiscoveryRule{Name: ruleName(acct, t), Provider: acct.Name, Tags: []string{acct.Name},
-			Languages: t.Languages, Topics: t.Topics, NamePattern: t.NamePattern}
-		switch {
-		case t.Kind == "org":
-			rule.Org = t.Owner
-		case t.Kind == "group":
-			rule.Group = t.Owner
-		case acct.Type == "github":
-			rule.Affiliation = []string{"owner"} // the token's own repos, private ones included
-		case acct.Type == "gitlab":
-			rule.User = t.Owner
-		}
-		rules = append(rules, rule.Name)
+	var names []string
+	for _, rule := range rules {
+		names = append(names, rule.Name)
 		if err := doc.Upsert("discovery", config.Named(rule.Name), rule); err != nil {
 			return err
 		}
 	}
 	doc.Remove("discovery", func(n *yaml.Node) bool {
-		return config.Field("provider", acct.Name)(n) && !slices.ContainsFunc(rules, func(r string) bool { return config.Named(r)(n) })
+		return config.Field("provider", acct.Name)(n) && !slices.ContainsFunc(names, func(r string) bool { return config.Named(r)(n) })
 	})
 
 	if acct.BaseDir == "" {
@@ -123,6 +107,32 @@ func renderAccount(doc *config.Document, acct Account) error {
 	}
 	override := config.Override{Repos: globs, BaseDir: acct.BaseDir, Account: acct.Name}
 	return doc.Upsert("overrides", config.Field("account", acct.Name), override)
+}
+
+// Discovery is the provider an account's repos are found through, and a
+// discovery rule for each owner it tracks.
+func (acct Account) Discovery() (config.Provider, []config.DiscoveryRule) {
+	provider := config.Provider{
+		Name: acct.Name, Type: acct.Type, URL: acct.URL, Account: acct.Name,
+		TokenCommand: acct.TokenCommand, TokenEnv: acct.TokenEnv, CloneProtocol: acct.Protocol,
+	}
+	var rules []config.DiscoveryRule
+	for _, t := range acct.Track {
+		rule := config.DiscoveryRule{Name: ruleName(acct, t), Provider: acct.Name, Tags: []string{acct.Name},
+			Languages: t.Languages, Topics: t.Topics, Names: t.Names, NamePattern: t.NamePattern}
+		switch {
+		case t.Kind == "org":
+			rule.Org = t.Owner
+		case t.Kind == "group":
+			rule.Group = t.Owner
+		case acct.Type == "github":
+			rule.Affiliation = []string{"owner"} // the token's own repos, private ones included
+		case acct.Type == "gitlab":
+			rule.User = t.Owner
+		}
+		rules = append(rules, rule)
+	}
+	return provider, rules
 }
 
 // ruleName names an account's rule for an owner: the account's own repos are

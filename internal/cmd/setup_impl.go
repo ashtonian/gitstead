@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -412,7 +411,8 @@ func askSetup(ctx *Context, det setup.Detected, a setup.Answers, tracked map[str
 	if err := askLayout(det, &a, home); err != nil {
 		return a, err
 	}
-	if err := askAccounts(ctx.GoCtx(), det, &a, online); err != nil {
+	found := map[string]int{}
+	if err := askAccounts(ctx.GoCtx(), det, &a, online, found); err != nil {
 		return a, err
 	}
 	if err := askFeatures(&a); err != nil {
@@ -429,7 +429,7 @@ func askSetup(ctx *Context, det setup.Detected, a setup.Answers, tracked map[str
 	if err := askAdopt(det, &a, tracked, home); err != nil {
 		return a, err
 	}
-	return a, askFinish(det, &a)
+	return a, askFinish(det, &a, found)
 }
 
 // askSchedule asks how often the background sync runs, and on Linux whether
@@ -456,8 +456,9 @@ func askSchedule(a *setup.Answers) error {
 }
 
 // askFinish asks about what setup does beyond the config: your shell, your
-// global git config, and cloning now.
-func askFinish(det setup.Detected, a *setup.Answers) error {
+// global git config, and cloning now. found is how many repos each account's
+// rules found, for the accounts whose rules were looked up.
+func askFinish(det setup.Detected, a *setup.Answers, found map[string]int) error {
 	var fields []huh.Field
 	switch {
 	case det.ShellRC != nil && det.ShellIntegrated:
@@ -475,10 +476,23 @@ func askFinish(det setup.Detected, a *setup.Answers) error {
 				"with includeIf: one include.path line in your global git config. Recommended with several accounts.").
 			Value(&a.GitIncludes))
 	}
-	if len(a.Accounts) > 0 {
+	total, known := foundTotal(a.Accounts, found)
+	nothingToClone := known && total == 0
+	if nothingToClone {
+		a.Clone = false
+	}
+	if len(a.Accounts) > 0 && !nothingToClone {
+		title := "Clone the repos your accounts track now?"
+		if known {
+			title = fmt.Sprintf("Clone the %d %s your accounts track now?", total, plural(total, "repo", "repos"))
+		}
+		later := "Otherwise `gitten apply` does it, or `gitten sync`."
+		if a.Schedule {
+			later = "Otherwise the first background sync does it, or `gitten apply`."
+		}
 		fields = append(fields, huh.NewConfirm().
-			Title("Clone the repos your accounts track now?").
-			Description("Otherwise the first background sync does it, or `gitten apply`.").
+			Title(title).
+			Description("Repos already here are left as they are. "+later).
 			Value(&a.Clone))
 	}
 	if len(fields) == 0 {
@@ -509,7 +523,21 @@ func askLayout(det setup.Detected, a *setup.Answers, home string) error {
 	)).Run()
 }
 
-func askAccounts(ctx context.Context, det setup.Detected, a *setup.Answers, online bool) error {
+// foundTotal is how many repos the accounts' rules found, and whether every
+// account's were looked up.
+func foundTotal(accounts []setup.Account, found map[string]int) (int, bool) {
+	total := 0
+	for _, acct := range accounts {
+		n, ok := found[acct.Name]
+		if !ok {
+			return 0, false
+		}
+		total += n
+	}
+	return total, true
+}
+
+func askAccounts(ctx context.Context, det setup.Detected, a *setup.Answers, online bool, found map[string]int) error {
 	if len(a.Accounts) > 0 {
 		var keep []string
 		var opts []huh.Option[string]
@@ -547,7 +575,7 @@ func askAccounts(ctx context.Context, det setup.Detected, a *setup.Answers, onli
 		a.Accounts = append(a.Accounts, acct)
 	}
 	for i := range a.Accounts {
-		if err := askAccount(ctx, det, &a.Accounts[i], online); err != nil {
+		if err := askAccount(ctx, det, &a.Accounts[i], online, found); err != nil {
 			return err
 		}
 	}
@@ -581,7 +609,7 @@ func askNewAccount() (setup.Account, error) {
 	return acct, err
 }
 
-func askAccount(ctx context.Context, det setup.Detected, acct *setup.Account, online bool) error {
+func askAccount(ctx context.Context, det setup.Detected, acct *setup.Account, online bool, found map[string]int) error {
 	title := fmt.Sprintf("Account %s on %s", orDefault(acct.Login, acct.Name), acct.Host)
 	if err := huh.NewForm(huh.NewGroup(
 		huh.NewNote().Title(title),
@@ -589,8 +617,24 @@ func askAccount(ctx context.Context, det setup.Detected, acct *setup.Account, on
 	)).Run(); err != nil {
 		return err
 	}
-	if err := askTrack(ctx, acct, online); err != nil {
-		return err
+	// Choose what to track until what it finds is what you want.
+	for {
+		if err := askTrack(ctx, acct, online); err != nil {
+			return err
+		}
+		if !online || len(acct.Track) == 0 {
+			break
+		}
+		n, keep, err := previewTrack(ctx, *acct)
+		if err != nil {
+			return err
+		}
+		if keep {
+			if n >= 0 {
+				found[acct.Name] = n
+			}
+			break
+		}
 	}
 
 	keyChoice := acct.SSHKey
@@ -743,42 +787,141 @@ func askTrack(ctx context.Context, acct *setup.Account, online bool) error {
 // re-run starts from them.
 func keepFilters(t setup.Track, previous []setup.Track) setup.Track {
 	if i := slices.IndexFunc(previous, func(p setup.Track) bool { return strings.EqualFold(p.Owner, t.Owner) }); i >= 0 {
-		t.Languages, t.Topics, t.NamePattern = previous[i].Languages, previous[i].Topics, previous[i].NamePattern
+		p := previous[i]
+		t.Languages, t.Topics, t.Names, t.NamePattern = p.Languages, p.Topics, p.Names, p.NamePattern
 	}
 	return t
 }
 
-// askFilters offers to narrow each owner an account tracks to the repos in
-// some languages, with some topics, or whose names match a pattern; the
+// previewTrack looks up what an account's rules find, shows it, and asks
+// whether to track that. It returns how many repos were found (-1 when the
+// lookup failed) and false to choose again.
+func previewTrack(ctx context.Context, acct setup.Account) (int, bool, error) {
+	provider, rules := acct.Discovery()
+	cfg := config.Defaults()
+	cfg.Providers, cfg.Discovery = []config.Provider{provider}, rules
+	fmt.Printf("Looking up what %s tracks...\n", acct.Name)
+	lctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	results, discovered, err := discovery.RunDiscovery(lctx, cfg, "", "")
+	cancel()
+	if err != nil {
+		fmt.Printf("  Couldn't look it up (%v); `gitten discover` shows it once the config is written.\n", err)
+		return -1, true, nil
+	}
+	byRule := map[string][]string{}
+	for _, r := range discovered {
+		byRule[r.DiscoveredBy] = append(byRule[r.DiscoveredBy], r.Name)
+	}
+	failed := false
+	for i, r := range results {
+		label := r.Rule
+		if i < len(acct.Track) {
+			label = trackLabel(acct.Track[i])
+		}
+		if r.Err != nil {
+			failed = true
+			fmt.Printf("  %s: couldn't list them: %v\n", label, r.Err)
+			continue
+		}
+		names := byRule[r.Rule]
+		slices.SortFunc(names, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
+		fmt.Printf("  %s: %d %s\n", label, len(names), plural(len(names), "repo", "repos"))
+		if len(names) > 0 {
+			fmt.Printf("    %s\n", sample(names, 12))
+		}
+		for _, w := range r.Warnings {
+			fmt.Printf("    warning: %s\n", w)
+		}
+	}
+	n := len(discovered)
+	if failed {
+		n = -1
+	}
+	keep, title := "keep", fmt.Sprintf("Track these %d repos with %s?", len(discovered), acct.Name)
+	switch {
+	case len(discovered) == 1:
+		title = "Track this repo with " + acct.Name + "?"
+	case len(discovered) == 0 && !failed:
+		keep, title = "change", "Nothing matches. Keep it anyway?"
+	}
+	if err := huh.NewSelect[string]().
+		Title(title).
+		Description("Nothing is cloned yet: you choose that at the end.").
+		Options(
+			huh.NewOption("Yes", "keep"),
+			huh.NewOption("No, change whose repos or the filters", "change"),
+		).Value(&keep).Run(); err != nil {
+		return n, false, err
+	}
+	return n, keep == "keep", nil
+}
+
+// trackLabel names what a tracked owner covers: whose repos, and the filters.
+func trackLabel(t setup.Track) string {
+	label := t.Owner
+	if t.Kind == "self" {
+		label += " (your own repos)"
+	}
+	var filters []string
+	if len(t.Names) > 0 {
+		filters = append(filters, "named "+strings.Join(t.Names, " or "))
+	}
+	if t.NamePattern != "" {
+		filters = append(filters, "matching "+t.NamePattern)
+	}
+	if len(t.Languages) > 0 {
+		filters = append(filters, "in "+strings.Join(t.Languages, " or "))
+	}
+	if len(t.Topics) > 0 {
+		filters = append(filters, "with topics "+strings.Join(t.Topics, " and "))
+	}
+	if len(filters) > 0 {
+		label += ", " + strings.Join(filters, ", ")
+	}
+	return label
+}
+
+// sample is names joined, up to max of them, with how many more there are.
+func sample(names []string, max int) string {
+	if len(names) <= max {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s, and %d more", strings.Join(names[:max], ", "), len(names)-max)
+}
+
+// askFilters offers to narrow each owner an account tracks to the repos
+// whose names match some globs, in some languages, or with some topics; the
 // answers become the filters of the owner's discovery rule.
 func askFilters(acct *setup.Account) error {
 	if len(acct.Track) == 0 {
 		return nil
 	}
-	narrow := slices.ContainsFunc(acct.Track, func(t setup.Track) bool {
-		return len(t.Languages) > 0 || len(t.Topics) > 0 || t.NamePattern != ""
-	})
+	narrow := slices.ContainsFunc(acct.Track, setup.Track.Narrowed)
 	if err := huh.NewConfirm().Title("Track only some of their repos?").
-		Description("Narrow each owner by language, topics or a name pattern. Otherwise every repo they own is tracked.").
+		Description("Narrow each owner by name, language or topics. Otherwise every repo they own is tracked.").
 		Value(&narrow).Run(); err != nil {
 		return err
 	}
 	for i := range acct.Track {
 		t := &acct.Track[i]
 		if !narrow {
-			t.Languages, t.Topics, t.NamePattern = nil, nil, ""
+			t.Languages, t.Topics, t.Names, t.NamePattern = nil, nil, nil, ""
 			continue
 		}
-		languages, topics := strings.Join(t.Languages, ", "), strings.Join(t.Topics, ", ")
+		names, languages, topics := strings.Join(t.Names, ", "), strings.Join(t.Languages, ", "), strings.Join(t.Topics, ", ")
+		namesHelp := "Any of them, comma-separated; * matches anything: *billing*, *payments*, svc-*. Blank for any name."
+		if t.NamePattern != "" {
+			namesHelp += fmt.Sprintf(" Your config's name_pattern %q applies too.", t.NamePattern)
+		}
 		if err := huh.NewForm(huh.NewGroup(
 			huh.NewNote().Title(t.Owner+"'s repos"),
+			huh.NewInput().Title("Only names like").Description(namesHelp).Value(&names).Validate(validNameGlobs),
 			huh.NewInput().Title("Only in these languages").Description("Any of them, comma-separated: Go, Rust. Blank for any language.").Value(&languages),
 			huh.NewInput().Title("Only with these topics").Description("All of them, comma-separated. Blank for any topics.").Value(&topics),
-			huh.NewInput().Title("Only names matching").Description("A regular expression, such as ^svc-. Blank for any name.").Value(&t.NamePattern).Validate(validRegexp),
 		)).Run(); err != nil {
 			return err
 		}
-		t.Languages, t.Topics = splitList(languages), splitList(topics)
+		t.Names, t.Languages, t.Topics = splitList(names), splitList(languages), splitList(topics)
 	}
 	return nil
 }
@@ -794,9 +937,11 @@ func splitList(s string) []string {
 	return out
 }
 
-func validRegexp(s string) error {
-	if _, err := regexp.Compile(s); err != nil {
-		return fmt.Errorf("not a regular expression: %w", err)
+func validNameGlobs(s string) error {
+	for _, g := range splitList(s) {
+		if err := config.CheckNameGlob(g); err != nil {
+			return err
+		}
 	}
 	return nil
 }

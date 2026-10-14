@@ -367,6 +367,17 @@ func TestE2E_DiscoverByUser(t *testing.T) {
 			t.Errorf("discover output missing %s:\n%s", name, out)
 		}
 	}
+	// A preview says it changed nothing, and that nothing will change by
+	// itself.
+	for _, want := range []string{"This was a preview: nothing was cloned or changed.", "3 repos would be cloned.",
+		"No background sync is installed"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("discover output missing %q:\n%s", want, out)
+		}
+	}
+	if repos := env.statusJSON(t); len(repos) != 0 {
+		t.Errorf("a preview tracked %v", repos)
+	}
 }
 
 // TestE2E_DiscoverApplyHTTPS verifies clone_protocol: https drives discover
@@ -469,15 +480,15 @@ func TestE2E_CloneSelection(t *testing.T) {
 		Rule string   `json:"rule"`
 		New  []string `json:"new"`
 	}
-	if stderr, code := env.runJSON(t, &preview, "clone", "--org", "test-org", "--name", "^svc-", "--dry-run"); code != 0 ||
-		preview.Rule != "test-org" || strings.Join(preview.New, " ") != key("svc-a")+" "+key("svc-b") {
+	if stderr, code := env.runJSON(t, &preview, "clone", "--org", "test-org", "--name", "SVC-*", "--dry-run"); code != 0 ||
+		preview.Rule != "test-org-svc" || strings.Join(preview.New, " ") != key("svc-a")+" "+key("svc-b") {
 		t.Fatalf("clone --dry-run: exit %d, %+v\n%s", code, preview, stderr)
 	}
 	if repos := env.statusJSON(t); len(repos) != 0 {
 		t.Fatalf("a dry run tracked %v", repos)
 	}
 
-	if out, code := env.run(t, "clone", "--org", "test-org", "--name", "^svc-", "--save", "services"); code != 0 {
+	if out, code := env.run(t, "clone", "--org", "test-org", "--name", "svc-*", "--save", "services"); code != 0 {
 		t.Fatalf("clone --save exit %d:\n%s", code, out)
 	}
 	for _, name := range []string{"svc-a", "svc-b"} {
@@ -485,7 +496,7 @@ func TestE2E_CloneSelection(t *testing.T) {
 			t.Errorf("%s wasn't cloned", name)
 		}
 	}
-	if cfg := mustRead(t, env.configFile); !strings.Contains(cfg, "name: services") || !strings.Contains(cfg, "name_pattern: ^svc-") {
+	if cfg := mustRead(t, env.configFile); !strings.Contains(cfg, "name: services") || !strings.Contains(cfg, "- svc-*") {
 		t.Errorf("the rule wasn't saved:\n%s", cfg)
 	}
 
@@ -500,7 +511,7 @@ func TestE2E_CloneSelection(t *testing.T) {
 
 	// Unsaved, the repos are tracked as cloned by hand, and config is left be.
 	before := mustRead(t, env.configFile)
-	if out, code := env.run(t, "clone", "--org", "test-org", "--name", "^lib-", "--no-save"); code != 0 {
+	if out, code := env.run(t, "clone", "--org", "test-org", "--name-pattern", "^lib-", "--no-save"); code != 0 {
 		t.Fatalf("clone --no-save exit %d:\n%s", code, out)
 	}
 	if mustRead(t, env.configFile) != before {
