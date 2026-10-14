@@ -66,9 +66,9 @@ git-mgr shells out to `git`, so git must be on `PATH`.
 ## Quick start
 
 ```bash
-git-mgr setup     # a few questions, a review of the config it will write, then it writes it
-git-mgr plan      # what will be cloned and changed
-git-mgr apply     # do it
+git-mgr setup     # a few questions, a review, then it writes the config, clones and installs the background sync
+git-mgr status    # what it tracks
+git-mgr cd api    # jump to a repo (a new terminal picks up the shell integration)
 ```
 
 `setup` starts every answer at what it finds on your machine, so on a typical
@@ -83,9 +83,11 @@ machine you mostly press Enter:
    account your keys sign in as — or HTTPS), the commit identity (from your
    global git config or `includeIf` files), signing, and optionally a separate
    base dir.
-3. **Features** — backups (on), background sync every 15 minutes (on), offsite
-   backup refs (off), what `sync` may change by itself, what happens when a repo
-   disappears upstream.
+3. **Features** — backups (on), the background sync (on) and how often it
+   runs (15 minutes; on Linux, whether it keeps running while you are logged
+   out), offsite backup refs (off), fast-forwarding clean clones that are behind
+   (off), what `sync` may change by itself, what happens when a repo disappears
+   upstream.
 4. **Agents** — whether to run coding agents in [workspaces](#workspaces) (on
    when `claude` or `codex` is on your `PATH`): which agents, plus a command of
    your own such as a shell-function wrapper, how many per workspace, where
@@ -95,17 +97,37 @@ machine you mostly press Enter:
    afterwards with `git-mgr ws create … --save`, once their repos are tracked.
 5. **Existing clones** — those discovery won't find where they are can be
    tracked in place.
-6. **Review** — the diff of your config file and checks: each token works, each
-   key signs in as the right account, signing works without a terminal. Nothing
-   is written until you confirm.
+6. **Finishing touches** — add `git-mgr cd` and tab completion to your shell's
+   startup file (on, unless it has them: one line in `~/.zshrc`,
+   `~/.bashrc` -- `~/.bash_profile` on macOS -- or fish's `config.fish`);
+   give each account's identity to repos you clone yourself under its folders
+   ([`accounts gitconfig --install`](#accounts), on with several accounts);
+   clone what your accounts track now (on).
+7. **Review** — the diff of your config file, everything else it will do, and
+   checks: each token works, each key signs in as the right account, signing
+   works without a terminal, and the background sync will have each token (one
+   in an environment variable it won't). Nothing is written until you confirm.
+
+Then it writes the config and does the rest in this order -- tracks the
+clones you picked, writes your git identities, adds the shell line, clones,
+and installs the background sync last, so its first run doesn't race the
+clone -- and ends with what it set up and what to run next. A step that fails
+is reported and the others still run; running `setup` again finishes it.
+
+A `gh` login whose token comes from an environment variable (`GITHUB_TOKEN`,
+`GH_TOKEN`) is set up to read it from there (`token_env`), since `gh auth
+token` reads only the logins gh stores; `gh auth login` stores one.
 
 Re-run `setup` any time to change your answers; it edits the config in place,
-keeps your comments and touches only what it manages. Scripted:
+keeps your comments and touches only what it manages. Every answer starts at
+what is set up now: the background sync stays as it is unless you change it
+(turning it off removes it), and lines it added before are replaced, not
+repeated. Scripted:
 
 | Flag | Effect |
 | --- | --- |
 | `--yes` | Take the detected and recommended answers without asking. |
-| `--answers <file>` | Take the answers from a YAML file. |
+| `--answers <file>` | Take the answers from a YAML file (the format `--save-answers` writes). |
 | `--save-answers <file>` | Also write the answers used, to repeat this setup on another machine. |
 | `--dry-run` | Show the diff and checks; change nothing. |
 | `--offline` | Skip `ssh -T` probes and provider API calls. |
@@ -121,9 +143,12 @@ git-mgr status                         # table of what you're managing
 git-mgr ws create app --repo ~/code/myrepo --agents 4 --open --cmd claude
 ```
 
-`git-mgr bootstrap` runs `setup` (if there's no config yet), `doctor`,
-`discover --apply`, `sync` and installs the agent, in one command. `git-mgr init`
-writes a config without asking anything.
+`git-mgr bootstrap` is for a machine that gets its config another way --
+your dotfiles, a home-manager module, `setup --save-answers` from another
+machine: it runs `setup --yes` only if there's no config yet, then `doctor`,
+`discover --apply`, `sync`, and installs the background sync (`--profile`
+scopes all of it to a tag). `git-mgr init` writes a starter config without
+asking anything or touching anything else.
 
 ## Commands
 
@@ -156,9 +181,9 @@ writes a config without asking anything.
 | `git-mgr accounts ls\|gitconfig` | List accounts and their folders; make each account's identity your git's own under its folders with `includeIf` (`--write`, `--install`). See [Accounts](#accounts). |
 | `git-mgr archives ls\|show\|restore\|rm` | The catalog of what was saved before copies and repos were taken away -- bundles of unique work, and whole clones -- and how to restore each; `restore` moves an archived clone back or rebuilds a clone from a bundle, `rm` deletes archives for good. |
 | `git-mgr cd\|path\|open <query>` | Jump to, print, or open in your editor (`--web`: the repo's page) a repo, workspace or agent's folder from part of its name. See [Jump and open](#jump-and-open). |
-| `git-mgr shell-init bash\|zsh\|fish` | Print the shell function that makes `git-mgr cd` change directory. |
+| `git-mgr shell-init bash\|zsh\|fish` | Print the shell integration: the function that makes `git-mgr cd` change directory, and tab completion. `setup` adds it to your shell. |
 | `git-mgr install-agent` | Install, list (`--list`) or remove (`--uninstall`) background syncs (launchd/systemd/cron); `--name` and `--repos`/`--tag`/`--set` for several. |
-| `git-mgr install-completions` | Print a shell completion script (bash/zsh/fish). See [Shell completions](#shell-completions). |
+| `git-mgr install-completions` | Print tab completion alone, for your login shell. See [Shell completions](#shell-completions). |
 | `git-mgr version` | Print version, commit, build date. |
 
 Global flags: `--config`, `--state`, `--verbose`/`-v`, `--quiet`/`-q`,
@@ -232,7 +257,7 @@ snapshot.
 ## Jump and open
 
 ```bash
-eval "$(git-mgr shell-init zsh)"     # in ~/.zshrc (or bash; fish: git-mgr shell-init fish | source)
+eval "$(git-mgr shell-init zsh)"     # setup adds this to ~/.zshrc (or bash; fish: git-mgr shell-init fish | source)
 git-mgr cd app                        # the repo app
 git-mgr cd acme/api                   # by owner/name, when two repos share a name
 git-mgr cd app 2                      # workspace app, agent-2's folder
@@ -261,7 +286,9 @@ works), in the target's directory.
 
 Tab-completion for commands, flags, and dynamic values — repo keys, tags, named
 sets, workspace and fleet names, and `cd`/`path`/`open` targets are pulled live
-from your state/config.
+from your state/config. `shell-init` (see [Jump and open](#jump-and-open)),
+which `setup` adds to your shell, includes it; in zsh it loads the completion
+system (`compinit`) first if your configuration hasn't. For completion alone:
 
 ```bash
 # zsh / bash — add to your rc file

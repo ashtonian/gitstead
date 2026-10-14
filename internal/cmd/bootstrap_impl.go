@@ -48,8 +48,9 @@ func (c *BootstrapCmd) Run(ctx *Context) error {
 	finish := func(err error) error { return ctx.finish(steps, err) }
 
 	if needSetup {
-		// The agent is installed below, with bootstrap's own interval.
-		s := &SetupCmd{Yes: ctx.JSON || !term.IsTerminal(int(os.Stdin.Fd())), noSchedule: true}
+		// Repos are cloned and the agent installed below, with bootstrap's
+		// own profile and interval.
+		s := &SetupCmd{Yes: ctx.JSON || !term.IsTerminal(int(os.Stdin.Fd())), noSchedule: true, noClone: true}
 		if err := step("setup", s.Run); err != nil {
 			return finish(fmt.Errorf("setup: %w", err))
 		}

@@ -14,6 +14,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/jump"
 	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/git-mgr/internal/shellutil"
 )
 
 // targetFlags pick a place git-mgr knows from a short query.
@@ -184,7 +185,7 @@ func (c *OpenCmd) openWeb(ctx *Context, t jump.Target) error {
 
 // ShellInitCmd prints the shell integration: a git-mgr function whose cd
 // changes the shell's directory, and which hands everything else to the
-// program.
+// program, and tab completion of git-mgr's commands, flags and arguments.
 type ShellInitCmd struct {
 	Shell string `arg:"" help:"Your shell: bash, zsh or fish." enum:"bash,zsh,fish"`
 }
@@ -193,9 +194,16 @@ func (c *ShellInitCmd) Run(ctx *Context) error {
 	if ctx.JSON {
 		return errNoJSON("shell-init, which prints shell code,")
 	}
+	// Completion runs this binary, by its path, with the command line in
+	// COMP_LINE (see kongplete.Complete in main).
+	bin, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("finding the git-mgr binary for completion: %w", err)
+	}
+	bin = shellutil.Quote(bin)
 	switch c.Shell {
 	case "fish":
-		fmt.Print(`# git-mgr shell integration: git-mgr cd <query> changes directory.
+		fmt.Printf(`# git-mgr shell integration: git-mgr cd <query> changes directory.
 function git-mgr
     if test (count $argv) -gt 0; and test $argv[1] = cd
         set -l dir (command git-mgr path $argv[2..-1]); and cd $dir
@@ -203,9 +211,23 @@ function git-mgr
         command git-mgr $argv
     end
 end
-`)
+# Tab completion.
+function __complete_git_mgr
+    set -lx COMP_LINE (commandline -cp)
+    test -z (commandline -ct)
+    and set COMP_LINE "$COMP_LINE "
+    %s
+end
+complete -f -c git-mgr -a "(__complete_git_mgr)"
+`, bin)
 	default:
-		fmt.Print(`# git-mgr shell integration: git-mgr cd <query> changes directory.
+		compinit := ""
+		if c.Shell == "zsh" {
+			// zsh runs bash completion through bashcompinit, which needs
+			// the completion system (compinit) loaded first.
+			compinit = "(( $+functions[compdef] )) || { autoload -U +X compinit && compinit }\nautoload -U +X bashcompinit && bashcompinit\n"
+		}
+		fmt.Printf(`# git-mgr shell integration: git-mgr cd <query> changes directory.
 git-mgr() {
   if [ "$1" = cd ]; then
     shift
@@ -215,7 +237,9 @@ git-mgr() {
     command git-mgr "$@"
   fi
 }
-`)
+# Tab completion.
+%scomplete -o default -C %s git-mgr
+`, compinit, bin)
 	}
 	return nil
 }

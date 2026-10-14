@@ -119,9 +119,31 @@ keeps comments and order, sets `base_dir`, `layout` (dropping `path_template`)
 and the feature keys, and upserts by name each account, its provider (same
 name, `account:` set) and one rule per tracked owner (`<account>` for its own
 repos, `<account>/<org>` per organization), removing that provider's rules for
-owners no longer tracked. Before writing it shows the diff and runs the checks
-(`setup.Checker`: tokens, keys, `ssh -T`, a test signature), which `doctor` also
-uses offline. After writing it adopts the chosen clones and installs the agent.
+owners no longer tracked. Before writing it shows the diff, what it will do
+beyond the config, and the checks (`setup.Checker`: tokens, keys, `ssh -T`, a
+test signature, which `doctor` also uses offline; with the schedule on,
+`setup.ScheduleChecks`: a `token_env` the schedule's captured environment
+lacks). After writing it reloads the config and runs, each step reported and
+the rest run when one fails: adopt the chosen clones, `accounts gitconfig
+--install` (`git_includes`), add the `shell-init` line to the shell's startup
+file between markers it replaces on a re-run (`shell`; `setup.ShellRC`: `$SHELL`
+picks zsh -> `${ZDOTDIR:-~}/.zshrc`, bash -> `~/.bashrc` or `~/.bash_profile` on
+macOS, fish -> `config.fish`; a symlinked file is edited at its target), `discover
+--apply` (`clone`), and last `install-agent --interval <schedule_interval>`, or
+`install-agent --uninstall` when the schedule is off and one is installed. A gh
+login whose token gh has from an environment variable (`tokenSource`) gets
+`token_env`, not `gh auth token --user`, which reads only stored logins; when gh
+lists both for one login, the stored one wins.
+
+Answers (`setup.Answers`, the `--answers`/`--save-answers` file): `base_dir`,
+`layout`, `accounts`, `adopt`, `backups`, `schedule`, `schedule_interval` (divides
+an hour or a day; default `15m`, or the installed schedule's), `linger`,
+`remote_sync`, `update`, `reconcile_auto`, `cleanup`, `workspaces`, `shell`,
+`git_includes`, `clone`. Defaults: the schedule on for a fresh config, else as
+installed; `shell` on unless the startup file already has a `git-mgr shell-init`
+line; `git_includes` on with several accounts, one of them with a key or
+identity of its own, or when already included; `clone` on with accounts.
+`bootstrap` runs setup leaving the schedule and cloning to its own steps.
 
 | Flag | Description |
 |---|---|
@@ -133,27 +155,11 @@ uses offline. After writing it adopts the chosen clones and installs the agent.
 
 #### `git-mgr init`
 
-Create a config file with sensible defaults. Interactive prompts for base_dir, provider instances, first discovery rule.
-
-```
-$ git-mgr init
-Config file: ~/.config/git-mgr/config.yaml
-Base directory for repos [~/repos]: ~/projects
-Add a provider? (y/n): y
-  Provider type (github/gitlab/gitea/forgejo): github
-  Instance name [github.com]: github.com
-  API URL (leave empty for github.com): 
-  Token command [gh auth token]: 
-Add a discovery rule? (y/n): y
-  Provider instance: github.com
-  User or org? (user/org): user
-  Username: your-login
-  Include forks? (y/n): n
-  Include archived? (y/n): n
-  Tags (comma-separated, optional): personal
-  Rule name [ashtonian-repos]:
-Config written to ~/.config/git-mgr/config.yaml
-```
+Write a starter config without asking: the defaults, plus, when `gh` is logged
+in to github.com, a provider reading its token (`gh auth token --hostname
+github.com --user <login>`) and a rule for the login's own repos; commented
+examples of providers and rules follow. Refuses to overwrite an existing config.
+`setup` is the guided way.
 
 #### `git-mgr discover [flags]`
 

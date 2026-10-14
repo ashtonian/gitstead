@@ -11,6 +11,7 @@ import (
 	"github.com/ashtonian/git-mgr/internal/discovery"
 	"github.com/ashtonian/git-mgr/internal/gitops"
 	"github.com/ashtonian/git-mgr/internal/reconcile"
+	"github.com/ashtonian/git-mgr/internal/scheduler"
 )
 
 // Status is how a check went.
@@ -113,6 +114,26 @@ func (c Checker) probeKey(ctx context.Context, a *config.Account, host string) C
 	default:
 		return Check{Pass, fmt.Sprintf("account %q: %s authenticates as %s on %s", a.Name, key, m[1], host)}
 	}
+}
+
+// ScheduleChecks warns about what a background sync, which runs without
+// your shell's environment, won't have: a token in an environment variable
+// it doesn't set.
+func ScheduleChecks(cfg *config.Config, getenv func(string) string) []Check {
+	captured, _ := scheduler.CaptureEnv(getenv)
+	var checks []Check
+	for _, p := range cfg.Providers {
+		if p.TokenEnv == "" || captured[p.TokenEnv] != "" {
+			continue
+		}
+		fix := "use a token_command that reads it from a store, such as a password manager's CLI"
+		if config.NormalizeProviderType(p.Type) == "github" {
+			fix = "`gh auth login` stores it, so `gh auth token` can read it; run setup again afterwards"
+		}
+		checks = append(checks, Check{Warn, fmt.Sprintf("provider %q reads its token from $%s, which the background sync won't have: %s",
+			p.Name, p.TokenEnv, fix)})
+	}
+	return checks
 }
 
 type sshKeyRef struct{ where, path string }

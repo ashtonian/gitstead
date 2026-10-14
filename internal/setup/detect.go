@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -33,6 +34,18 @@ type GHAccount struct {
 	Active      bool
 	Scopes      string // comma-separated OAuth scopes
 	GitProtocol string // what gh uses for git: ssh or https
+	// TokenSource is where gh has the token: "keyring" or "oauth_token"
+	// for a login it stores, or the environment variable it was given.
+	TokenSource string
+}
+
+// TokenEnv is the environment variable holding the account's token, when
+// gh has it from one rather than a login it stores.
+func (a GHAccount) TokenEnv() string {
+	if a.TokenSource != "" && a.TokenSource == strings.ToUpper(a.TokenSource) {
+		return a.TokenSource
+	}
+	return ""
 }
 
 // SSHHost is a Host block in ~/.ssh/config.
@@ -77,6 +90,23 @@ type Detected struct {
 	Agents []config.AgentProfile
 	// Launchers are the launchers installed: tmux, iterm, muxy.
 	Launchers []string
+
+	// ShellRC is your shell's startup file; nil for a shell git-mgr doesn't
+	// integrate with. ShellIntegrated reports that it loads git-mgr's shell
+	// integration already.
+	ShellRC         *ShellRC
+	ShellIntegrated bool
+	// GitIncludes reports that your global git config includes the file
+	// `git-mgr accounts gitconfig` writes.
+	GitIncludes bool
+	// Schedule is the background sync setup installs, when one is; the
+	// caller fills it in from state.
+	Schedule *InstalledSchedule
+}
+
+// InstalledSchedule is a background sync already installed.
+type InstalledSchedule struct {
+	Interval time.Duration
 }
 
 // Runner runs a command and returns its standard output.
@@ -108,7 +138,14 @@ func quietCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 // Detector finds what a machine already has.
 type Detector struct {
 	Home string
-	Run  Runner
+	// GOOS and Getenv describe the machine for the shell's startup file;
+	// runtime.GOOS and os.Getenv when empty.
+	GOOS   string
+	Getenv func(string) string
+	// AccountsInclude is the file `git-mgr accounts gitconfig` writes, to
+	// look for in the global git config's include.path.
+	AccountsInclude string
+	Run             Runner
 	// RunCombined runs network probes, whose answers come on standard error.
 	RunCombined Runner
 	// Roots are where to look for existing clones; DefaultRoots when empty.
@@ -151,10 +188,44 @@ func (d *Detector) Detect(ctx context.Context) Detected {
 	}
 	det.Layout = guessLayout(det.Clones, logins)
 	det.Agents, det.Launchers = d.agentTools()
+	det.ShellRC, det.ShellIntegrated = d.shellRC()
+	det.GitIncludes = d.gitIncludes(ctx)
 	if d.Probe {
 		d.probeKeys(ctx, det.SSHKeys, det.GH)
 	}
 	return det
+}
+
+func (d *Detector) shellRC() (*ShellRC, bool) {
+	goos, getenv := d.GOOS, d.Getenv
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	rc, ok := DetectShellRC(d.Home, goos, getenv)
+	if !ok {
+		return nil, false
+	}
+	integrated, _ := rc.Integrated()
+	return &rc, integrated
+}
+
+func (d *Detector) gitIncludes(ctx context.Context) bool {
+	if d.AccountsInclude == "" {
+		return false
+	}
+	out, err := d.Run(ctx, "git", "config", "--global", "--get-all", "include.path")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if expandFrom(strings.TrimSpace(line), d.Home) == d.AccountsInclude {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Detector) ghAccounts(ctx context.Context) []GHAccount {
@@ -164,24 +235,32 @@ func (d *Detector) ghAccounts(ctx context.Context) []GHAccount {
 	}
 	var status struct {
 		Hosts map[string][]struct {
-			Host, Login, Scopes, GitProtocol, State string
-			Active                                  bool
+			Host, Login, Scopes, GitProtocol, State, TokenSource string
+			Active                                               bool
 		} `json:"hosts"`
 	}
 	if json.Unmarshal(out, &status) != nil {
 		return nil
 	}
 	var accounts []GHAccount
-	seen := map[string]bool{}
+	seen := map[string]int{} // host/login -> index in accounts
 	for _, entries := range status.Hosts {
 		for _, e := range entries {
-			// gh lists an env-var token beside the stored one for the same
-			// login; one account each.
-			if e.State != "success" || e.Login == "" || seen[e.Host+"/"+e.Login] {
+			if e.State != "success" || e.Login == "" {
 				continue
 			}
-			seen[e.Host+"/"+e.Login] = true
-			accounts = append(accounts, GHAccount{Host: e.Host, Login: e.Login, Active: e.Active, Scopes: e.Scopes, GitProtocol: e.GitProtocol})
+			a := GHAccount{Host: e.Host, Login: e.Login, Active: e.Active, Scopes: e.Scopes, GitProtocol: e.GitProtocol, TokenSource: e.TokenSource}
+			// gh lists an env-var token beside the stored one for the same
+			// login; one account each, the stored login if there is one,
+			// since a scheduled sync has no shell environment.
+			if i, ok := seen[e.Host+"/"+e.Login]; ok {
+				if accounts[i].TokenEnv() != "" && a.TokenEnv() == "" {
+					accounts[i] = a
+				}
+				continue
+			}
+			seen[e.Host+"/"+e.Login] = len(accounts)
+			accounts = append(accounts, a)
 		}
 	}
 	sort.Slice(accounts, func(i, j int) bool {

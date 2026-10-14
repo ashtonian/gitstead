@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ashtonian/git-mgr/internal/config"
 	"github.com/ashtonian/git-mgr/internal/pathtemplate"
 	"github.com/ashtonian/git-mgr/internal/repourl"
+	"github.com/ashtonian/git-mgr/internal/scheduler"
 )
 
 // Answers are every choice setup makes. They double as the --answers file,
@@ -21,8 +23,12 @@ type Answers struct {
 	// Adopt lists existing clones to track where they are.
 	Adopt []string `yaml:"adopt,omitempty"`
 
-	Backups  bool `yaml:"backups"`
-	Schedule bool `yaml:"schedule"` // install the background sync agent
+	Backups bool `yaml:"backups"`
+	// Schedule installs the background sync, every ScheduleInterval; false
+	// removes one setup installed. ScheduleInterval is a duration that
+	// divides an hour or a day; "" means 15m.
+	Schedule         bool   `yaml:"schedule"`
+	ScheduleInterval string `yaml:"schedule_interval,omitempty"`
 	// Linger keeps a Linux schedule running while you are logged out
 	// (loginctl enable-linger).
 	Linger     bool `yaml:"linger,omitempty"`
@@ -34,6 +40,41 @@ type Answers struct {
 	Cleanup       string `yaml:"cleanup"`
 	// Workspaces sets up agents' workspaces; nil leaves them as they are.
 	Workspaces *Workspaces `yaml:"workspaces,omitempty"`
+
+	// Shell adds `git-mgr cd` and tab completion to your shell's startup
+	// file (see ShellRC).
+	Shell bool `yaml:"shell"`
+	// GitIncludes makes each account's identity your git's own for repos you
+	// clone yourself under its folders: `git-mgr accounts gitconfig
+	// --install`, which adds one include.path to your global git config.
+	GitIncludes bool `yaml:"git_includes"`
+	// Clone clones what the accounts track, and makes the config's other
+	// changes that move and delete nothing, once the config is written:
+	// `git-mgr discover --apply`.
+	Clone bool `yaml:"clone"`
+}
+
+// DefaultScheduleInterval is how often the background sync runs unless the
+// answers say otherwise.
+const DefaultScheduleInterval = 15 * time.Minute
+
+// FormatInterval writes a schedule's interval as people do: 15m, 1h.
+func FormatInterval(d time.Duration) string {
+	if d >= time.Hour && d%time.Hour == 0 {
+		return fmt.Sprintf("%dh", d/time.Hour)
+	}
+	if d%time.Minute == 0 {
+		return fmt.Sprintf("%dm", d/time.Minute)
+	}
+	return d.String()
+}
+
+// Interval is how often the background sync runs.
+func (a Answers) Interval() time.Duration {
+	if d, err := time.ParseDuration(a.ScheduleInterval); err == nil {
+		return d
+	}
+	return DefaultScheduleInterval
 }
 
 // Workspaces are the answers for running coding agents in workspaces: the
@@ -105,6 +146,15 @@ func (a Answers) Validate() error {
 	if a.BaseDir == "" {
 		return fmt.Errorf("base_dir is empty")
 	}
+	if a.ScheduleInterval != "" {
+		d, err := time.ParseDuration(a.ScheduleInterval)
+		if err != nil {
+			return fmt.Errorf("schedule_interval %q: %w", a.ScheduleInterval, err)
+		}
+		if err := scheduler.ValidInterval(d); err != nil {
+			return fmt.Errorf("schedule_interval: %w", err)
+		}
+	}
 	if _, ok := config.Layouts[a.Layout]; !ok && a.Layout != "custom" {
 		return fmt.Errorf("layout %q is not one of owner/name, host/owner/name, name or custom", a.Layout)
 	}
@@ -159,11 +209,16 @@ func (w Workspaces) validate() error {
 }
 
 // Defaults proposes answers: the existing config's choices where there is
-// one, otherwise what was detected, with the recommended features on.
+// one, otherwise what was detected, with the recommended features on. The
+// background sync is on unless an existing config runs without one; shell
+// integration is on unless your shell has it already; git includes are on
+// for several accounts, one of them at least with an identity or key of its
+// own to give; cloning is on when there are accounts to clone from.
 func Defaults(det Detected, existing *config.Config, home string) Answers {
 	a := Answers{
 		BaseDir: "~/repos", Layout: "host/owner/name",
-		Backups: true, Schedule: true, Linger: true, ReconcileAuto: "safe", Cleanup: "mark_stale",
+		Backups: true, Schedule: true, ScheduleInterval: FormatInterval(DefaultScheduleInterval), Linger: true,
+		ReconcileAuto: "safe", Cleanup: "mark_stale",
 	}
 	if existing != nil {
 		a.BaseDir = tildePath(existing.BaseDir, home)
@@ -171,15 +226,24 @@ func Defaults(det Detected, existing *config.Config, home string) Answers {
 		a.Backups, a.RemoteSync = existing.Backup.Enabled, existing.RemoteSync.Enabled
 		a.Update = existing.Sync.Update == "ff-only-clean"
 		a.ReconcileAuto, a.Cleanup = existing.Reconcile.Auto, existing.Cleanup.Policy
-		a.Schedule = false // re-running setup doesn't reinstall the agent unless asked
 		a.Accounts = existingAccounts(existing)
 	} else if det.Layout.Matches > 0 {
 		a.BaseDir, a.Layout = tildePath(det.Layout.BaseDir, home), det.Layout.Layout
+	}
+	if existing != nil || det.Schedule != nil {
+		a.Schedule = det.Schedule != nil
+	}
+	if det.Schedule != nil {
+		a.ScheduleInterval = FormatInterval(det.Schedule.Interval)
 	}
 	if len(a.Accounts) == 0 {
 		a.Accounts = detectedAccounts(det)
 	}
 	a.Workspaces = defaultWorkspaces(det, existing, home)
+	a.Shell = det.ShellRC != nil && !det.ShellIntegrated
+	own := slices.ContainsFunc(a.Accounts, func(acct Account) bool { return acct.SSHKey != "" || acct.Git.Email != "" })
+	a.GitIncludes = det.GitIncludes || len(a.Accounts) > 1 && own
+	a.Clone = len(a.Accounts) > 0
 	return a
 }
 
@@ -208,10 +272,15 @@ func detectedAccounts(det Detected) []Account {
 	for _, gh := range det.GH {
 		acct := Account{
 			Name: gh.Login, Type: "github", Host: gh.Host, Login: gh.Login,
-			TokenCommand: fmt.Sprintf("gh auth token --hostname %s --user %s", gh.Host, gh.Login),
-			Track:        []Track{{Owner: gh.Login, Kind: "self"}},
-			SSHKey:       det.KeyFor(gh.Host, gh.Login),
-			Protocol:     "https",
+			Track:    []Track{{Owner: gh.Login, Kind: "self"}},
+			SSHKey:   det.KeyFor(gh.Host, gh.Login),
+			Protocol: "https",
+		}
+		// `gh auth token --user` reads only a login gh stores.
+		if env := gh.TokenEnv(); env != "" {
+			acct.TokenEnv = env
+		} else {
+			acct.TokenCommand = fmt.Sprintf("gh auth token --hostname %s --user %s", gh.Host, gh.Login)
 		}
 		if perLogin[gh.Login] > 1 {
 			acct.Name = gh.Login + "-" + strings.Split(gh.Host, ".")[0]
