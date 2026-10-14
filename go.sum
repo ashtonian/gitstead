@@ -18,8 +18,8 @@ github.com/alecthomas/kong v1.16.1 h1:ixhCt93XkJ98kGposQ54+bl0IK6XwqB40AsMynU7Z8
 github.com/alecthomas/kong v1.16.1/go.mod h1:wrlbXem1CWqUV5Vbmss5ISYhsVPkBb1Yo7YKJghju2I=
 github.com/alecthomas/repr v0.5.2 h1:SU73FTI9D1P5UNtvseffFSGmdNci/O6RsqzeXJtP0Qs=
 github.com/alecthomas/repr v0.5.2/go.mod h1:Fr0507jx4eOXV7AlPV6AVZLYrLIuIeSOWtW57eE/O/4=
-github.com/ashtonian/pkg/config v0.1.0 h1:6pDHJ0fOz46jnDbpkR1URtR0yf94vav6WRvqAuGtdOQ=
-github.com/ashtonian/pkg/config v0.1.0/go.mod h1:ldVrZbCLx1AjfVeYr0p3yNPfKUZ45i3d/qq8iXpJmTg=
+github.com/ashtonian/pkg/config v0.3.0 h1:AivIczgE1H9AbjTbrQySCBMDwZJ5JvAXXjEGU2+jSf8=
+github.com/ashtonian/pkg/config v0.3.0/go.mod h1:ldVrZbCLx1AjfVeYr0p3yNPfKUZ45i3d/qq8iXpJmTg=
 github.com/ashtonian/pkg/config/kongprovider v0.1.0 h1:llraRGqGY54QYTtkcNCv+jakeK1qw/z+iVPjwY5HESc=
 github.com/ashtonian/pkg/config/kongprovider v0.1.0/go.mod h1:kiscTOk0Nqw9Sp57nhnlRFSeHD+cg2lR3qWT6SLARzs=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=

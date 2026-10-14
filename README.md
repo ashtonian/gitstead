@@ -391,8 +391,9 @@ two repos with the same name can't both be placed and are reported as blocked. A
 with neither may the default file be missing, meaning the defaults: a missing, unreadable or malformed file is an error rather
 than a silent fall back to defaults, which would otherwise run with no discovery
 rules and mark every discovered repo stale. A key that isn't a setting -- a typo,
-or one renamed since -- is an error too, naming every such key:
-`keys no field of config.Config decodes: sync.timout_per_repo`.
+or one renamed since -- is an error too, naming every such key with the
+setting it most likely misspells:
+`"sync.timout_per_repo" is not a setting (did you mean "sync.timeout_per_repo"?)`.
 
 ### Providers
 
