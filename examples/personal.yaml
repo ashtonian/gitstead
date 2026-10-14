@@ -1,0 +1,22 @@
+# Every repo your GitHub account owns, private ones included, cloned into
+# ~/code/<owner>/<name> and kept in sync. The token comes from gh: run
+# `gh auth login` once. (`gitstead setup` writes much the same for you.)
+base_dir: ~/code
+layout: owner/name
+
+accounts:
+  - name: me
+    hosts: [github.com]
+    owners: [your-login]
+    git: {name: Your Name, email: you@example.com}
+
+providers:
+  - name: me
+    type: github
+    account: me
+    token_command: gh auth token --hostname github.com --user your-login
+
+discovery:
+  - name: me
+    provider: me
+    affiliation: [owner]     # the token's own repos; forks and archived left out

@@ -1,0 +1,33 @@
+# Repos found by search rather than by owner: open source you follow, and
+# everything in an org that mentions a keyword. A query is the provider's
+# own search syntax, passed through as it is; GitHub returns at most 1000
+# results per query. Try it without a config:
+#   gitstead clone --query "topic:kubernetes-operator language:go stars:>3000" --dry-run
+base_dir: ~/code
+layout: host/owner/name
+
+providers:
+  - name: github.com
+    type: github
+    token_command: gh auth token --hostname github.com
+
+discovery:
+  - name: k8s-operators
+    provider: github.com
+    query: "topic:kubernetes-operator language:go stars:>3000"
+    tags: [oss, k8s]
+  - name: charm-tui
+    provider: github.com
+    org: charmbracelet
+    languages: [Go]
+    name_pattern: "^(bubble|lip|glam)"
+    tags: [oss, tui]
+  - name: acme-payments
+    provider: github.com
+    query: "org:acme payments in:name,description,readme archived:false"
+    tags: [payments]
+
+cleanup:
+  # A repo that stops matching a search is marked stale and kept; nothing
+  # is deleted.
+  policy: mark_stale

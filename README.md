@@ -364,8 +364,11 @@ expand their subcommands during completion.
 
 ## Configuration
 
-Config lives at `~/.config/gitstead/config.yaml`. See
-[`config.example.yaml`](config.example.yaml) for a fully annotated reference.
+Config lives at `~/.config/gitstead/config.yaml`. [`examples/`](examples/) has
+short, complete configs for common setups -- searches and filters, two
+accounts, self-hosted forges, agents, a full safety net -- with what each one
+produces; [`config.example.yaml`](config.example.yaml) is the fully annotated
+reference of every key.
 
 gitstead follows the XDG base directories: its config in
 `$XDG_CONFIG_HOME/gitstead`, its state, operation log, backups, archives,
@@ -1939,6 +1942,7 @@ go build -ldflags="-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD)" .
 | `internal/oplog`, `internal/notify` | The operation log and desktop notifications. |
 | `internal/testenv` | Isolating each package's tests from the machine: home, XDG directories, git config, temporary directories. |
 | `e2e/` | End-to-end tests, a module of their own: the built binary against local remotes and a Forgejo container. |
+| `examples/` | Complete configs for common setups, each loaded by the tests, and [what each one produces](examples/README.md). |
 | `docs/` | [ARCHITECTURE.md](docs/ARCHITECTURE.md), how the parts fit and why; [RELEASING.md](docs/RELEASING.md), cutting a release. |
 | `nix/home-manager.nix`, `flake.nix` | The home-manager module: package, config and schedules as systemd timers or launchd agents. |
 

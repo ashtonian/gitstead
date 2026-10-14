@@ -1,0 +1,42 @@
+# Coding agents in workspaces: four agents on one repo, two on a pair of
+# related repos, each agent in a worktree of its own on its own branch, and
+# a fleet that opens them all side by side in tmux: `gitstead fleet open daily`.
+base_dir: ~/code
+layout: owner/name
+
+repos:
+  - url: git@github.com:your-login/app.git
+  - url: git@github.com:your-login/api.git
+  - url: git@github.com:your-login/web.git
+
+agents:
+  - name: claude
+    command: claude
+    resume: claude --continue
+  - name: codex
+    command: codex
+
+workspace_defaults:
+  root: ~/workspaces
+  isolation: worktree
+  ports: {base: 41000, count: 10}   # each agent's own block: GITSTEAD_PORT..+9
+  env:
+    PORT: "{{.Port}}"
+
+workspaces:
+  - name: app
+    repos: [github.com/your-login/app]
+    agents: 4
+  - name: platform
+    repos: [github.com/your-login/api, github.com/your-login/web]
+    agents: 2
+    agent: codex
+
+fleets:
+  - name: daily
+    workspaces: [app, platform]
+    launcher: tmux
+
+notify:
+  enabled: true
+  on_waiting: true                  # tell me when an agent waits for input
