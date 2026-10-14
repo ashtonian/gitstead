@@ -103,11 +103,19 @@ type Account struct {
 // of Languages, with all of Topics, and whose name matches NamePattern, when
 // set.
 type Track struct {
-	Owner       string   `yaml:"owner"`
-	Kind        string   `yaml:"kind"` // self | org | group
-	Languages   []string `yaml:"languages,omitempty"`
-	Topics      []string `yaml:"topics,omitempty"`
+	Owner     string   `yaml:"owner"`
+	Kind      string   `yaml:"kind"` // self | org | group
+	Languages []string `yaml:"languages,omitempty"`
+	Topics    []string `yaml:"topics,omitempty"`
+	// Names are globs over repo names (*billing*); NamePattern a regular
+	// expression. A repo must match both, when both are set.
+	Names       []string `yaml:"names,omitempty"`
 	NamePattern string   `yaml:"name_pattern,omitempty"`
+}
+
+// Narrowed reports whether t keeps only some of the owner's repos.
+func (t Track) Narrowed() bool {
+	return len(t.Languages) > 0 || len(t.Topics) > 0 || len(t.Names) > 0 || t.NamePattern != ""
 }
 
 // Owners are the owners an account covers: the ones it tracks.
@@ -174,6 +182,11 @@ func (a Answers) Validate() error {
 			}
 			if _, err := regexp.Compile(t.NamePattern); err != nil {
 				return fmt.Errorf("account %q: owner %q: name_pattern: %w", acct.Name, t.Owner, err)
+			}
+			for _, g := range t.Names {
+				if err := config.CheckNameGlob(g); err != nil {
+					return fmt.Errorf("account %q: owner %q: names: %w", acct.Name, t.Owner, err)
+				}
 			}
 		}
 	}
@@ -345,7 +358,7 @@ func existingAccounts(cfg *config.Config) []Account {
 
 // trackOf is the Track rule r describes for owner.
 func trackOf(r config.DiscoveryRule, owner, kind string) Track {
-	return Track{Owner: owner, Kind: kind, Languages: r.Languages, Topics: r.Topics, NamePattern: r.NamePattern}
+	return Track{Owner: owner, Kind: kind, Languages: r.Languages, Topics: r.Topics, Names: r.Names, NamePattern: r.NamePattern}
 }
 
 // AdoptCandidates are existing clones that discovery won't pick up by

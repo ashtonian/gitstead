@@ -20,6 +20,7 @@ func TestRuleName(t *testing.T) {
 		{name: "org with filters", rule: config.DiscoveryRule{Org: "Acme", Languages: []string{"Go"}, Topics: []string{"api service"}}, want: "acme-go-api-service"},
 		{name: "taken twice", rule: config.DiscoveryRule{Org: "acme", Languages: []string{"go"}}, want: "acme-go-3"},
 		{name: "gitlab subgroup", rule: config.DiscoveryRule{Group: "acme/platform"}, want: "acme/platform"},
+		{name: "org with name globs", rule: config.DiscoveryRule{Org: "acme", Names: []string{"*billing*", "*payments*"}}, want: "acme-billing-payments"},
 		{name: "mine", mine: true, want: "mine"},
 		{name: "search", rule: config.DiscoveryRule{Query: "org:acme stars:>50"}, want: "search"},
 	}

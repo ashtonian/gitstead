@@ -164,6 +164,9 @@ type DiscoveryRule struct {
 	Languages       []string `koanf:"languages"        yaml:"languages,omitempty"`
 	Topics          []string `koanf:"topics"           yaml:"topics,omitempty"`
 	NamePattern     string   `koanf:"name_pattern"     yaml:"name_pattern,omitempty"  validate:"omitempty,valid_regex"`
+	// Names keeps the repos whose name matches any of these globs, ignoring
+	// case: billing-* or *payments*. With name_pattern too, a name must match both.
+	Names []string `koanf:"names" yaml:"names,omitempty"`
 	// Affiliation narrows a GitHub rule with no user, org or query -- the
 	// token's own repos -- to repos the account owns, collaborates on, or
 	// sees through an organization. Empty means all three, GitHub's default.
@@ -173,10 +176,15 @@ type DiscoveryRule struct {
 	Account     string   `koanf:"account"          yaml:"account,omitempty"`
 }
 
-// ExcludeRule defines repos to skip.
+// ExcludeRule defines repos to skip: a repo is skipped when its name
+// matches name_pattern or any of names, or its key any of repos.
 type ExcludeRule struct {
-	NamePattern string   `koanf:"name_pattern" yaml:"name_pattern,omitempty" validate:"omitempty,valid_regex"`
-	Repos       []string `koanf:"repos"        yaml:"repos,omitempty"`
+	NamePattern string `koanf:"name_pattern" yaml:"name_pattern,omitempty" validate:"omitempty,valid_regex"`
+	// Names are globs over repo names, ignoring case: *-sandbox.
+	Names []string `koanf:"names" yaml:"names,omitempty"`
+	// Repos are repo keys or globs over them, as overrides' are:
+	// github.com/acme/legacy-*.
+	Repos []string `koanf:"repos" yaml:"repos,omitempty"`
 }
 
 // RepoSet is a named, reusable selection of tracked repos, usable via --set on

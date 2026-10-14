@@ -31,9 +31,8 @@ type CLI struct {
 
 	// Commands
 	Version    VersionCmd    `cmd:"" help:"Print version information."`
-	Setup      SetupCmd      `cmd:"" help:"Set up gitstead, or change your setup: accounts, layout, what to track, features."`
-	Init       InitCmd       `cmd:"" help:"Create a config file with sensible defaults, without asking."`
-	Bootstrap  BootstrapCmd  `cmd:"" help:"Set up a fresh machine: init, doctor, discover, sync, install agent."`
+	Setup      SetupCmd      `cmd:"" aliases:"init" help:"Set up gitstead, or change your setup: accounts, what to track, layout, features. Each question starts at what it finds; --yes takes those answers without asking."`
+	Bootstrap  BootstrapCmd  `cmd:"" help:"Set up a fresh machine: setup, doctor, discover, sync, install agent."`
 	Discover   DiscoverCmd   `cmd:"" help:"Discover repos from configured providers."`
 	Sync       SyncCmd       `cmd:"" help:"Fetch all tracked repos and backup uncommitted changes."`
 	Plan       PlanCmd       `cmd:"" help:"Show what applying config would change, without changing anything."`
