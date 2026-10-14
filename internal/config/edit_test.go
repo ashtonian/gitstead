@@ -35,7 +35,7 @@ accounts:
 	must(t, doc.Set("backup.enabled", false))
 	must(t, doc.Upsert("accounts", config.Named("work"), config.Account{Name: "work", Hosts: []string{"github.com"}, SSHKey: "~/.ssh/id_work"}))
 	must(t, doc.Upsert("accounts", config.Named("new"), config.Account{Name: "new", Hosts: []string{"example.com"}}))
-	must(t, doc.Save())
+	must(t, doc.Save(t.Context()))
 
 	data, _ := os.ReadFile(path)
 	got := string(data)
@@ -54,7 +54,7 @@ accounts:
 	if strings.Index(got, "name: work") > strings.Index(got, "name: other") {
 		t.Errorf("an upsert must replace the entry in place:\n%s", got)
 	}
-	cfg, err := config.Load(path)
+	cfg, err := config.Load(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
 	}

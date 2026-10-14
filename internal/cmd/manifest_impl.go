@@ -170,7 +170,7 @@ func keepBinding(ctx *Context, cfg *config.Config, key string, mr config.ManualR
 	if err := doc.Upsert("repos", config.MatchesRepo(key), entry); err != nil {
 		return err
 	}
-	if err := doc.Save(); err != nil {
+	if err := doc.Save(ctx.GoCtx()); err != nil {
 		return fmt.Errorf("its account or key must be kept in config, but adding it to %s's repos: failed (%w); add the entry there yourself, or point manifest: at a file to keep it in", ctx.ConfigPath(), err)
 	}
 	fmt.Printf("  Added %s to %s's repos:, for its account or key\n", key, ctx.ConfigPath())

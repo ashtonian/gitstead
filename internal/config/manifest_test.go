@@ -87,7 +87,7 @@ func TestUpdateManifest(t *testing.T) {
 func TestLoad_Manifest(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "repos.yaml")
-	if err := os.WriteFile(manifest, []byte("repos:\n  - url: git@github.com:me/notes.git\n    path: ~/notes\n"), 0o644); err != nil {
+	if err := os.WriteFile(manifest, []byte("repos:\n  - url: git@github.com:me/notes.git\n    path: ~/notes\n    ssh_key: ~/.ssh/notes\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "config.yaml")
@@ -95,12 +95,16 @@ func TestLoad_Manifest(t *testing.T) {
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := Load(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(cfg.Repos) != 2 || cfg.Repos[1].URL != "git@github.com:me/notes.git" || cfg.Repos[1].Path != "~/notes" {
 		t.Errorf("repos = %+v", cfg.Repos)
+	}
+	// Its keys are expanded as the config's own entries' are.
+	if want := ExpandHome("~/.ssh/notes"); cfg.Repos[1].SSHKey != want {
+		t.Errorf("ssh_key = %q, want %q", cfg.Repos[1].SSHKey, want)
 	}
 }
 
@@ -116,7 +120,7 @@ func TestLoad_ManifestUnknownAccount(t *testing.T) {
 	if err := os.WriteFile(path, []byte("manifest: "+manifest+"\naccounts:\n  - name: work\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), `unknown account "wrok"`) {
+	if _, err := Load(t.Context(), path); err == nil || !strings.Contains(err.Error(), `unknown account "wrok"`) {
 		t.Fatalf("Load = %v, want an unknown account error", err)
 	}
 }

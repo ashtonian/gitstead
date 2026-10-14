@@ -5,11 +5,8 @@ Thanks for your interest in improving gitten.
 ## Development setup
 
 Requires Go (see the version in [`go.mod`](go.mod)) and `git` on `PATH`.
-Until pkg's config package is published as a module, `go.mod` takes it
-from a pkg checkout beside this one:
 
 ```bash
-git clone https://github.com/ashtonian/pkg
 git clone https://github.com/ashtonian/gitten
 cd gitten
 go build ./...

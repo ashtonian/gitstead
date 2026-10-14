@@ -11,6 +11,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/ashtonian/gitten/internal/cmd"
+	"github.com/ashtonian/pkg/config/kongprovider"
 	"github.com/willabides/kongplete"
 )
 
@@ -69,7 +70,7 @@ func main() {
 		State:      cli.State,
 		Verbose:    cli.Verbose,
 		Quiet:      cli.Quiet,
-		Jobs:       cli.Jobs,
+		Flags:      kongprovider.New(ctx, cmd.ConfigFlags),
 		VersionStr: ver,
 		Ctx:        rootCtx,
 		JSON:       cli.JSON,

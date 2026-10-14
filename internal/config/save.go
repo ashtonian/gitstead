@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -20,7 +21,7 @@ var ErrWorkspaceExists = errors.New("workspace already declared in config")
 // When the config file does not exist it is created holding just the
 // workspace. The written file is re-loaded and validated before returning, so
 // a successful call never leaves an invalid config.
-func SaveWorkspace(path string, w Workspace, overwrite bool) error {
+func SaveWorkspace(ctx context.Context, path string, w Workspace, overwrite bool) error {
 	doc, err := OpenDocument(path)
 	if err != nil {
 		return err
@@ -31,7 +32,7 @@ func SaveWorkspace(path string, w Workspace, overwrite bool) error {
 	if err := doc.Upsert("workspaces", Named(w.Name), w); err != nil {
 		return err
 	}
-	if err := doc.Save(); err != nil {
+	if err := doc.Save(ctx); err != nil {
 		return fmt.Errorf("saving workspace: %w", err)
 	}
 	return nil

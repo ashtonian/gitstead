@@ -90,3 +90,22 @@ func TestEnviron(t *testing.T) {
 		}
 	}
 }
+
+// The variables gitten sets for an agent name no setting, so gitten run
+// inside a workspace loads the config it loads outside one.
+func TestLoad_ContextVarsAreNotSettings(t *testing.T) {
+	want, err := Load(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range ContextVars {
+		t.Setenv(name, "1")
+	}
+	got, err := Load(t.Context(), "")
+	if err != nil {
+		t.Fatalf("with the agent variables set: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the agent variables changed the config:\n got %+v\nwant %+v", got, want)
+	}
+}

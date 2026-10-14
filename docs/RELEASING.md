@@ -17,12 +17,12 @@ A tag with a pre-release suffix (`v1.0.0-rc.1`) is published as a pre-release.
 
 ## Before the first release
 
-- **pkg.** `go.mod` takes pkg's config package from `../pkg`; no
-  build outside this machine works until it is published as a module and
-  pinned (`go get github.com/ashtonian/pkg/config@vX.Y.Z`, then drop the
-  `replace`). `go install` refuses a module with a `replace` directive, and
-  CI, Docker and GoReleaser all build from a clean checkout. Then remove the
-  build-from-source note from the README's Install section.
+- **No `replace` in `go.mod`.** `go install` refuses a module with one, and
+  CI, Docker and GoReleaser build from a clean checkout: every dependency,
+  `github.com/ashtonian/pkg/config` included, is a pinned, published version.
+- **Public repository.** `go install`, the Go module proxy and the release
+  downloads need `ashtonian/gitten` public. Make it public before tagging,
+  then remove the build-from-source note from the README's Install section.
 - **Secrets** in the repository's Actions settings:
   - `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`: a Docker Hub access token with
     read and write. The `ashtonian/gitten` repository is made on the first

@@ -77,7 +77,7 @@ func TestValidate_Accounts(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := accountsConfig()
 			tt.modify(cfg)
-			err := config.Validate(cfg)
+			err := config.Check(cfg)
 			switch {
 			case tt.want == "" && err != nil:
 				t.Fatalf("unexpected error: %v", err)
@@ -91,7 +91,7 @@ func TestValidate_Accounts(t *testing.T) {
 func TestValidate_OneTokenSourcePerProvider(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Providers = []config.Provider{{Name: "gh", Type: "github", TokenEnv: "WORK_TOKEN", TokenCommand: "gh auth token"}}
-	if err := config.Validate(cfg); err == nil || !strings.Contains(err.Error(), "set one of token, token_env and token_command") {
+	if err := config.Check(cfg); err == nil || !strings.Contains(err.Error(), "set one of token, token_env and token_command") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -99,7 +99,7 @@ func TestValidate_OneTokenSourcePerProvider(t *testing.T) {
 func TestValidate_RejectsURLCredentials(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Repos = []config.ManualRepo{{URL: "https://me:s3cret@github.com/acme/api.git"}}
-	err := config.Validate(cfg)
+	err := config.Check(cfg)
 	if err == nil || !strings.Contains(err.Error(), "embeds a credential") || strings.Contains(err.Error(), "s3cret") {
 		t.Fatalf("err = %v", err)
 	}
@@ -108,7 +108,7 @@ func TestValidate_RejectsURLCredentials(t *testing.T) {
 func TestValidate_RequiredSSHSigningNeedsAKey(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Accounts = []config.Account{{Name: "work", Signing: config.Signing{Mode: "required", Format: "ssh"}}}
-	if err := config.Validate(cfg); err == nil || !strings.Contains(err.Error(), "needs signing.key") {
+	if err := config.Check(cfg); err == nil || !strings.Contains(err.Error(), "needs signing.key") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -117,15 +117,15 @@ func TestValidate_AffiliationOnlyForGitHubSelfRules(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Providers = []config.Provider{{Name: "gh", Type: "github"}, {Name: "gl", Type: "gitlab"}}
 	cfg.Discovery = []config.DiscoveryRule{{Name: "mine", Provider: "gh", Affiliation: []string{"owner"}}}
-	if err := config.Validate(cfg); err != nil {
+	if err := config.Check(cfg); err != nil {
 		t.Fatalf("self rule with affiliation: %v", err)
 	}
 	cfg.Discovery[0].Org = "acme"
-	if err := config.Validate(cfg); err == nil {
+	if err := config.Check(cfg); err == nil {
 		t.Error("affiliation with an org selector must be rejected")
 	}
 	cfg.Discovery[0] = config.DiscoveryRule{Name: "lab", Provider: "gl", Affiliation: []string{"owner"}}
-	if err := config.Validate(cfg); err == nil {
+	if err := config.Check(cfg); err == nil {
 		t.Error("affiliation on a gitlab rule must be rejected")
 	}
 }
@@ -135,7 +135,7 @@ func TestLayoutPresets(t *testing.T) {
 	if err := os.WriteFile(path, []byte("layout: owner/name\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Load(path)
+	cfg, err := config.Load(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestLayoutPresets(t *testing.T) {
 	if err := os.WriteFile(path, []byte("layout: name\npath_template: \"{{.Owner}}-{{.Name}}\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := config.Load(path); err == nil || !strings.Contains(err.Error(), "not both") {
+	if _, err := config.Load(t.Context(), path); err == nil || !strings.Contains(err.Error(), "not both") {
 		t.Fatalf("layout with a different path_template: %v", err)
 	}
 }

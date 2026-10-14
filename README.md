@@ -96,15 +96,10 @@ How it works inside -- components, data flow, locks, failure modes -- is in
 
 ## Install
 
-There is no release yet. gitten's config loader is
-[pkg](https://github.com/ashtonian/pkg)'s, which `go.mod` takes from a
-checkout beside this one (`replace => ../pkg/config`) until it is published as a
-module of its own; `go install`, the release archives, the Homebrew cask and
-the Docker image all start with the first release after that. Until then,
-build it from source:
+There is no release yet; the release archives, the Homebrew cask and the
+Docker image start with the first one. Until then, build it from source:
 
 ```bash
-git clone https://github.com/ashtonian/pkg
 git clone https://github.com/ashtonian/gitten
 cd gitten && go install .        # Go version: see go.mod
 ```
@@ -399,8 +394,8 @@ two repos with the same name can't both be placed and are reported as blocked. A
 with neither may the default file be missing, meaning the defaults: a missing, unreadable or malformed file is an error rather
 than a silent fall back to defaults, which would otherwise run with no discovery
 rules and mark every discovered repo stale. A key that isn't a setting -- a typo,
-or one renamed since -- is an error too, with the closest setting suggested:
-`"sync.timout_per_repo" is not a setting (did you mean "timeout_per_repo"?)`.
+or one renamed since -- is an error too, naming every such key:
+`keys no field of config.Config decodes: sync.timout_per_repo`.
 
 ### Providers
 
@@ -1854,8 +1849,18 @@ in-flight git and API operations cleanly.
 
 ## Environment variables
 
-All config fields can be overridden via `GITTEN_*` env vars (e.g.
-`GITTEN_BASE_DIR`, `GITTEN_CONCURRENCY`). Notable ones:
+Every setting can be set by an environment variable: `GITTEN_` and the
+setting's key, upper-cased, with `.` as `_` -- `GITTEN_BASE_DIR` sets
+`base_dir`, `GITTEN_SYNC_TIMEOUT_PER_REPO` sets `sync.timeout_per_repo`. A
+variable overrides the config file, and a flag that sets the same setting
+(`--concurrency`) overrides both; whichever set it, the value is validated as
+if it were in the file. A list takes comma-separated values. A map entry is
+`GITTEN_<MAP>_<KEY>` with its key lower-cased, so a map whose keys need
+capitals -- `workspace_defaults.env`, keyed by variable names -- belongs in the
+file. Settings inside lists of entries -- `providers`, `accounts`,
+`discovery`, `workspaces` -- are the file's alone. A `GITTEN_*` variable that names no setting is ignored,
+so the variables gitten sets for agents (`GITTEN_REPO`, `GITTEN_AGENT`, ...)
+never change a gitten run inside a workspace. Notable ones:
 
 | Variable | Effect |
 |---|---|
@@ -1890,9 +1895,7 @@ docker run -v ~/.config/gitten:/root/.config/gitten \
 
 ## Development
 
-Go (the version in `go.mod`), `git`, and -- until pkg's config package is
-published -- a [pkg](https://github.com/ashtonian/pkg) checkout beside
-this one (see [Install](#install)). [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+Go (the version in `go.mod`) and `git`. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 explains how the parts fit; [SPEC.md](SPEC.md) is the detailed reference.
 
 ```bash
@@ -1923,7 +1926,7 @@ go build -ldflags="-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD)" .
 | Package | Owns |
 | --- | --- |
 | `main.go`, `internal/cmd` | The CLI: flags, wiring, output. Commands load config and state, call the packages below, print. |
-| `internal/config` | Loading, defaults, validation, per-repo overrides, SSH key and protocol resolution. |
+| `internal/config` | Loading (on [`github.com/ashtonian/pkg/config`](https://github.com/ashtonian/pkg/tree/main/config)), defaults, validation, per-repo overrides, SSH key and protocol resolution. |
 | `internal/discovery` | Provider clients (GitHub, GitLab, Gitea/Forgejo), rule filtering, stale detection. |
 | `internal/reconcile` | Desired vs recorded vs on-disk for tracked repos, and the plan engine: applies changes, several repos at once, then serial ones. |
 | `internal/state` | The state file: schema, migrations, locking, atomic writes, and `GroupCommit`, which saves concurrent changes in one write. |

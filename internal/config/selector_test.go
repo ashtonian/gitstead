@@ -23,7 +23,7 @@ func TestValidateSelectorByProviderType(t *testing.T) {
 		cfg := Defaults()
 		cfg.Providers = []Provider{{Name: "p", Type: c.provType, URL: "https://example.com"}}
 		cfg.Discovery = []DiscoveryRule{c.rule}
-		err := Validate(cfg)
+		err := Check(cfg)
 		if (err != nil) != c.wantErr {
 			t.Errorf("%s: got err=%v, wantErr=%v", c.name, err, c.wantErr)
 		}
@@ -58,7 +58,7 @@ func TestValidateQueryMutualExclusion(t *testing.T) {
 		cfg := Defaults()
 		cfg.Providers = []Provider{{Name: "p", Type: "github"}}
 		cfg.Discovery = []DiscoveryRule{c.rule}
-		err := Validate(cfg)
+		err := Check(cfg)
 		if (err != nil) != c.wantErr {
 			t.Errorf("%s: got err=%v, wantErr=%v", c.name, err, c.wantErr)
 		}

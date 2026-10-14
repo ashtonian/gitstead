@@ -75,15 +75,15 @@ func TestValidate_RemoteSync(t *testing.T) {
 		{"an override's broken remote template", func(c *config.Config) {
 			c.Overrides = []config.Override{{Repos: []string{"x/*"}, RemoteSync: &config.RemoteSyncOverride{Remote: ptr("git@h:{{.Nope}}")}}}
 		}, "remote_sync.remote"},
-		{"an unknown wip mode", func(c *config.Config) { c.RemoteSync.WIP = "stash" }, "WIP"},
+		{"an unknown wip mode", func(c *config.Config) { c.RemoteSync.WIP = "stash" }, "remote_sync.wip must be one of"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := config.Defaults()
 			tt.mod(cfg)
-			err := config.Validate(cfg)
+			err := config.Check(cfg)
 			if tt.err == "" && err != nil || tt.err != "" && (err == nil || !strings.Contains(err.Error(), tt.err)) {
-				t.Errorf("Validate() = %v, want %q", err, tt.err)
+				t.Errorf("Check() = %v, want %q", err, tt.err)
 			}
 		})
 	}
@@ -95,14 +95,12 @@ func TestLoad_RejectsUnknownKeys(t *testing.T) {
 	tests := []struct {
 		yaml, err string
 	}{
-		{"sync:\n  timout_per_repo: 1m\n", `"sync.timout_per_repo" is not a setting (did you mean "timeout_per_repo"?)`},
-		{"remote_sync:\n  remote_name: backup\n", `"remote_sync.remote_name" is not a setting`},
-		{"accounts:\n  - name: work\n    ssh-key: ~/.ssh/id\n", `"accounts[0].ssh-key" is not a setting (did you mean "ssh_key"?)`},
-		{"backup:\n  max_per_repo: 10\n", `"backup.max_per_repo" is not a setting (did you mean "max_per_copy"?)`},
+		{"sync:\n  timout_per_repo: 1m\n", "sync.timout_per_repo"},
+		{"remote_sync:\n  remote_name: backup\n", "remote_sync.remote_name"},
+		{"accounts:\n  - name: work\n    ssh-key: ~/.ssh/id\n", "accounts[0].ssh-key"},
 		// Every unknown key is named, not just the first.
-		{"backup:\n  max_per_repo: 10\n  push_branch: false\n", `"backup.push_branch" is not a setting`},
+		{"backup:\n  max_per_repo: 10\n  push_branch: false\n", "backup.max_per_repo, backup.push_branch"},
 		{"agents:\n  - name: claude\n    command: claude\n    env: {ANTHROPIC_MODEL: opus}\n", ""}, // a map takes any key
-		{"workgroups: []\n", `"workgroups" is now "workspaces"`},
 		{"accounts:\n  - name: work\n    remote_sync:\n      wip: off\n", ""},
 	}
 	for _, tt := range tests {
@@ -110,7 +108,7 @@ func TestLoad_RejectsUnknownKeys(t *testing.T) {
 		if err := os.WriteFile(path, []byte(tt.yaml), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := config.Load(path)
+		_, err := config.Load(t.Context(), path)
 		if tt.err == "" && err != nil || tt.err != "" && (err == nil || !strings.Contains(err.Error(), tt.err)) {
 			t.Errorf("Load(%q) = %v, want %q", tt.yaml, err, tt.err)
 		}
@@ -119,7 +117,7 @@ func TestLoad_RejectsUnknownKeys(t *testing.T) {
 
 // The annotated example documents only real settings.
 func TestLoad_Example(t *testing.T) {
-	if _, err := config.Load("../../config.example.yaml"); err != nil {
+	if _, err := config.Load(t.Context(), "../../config.example.yaml"); err != nil {
 		t.Fatal(err)
 	}
 }

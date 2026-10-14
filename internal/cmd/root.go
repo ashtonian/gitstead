@@ -14,6 +14,7 @@ import (
 	"github.com/ashtonian/gitten/internal/config"
 	"github.com/ashtonian/gitten/internal/repourl"
 	"github.com/ashtonian/gitten/internal/state"
+	"github.com/knadh/koanf/v2"
 	"github.com/willabides/kongplete"
 )
 
@@ -24,8 +25,9 @@ type CLI struct {
 	State   string `help:"State file path ($GITTEN_STATE); without it, $XDG_DATA_HOME/gitten/state.yaml (~/.local/share/gitten/state.yaml)." env:"GITTEN_STATE" type:"path"`
 	Verbose bool   `help:"Verbose output." short:"v"`
 	Quiet   bool   `help:"Suppress non-error output." short:"q"`
-	Jobs    int    `help:"Max concurrent git operations (default 8)." short:"j" name:"concurrency"`
-	JSON    bool   `help:"Print the command's result as one JSON document on stdout; everything else goes to stderr."`
+	// Concurrency reaches config through ConfigFlags, not this field.
+	Concurrency int  `help:"Max concurrent git operations (config concurrency, default 8)." short:"j"`
+	JSON        bool `help:"Print the command's result as one JSON document on stdout; everything else goes to stderr."`
 
 	// Commands
 	Version    VersionCmd    `cmd:"" help:"Print version information."`
@@ -65,14 +67,22 @@ type CLI struct {
 	InstallCompletions kongplete.InstallCompletions `cmd:"" name:"install-completions" help:"Output a shell completion script (bash/zsh/fish)."`
 }
 
+// ConfigFlags maps each global flag that sets a config key to that key, so
+// the flag overrides the file and the environment and is validated with
+// them.
+var ConfigFlags = map[string]string{
+	"concurrency": "concurrency",
+}
+
 // Context is passed to all command Run methods.
 type Context struct {
 	Config     string
 	State      string
 	Verbose    bool
 	Quiet      bool
-	Jobs       int
 	VersionStr string
+	// Flags are the config keys set on the command line (ConfigFlags).
+	Flags koanf.Provider
 	// JSON asks for the result as JSON, which Emit writes to Out: the real
 	// stdout, while os.Stdout carries everything else to stderr.
 	JSON bool
@@ -130,12 +140,12 @@ func (c *Context) LoadConfig() (*config.Config, error) {
 	if c.Config == "" {
 		opts = append(opts, config.WithOptionalFile())
 	}
-	cfg, err := config.Load(c.ConfigPath(), opts...)
+	if c.Flags != nil {
+		opts = append(opts, config.WithFlags(c.Flags))
+	}
+	cfg, err := config.Load(c.GoCtx(), c.ConfigPath(), opts...)
 	if err != nil {
 		return nil, err
-	}
-	if c.Jobs > 0 {
-		cfg.Concurrency = c.Jobs
 	}
 	c.cfg = cfg
 	return cfg, nil

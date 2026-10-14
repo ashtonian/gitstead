@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -149,11 +150,11 @@ func (d *Document) Bytes() ([]byte, error) {
 
 // Save writes the document atomically, then loads it back so an invalid
 // config is never left in place without an error.
-func (d *Document) Save() error {
+func (d *Document) Save(ctx context.Context) error {
 	if err := writeDocumentAtomic(d.path, d.root); err != nil {
 		return err
 	}
-	if _, err := Load(d.path); err != nil {
+	if _, err := Load(ctx, d.path); err != nil {
 		return fmt.Errorf("config invalid after saving: %w", err)
 	}
 	return nil
