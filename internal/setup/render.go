@@ -93,7 +93,8 @@ func renderAccount(doc *config.Document, acct Account) error {
 
 	var rules []string
 	for _, t := range acct.Track {
-		rule := config.DiscoveryRule{Name: ruleName(acct, t), Provider: acct.Name, Tags: []string{acct.Name}}
+		rule := config.DiscoveryRule{Name: ruleName(acct, t), Provider: acct.Name, Tags: []string{acct.Name},
+			Languages: t.Languages, Topics: t.Topics, NamePattern: t.NamePattern}
 		switch {
 		case t.Kind == "org":
 			rule.Org = t.Owner

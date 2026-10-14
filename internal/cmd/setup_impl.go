@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -686,6 +687,7 @@ func askTrack(ctx context.Context, acct *setup.Account, online bool) error {
 			Value(&list).Validate(nonEmpty))).Run(); err != nil {
 			return err
 		}
+		previous := acct.Track
 		acct.Track = nil
 		for _, o := range strings.Split(list, ",") {
 			if o = strings.TrimSpace(o); o == "" {
@@ -698,9 +700,9 @@ func askTrack(ctx context.Context, acct *setup.Account, online bool) error {
 			if strings.EqualFold(o, acct.Login) || acct.Login == "" && len(acct.Track) == 0 {
 				kind = "self"
 			}
-			acct.Track = append(acct.Track, setup.Track{Owner: o, Kind: kind})
+			acct.Track = append(acct.Track, keepFilters(setup.Track{Owner: o, Kind: kind}, previous))
 		}
-		return nil
+		return askFilters(acct)
 	}
 
 	var opts []huh.Option[string]
@@ -727,11 +729,74 @@ func askTrack(ctx context.Context, acct *setup.Account, online bool) error {
 		Options(opts...).Filterable(true).Value(&chosen))).Run(); err != nil {
 		return err
 	}
+	previous := acct.Track
 	acct.Track = nil
 	for _, o := range owners {
 		if slices.Contains(chosen, o.Login) {
-			acct.Track = append(acct.Track, setup.Track{Owner: o.Login, Kind: o.Kind})
+			acct.Track = append(acct.Track, keepFilters(setup.Track{Owner: o.Login, Kind: o.Kind}, previous))
 		}
+	}
+	return askFilters(acct)
+}
+
+// keepFilters is t with the filters the same owner had in previous, so a
+// re-run starts from them.
+func keepFilters(t setup.Track, previous []setup.Track) setup.Track {
+	if i := slices.IndexFunc(previous, func(p setup.Track) bool { return strings.EqualFold(p.Owner, t.Owner) }); i >= 0 {
+		t.Languages, t.Topics, t.NamePattern = previous[i].Languages, previous[i].Topics, previous[i].NamePattern
+	}
+	return t
+}
+
+// askFilters offers to narrow each owner an account tracks to the repos in
+// some languages, with some topics, or whose names match a pattern; the
+// answers become the filters of the owner's discovery rule.
+func askFilters(acct *setup.Account) error {
+	if len(acct.Track) == 0 {
+		return nil
+	}
+	narrow := slices.ContainsFunc(acct.Track, func(t setup.Track) bool {
+		return len(t.Languages) > 0 || len(t.Topics) > 0 || t.NamePattern != ""
+	})
+	if err := huh.NewConfirm().Title("Track only some of their repos?").
+		Description("Narrow each owner by language, topics or a name pattern. Otherwise every repo they own is tracked.").
+		Value(&narrow).Run(); err != nil {
+		return err
+	}
+	for i := range acct.Track {
+		t := &acct.Track[i]
+		if !narrow {
+			t.Languages, t.Topics, t.NamePattern = nil, nil, ""
+			continue
+		}
+		languages, topics := strings.Join(t.Languages, ", "), strings.Join(t.Topics, ", ")
+		if err := huh.NewForm(huh.NewGroup(
+			huh.NewNote().Title(t.Owner+"'s repos"),
+			huh.NewInput().Title("Only in these languages").Description("Any of them, comma-separated: Go, Rust. Blank for any language.").Value(&languages),
+			huh.NewInput().Title("Only with these topics").Description("All of them, comma-separated. Blank for any topics.").Value(&topics),
+			huh.NewInput().Title("Only names matching").Description("A regular expression, such as ^svc-. Blank for any name.").Value(&t.NamePattern).Validate(validRegexp),
+		)).Run(); err != nil {
+			return err
+		}
+		t.Languages, t.Topics = splitList(languages), splitList(topics)
+	}
+	return nil
+}
+
+// splitList splits a comma-separated answer, dropping blanks.
+func splitList(s string) []string {
+	var out []string
+	for _, item := range strings.Split(s, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func validRegexp(s string) error {
+	if _, err := regexp.Compile(s); err != nil {
+		return fmt.Errorf("not a regular expression: %w", err)
 	}
 	return nil
 }

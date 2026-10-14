@@ -1,13 +1,15 @@
 # gitstead
 
-**Every git repo you work on, cloned, in sync and backed up** — across GitHub,
-GitLab and Gitea/Forgejo, several accounts, and several machines.
+**Clone and keep in sync every repo you work on** — whole orgs, users or
+searches across GitHub, GitLab and Gitea/Forgejo, filtered by language,
+topics, name or keywords, in one layout with the right account per repo.
 
-`gitstead setup` asks a few questions, then clones what your accounts own into
-one tidy layout, each repo with the right identity and SSH key, and installs a
-background sync. From then on every repo is fetched, kept in line with your
-config, and has its uncommitted work backed up -- without gitstead ever touching
-your branches, working tree or index. A new machine is one command away.
+`gitstead setup` asks a few questions and clones what your accounts track;
+`gitstead clone --org acme --language go` grabs a set on the spot. From then on
+a background sync fetches everything, clones what newly matches, follows
+renames and transfers, and flags what disappears upstream -- and backs up
+uncommitted work without ever touching your branches, working tree or index.
+A new machine is one command away.
 
 It also gives coding agents **workspaces**: a repo, or several related ones,
 worked on by several agents at once, each in a copy of its own, with their
@@ -15,12 +17,19 @@ work backed up and never deleted until it's archived.
 
 ## Highlights
 
-- **Multi-provider discovery** — GitHub, GitHub Enterprise, GitLab (incl.
-  self-hosted), and Gitea/Forgejo, by user, org, group, or raw search query.
-  SSH or HTTPS/PAT transport (`clone_protocol`).
-- **One-command bootstrap** — `gitstead bootstrap` (init → doctor → discover →
-  sync → agent) plus a shared manifest, so repos added by hand on one machine
-  reach the others ([Several machines](#several-machines)); `doctor` diagnoses tooling/auth/state before things break.
+- **Discovery that keeps up** — GitHub, GitHub Enterprise, GitLab (incl.
+  self-hosted), and Gitea/Forgejo, by user, org, group or raw search, filtered
+  by language, topics, name pattern, visibility, forks and archived. Saved as
+  rules, every sync clones what newly matches, follows renames and transfers,
+  and flags what disappears; `gitstead clone --org acme --language go` does it
+  once, on the spot ([Cloning a selection](#cloning-a-selection)).
+- **Quick setup** — `gitstead setup` asks a few questions and clones; `gitstead
+  bootstrap` sets up a machine that already has a config, and a shared
+  manifest carries repos added by hand from machine to machine
+  ([Several machines](#several-machines)); `doctor` diagnoses tooling, auth and
+  state before things break.
+- **The right account everywhere** — each repo gets its account's identity,
+  SSH key and signing, so you and your agents commit as the right person.
 - **Structured layout** — repos land at `{{.Host}}/{{.Owner}}/{{.Name}}` (fully
   templatable). Operate them in bulk with named **sets** (`--set`) and
   `run -- <cmd>`.
@@ -124,7 +133,8 @@ machine you mostly press Enter:
 2. **Accounts** — every account `gh` is logged in to, plus any you add by hand
    (GitLab, Gitea/Forgejo, another GitHub). For each: whose repos to track
    (your own, including private ones, and your organizations, listed from the
-   provider), how git reaches the host (an SSH key — setup asks each host which
+   provider) and, if you like, only those in some languages, with some topics
+   or with names matching a pattern; how git reaches the host (an SSH key — setup asks each host which
    account your keys sign in as — or HTTPS), the commit identity (from your
    global git config or `includeIf` files), signing, and optionally a separate
    base dir.
@@ -183,6 +193,7 @@ gitstead does too, with `~/repos` as the base dir:
 ```bash
 gitstead adopt ~/code/myrepo            # track a clone you already have
 gitstead clone git@github.com:me/app    # clone + track by URL (your SSH/HTTPS auth)
+gitstead clone --org acme --language go # clone every Go repo in acme (see Cloning a selection)
 gitstead sync                           # fetch all tracked repos + back up WIP
 gitstead status                         # table of what you're managing
 gitstead ws create app --repo ~/code/myrepo --agents 4 --open --cmd claude
@@ -212,6 +223,7 @@ asking anything or touching anything else.
 | `gitstead status` | Table of managed repos. `--live` inspects working trees now (dirty + ahead/behind, no network); `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
 | `gitstead doctor` | Diagnose tooling, auth (tokens/SSH keys), config, and repo-on-disk health. Read-only; `plan`/`apply` fix what config can. |
 | `gitstead clone <url>` | Clone and track one repo by hand, at its templated path or `--path`. `--tag`. A repo added by hand keeps the path and URL it was given. |
+| `gitstead clone --org\|--user\|--group\|--mine\|--query …` | Clone every repo a selection finds, narrowed by `--language`, `--topic`, `--name`, `--visibility`, `--forks`, `--archived`; `--dry-run` lists them. Offers to save the selection as a discovery rule (`--save <name>`, `--no-save`). See [Cloning a selection](#cloning-a-selection). |
 | `gitstead adopt <path>` | Track an existing clone where it is. `--scan` for batch, `--dry-run`, `--tag`. |
 | `gitstead remove <pattern>` | Stop tracking repos. `--tag`/`--set`, `--yes`. `--delete` also removes the clone from disk after archiving its unique work (see [Deleting without losing work](#deleting-without-losing-work)); `--archive` moves the clone, whole, into the archive instead (see [Archiving instead of deleting](#archiving-instead-of-deleting)). |
 | `gitstead run -- <cmd>` | Run a command in each matching repo (parallel). `--repos`/`--tag`/`--set`, `--fail-fast`. |
@@ -455,6 +467,40 @@ Filters are pushed to the server where the provider's list API supports it, and
 applied locally otherwise (per-repo language/topic lookups happen only for repos
 that pass the cheaper filters). When a provider genuinely can't honor a filter,
 `discover` prints a warning rather than silently returning nothing.
+
+### Cloning a selection
+
+To clone a set of repos now, without writing a rule first, give `clone` a
+selection instead of a URL. It runs the same discovery a rule does, lists
+what matches, and clones what isn't tracked yet:
+
+```bash
+gitstead clone --org acme --dry-run                       # everything in acme: list only
+gitstead clone --org acme --language go --topic service  # acme's Go services
+gitstead clone --user someone --name '^terraform-'        # someone's public terraform-* repos
+gitstead clone --mine --language rust                     # your own Rust repos, private ones included
+gitstead clone --query "org:acme payments in:name,description,readme archived:false"
+```
+
+| Flag | Selects |
+| --- | --- |
+| `--org`, `--user`, `--group` | An organization's, a user's public, or a GitLab group's repos. |
+| `--mine` | The repos your token's account owns, private ones included. |
+| `--query` | What the provider's own search finds; no other filter applies. |
+| `--language` | Only repos in one of these languages (repeat it, or comma-separate). |
+| `--topic` | Only repos with all of these topics. |
+| `--name` | Only repos whose name matches this regular expression. |
+| `--visibility`, `--forks`, `--archived` | Public, private or internal only; include forks; include archived repos. |
+| `--provider` | Which configured provider to search: the only one by default. With none configured, github.com, with gh's token when gh is logged in there and `GITHUB_TOKEN` isn't set. |
+| `--tag` | Tags for what it clones. |
+
+On a terminal it then asks whether to keep the selection as a discovery rule
+-- named after what it selects, such as `acme-go-service`, or as `--save
+<name>` says -- written into your config (with the provider, if config
+didn't have it). Kept, every `sync` clones what newly matches, follows
+renames and flags what stops matching, as with any rule. Not kept
+(`--no-save`, and the default without a terminal), its repos are tracked as
+cloned by hand: they keep their place and are never judged stale.
 
 ### Raw search queries
 
@@ -787,8 +833,9 @@ manifest: ~/dotfiles/gitstead/repos.yaml
   entries to paste into config. `gitstead doctor` names repos tracked by hand
   here that neither lists.
 
-The config file itself is never written, so this works when it is
-generated -- by the home-manager module, say -- and read-only. Without
+These commands never write the config file, so this works when it is
+generated -- by the home-manager module, say -- and read-only (`setup` and
+`clone --save` edit it, and only when you ask). Without
 `manifest:`, `manifest import` keeps an entry's `account` or `ssh_key` in
 config's `repos:`, edited in place, since state can't hold it: a read-only
 config fails that entry, naming what to add. `manifest export` writes each

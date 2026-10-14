@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -98,10 +99,15 @@ type Account struct {
 	BaseDir      string             `yaml:"base_dir,omitempty"` // this account's repos go here instead
 }
 
-// Track is an owner whose repos an account tracks.
+// Track is an owner whose repos an account tracks, narrowed to those in one
+// of Languages, with all of Topics, and whose name matches NamePattern, when
+// set.
 type Track struct {
-	Owner string `yaml:"owner"`
-	Kind  string `yaml:"kind"` // self | org | group
+	Owner       string   `yaml:"owner"`
+	Kind        string   `yaml:"kind"` // self | org | group
+	Languages   []string `yaml:"languages,omitempty"`
+	Topics      []string `yaml:"topics,omitempty"`
+	NamePattern string   `yaml:"name_pattern,omitempty"`
 }
 
 // Owners are the owners an account covers: the ones it tracks.
@@ -165,6 +171,9 @@ func (a Answers) Validate() error {
 		for _, t := range acct.Track {
 			if t.Kind != "self" && t.Kind != "org" && t.Kind != "group" {
 				return fmt.Errorf("account %q: owner %q has kind %q, not self, org or group", acct.Name, t.Owner, t.Kind)
+			}
+			if _, err := regexp.Compile(t.NamePattern); err != nil {
+				return fmt.Errorf("account %q: owner %q: name_pattern: %w", acct.Name, t.Owner, err)
 			}
 		}
 	}
@@ -294,7 +303,7 @@ func existingAccounts(cfg *config.Config) []Account {
 		if len(ca.Hosts) > 0 {
 			acct.Host = ca.Hosts[0]
 		}
-		self := false
+		var self *config.DiscoveryRule
 		for _, p := range cfg.Providers {
 			if p.Account != ca.Name {
 				continue
@@ -308,14 +317,14 @@ func existingAccounts(cfg *config.Config) []Account {
 				switch {
 				case r.Provider != p.Name:
 				case r.Org != "":
-					acct.Track = append(acct.Track, Track{Owner: r.Org, Kind: "org"})
+					acct.Track = append(acct.Track, trackOf(r, r.Org, "org"))
 				case r.Group != "":
-					acct.Track = append(acct.Track, Track{Owner: r.Group, Kind: "group"})
+					acct.Track = append(acct.Track, trackOf(r, r.Group, "group"))
 				case r.User != "":
 					acct.Login = r.User
-					self = true
+					self = &r
 				default:
-					self = true
+					self = &r
 				}
 			}
 		}
@@ -326,12 +335,17 @@ func existingAccounts(cfg *config.Config) []Account {
 				acct.Login = o
 			}
 		}
-		if self && acct.Login != "" {
-			acct.Track = append([]Track{{Owner: acct.Login, Kind: "self"}}, acct.Track...)
+		if self != nil && acct.Login != "" {
+			acct.Track = append([]Track{trackOf(*self, acct.Login, "self")}, acct.Track...)
 		}
 		accounts = append(accounts, acct)
 	}
 	return accounts
+}
+
+// trackOf is the Track rule r describes for owner.
+func trackOf(r config.DiscoveryRule, owner, kind string) Track {
+	return Track{Owner: owner, Kind: kind, Languages: r.Languages, Topics: r.Topics, NamePattern: r.NamePattern}
 }
 
 // AdoptCandidates are existing clones that discovery won't pick up by
