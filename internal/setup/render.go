@@ -94,8 +94,14 @@ func renderAccount(doc *config.Document, acct Account) error {
 			return err
 		}
 	}
+	// Rules setup manages that are no longer tracked go; searches and other
+	// rules it doesn't manage stay as they are.
 	doc.Remove("discovery", func(n *yaml.Node) bool {
-		return config.Field("provider", acct.Name)(n) && !slices.ContainsFunc(names, func(r string) bool { return config.Named(r)(n) })
+		var r config.DiscoveryRule
+		if !config.Field("provider", acct.Name)(n) || n.Decode(&r) != nil || !acct.Manages(r) {
+			return false
+		}
+		return !slices.ContainsFunc(names, func(name string) bool { return config.Named(name)(n) })
 	})
 
 	if acct.BaseDir == "" {
@@ -118,8 +124,8 @@ func (acct Account) Discovery() (config.Provider, []config.DiscoveryRule) {
 	}
 	var rules []config.DiscoveryRule
 	for _, t := range acct.Track {
-		rule := config.DiscoveryRule{Name: ruleName(acct, t), Provider: acct.Name, Tags: []string{acct.Name},
-			Languages: t.Languages, Topics: t.Topics, Names: t.Names, NamePattern: t.NamePattern}
+		rule := config.DiscoveryRule{Name: trackRule(acct, t), Provider: acct.Name, Tags: []string{acct.Name},
+			Languages: t.Languages, Topics: t.Topics, Names: t.Names, NamePattern: t.NamePattern, Skip: t.Skip}
 		switch {
 		case t.Kind == "org":
 			rule.Org = t.Owner
@@ -135,10 +141,14 @@ func (acct Account) Discovery() (config.Provider, []config.DiscoveryRule) {
 	return provider, rules
 }
 
-// ruleName names an account's rule for an owner: the account's own repos are
-// the account's name, an organization's are account/org.
-func ruleName(acct Account, t Track) string {
-	if t.Kind == "self" {
+// trackRule is the name of a track's rule: the one it came from, or for a
+// new one, the account's name for its own repos and account/org for an
+// organization's.
+func trackRule(acct Account, t Track) string {
+	switch {
+	case t.Rule != "":
+		return t.Rule
+	case t.Kind == "self":
 		return acct.Name
 	}
 	return acct.Name + "/" + t.Owner

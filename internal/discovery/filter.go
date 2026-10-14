@@ -46,6 +46,10 @@ func FilterRepos(repos []Repo, rule config.DiscoveryRule, excludes []config.Excl
 		if len(rule.Names) > 0 && !applied.Has(FilterName) && !config.NameMatches(rule.Names, repo.Name) {
 			continue
 		}
+		// Left out by hand, so applied whatever the provider did.
+		if slices.ContainsFunc(rule.Skip, func(n string) bool { return strings.EqualFold(n, repo.Name) }) {
+			continue
+		}
 		if isExcluded(repo, excludes) {
 			continue
 		}

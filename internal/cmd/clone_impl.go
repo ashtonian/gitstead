@@ -121,7 +121,7 @@ func (c *CloneCmd) cloneSelection(ctx *Context) error {
 	}
 
 	if !ctx.Quiet {
-		fmt.Printf("Searching %s...\n", provider.Name)
+		fmt.Printf("Searching %s on %s...\n", c.what(), provider.Host())
 	}
 	results, discovered, err := discovery.RunDiscovery(ctx.GoCtx(), trial, rule.Name, "")
 	if err != nil {
@@ -158,8 +158,28 @@ func (c *CloneCmd) cloneSelection(ctx *Context) error {
 		return ctx.finish(map[string]any{"rule": rule.Name, "provider": provider.Name, "new": nonNil(found), "tracked": nonNil(tracked)}, nil)
 	}
 
+	interactive := !ctx.JSON && term.IsTerminal(int(os.Stdin.Fd()))
+	if interactive && len(found) > 0 {
+		kept, err := chooseClones(found)
+		if errors.Is(err, huh.ErrUserAborted) || err == nil && len(kept) == 0 {
+			fmt.Println("Cancelled; nothing cloned.")
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		// What was picked off stays off: the rule, if kept, skips it.
+		for _, key := range found {
+			if !slices.Contains(kept, key) {
+				rule.Skip = append(rule.Skip, discovered[key].Name)
+				delete(discovered, key)
+			}
+		}
+		found = kept
+	}
+
 	save := c.Save != ""
-	if !save && !c.NoSave && !ctx.JSON && term.IsTerminal(int(os.Stdin.Fd())) {
+	if !save && !c.NoSave && interactive {
 		save = true
 		err := huh.NewConfirm().
 			Title(fmt.Sprintf("Keep this selection, as discovery rule %q?", rule.Name)).
@@ -215,6 +235,44 @@ func (c *CloneCmd) cloneSelection(ctx *Context) error {
 		}
 	}
 	return ctx.finishChanges(errors.Join(errs...))
+}
+
+// what names what the selection searches: acme's repos, your own, or a
+// search's results.
+func (c *CloneCmd) what() string {
+	switch {
+	case c.Org != "":
+		return c.Org + "'s repos"
+	case c.User != "":
+		return c.User + "'s repos"
+	case c.Group != "":
+		return c.Group + "'s projects"
+	case c.Mine:
+		return "your own repos"
+	}
+	return fmt.Sprintf("for %q", c.Query)
+}
+
+// chooseClones asks whether to clone all of keys, some of them, or none, and
+// returns the ones to clone.
+func chooseClones(keys []string) ([]string, error) {
+	choice := "all"
+	if err := huh.NewSelect[string]().
+		Title(fmt.Sprintf("Clone %s?", plural(len(keys), "this repo", fmt.Sprintf("these %d repos", len(keys))))).
+		Options(
+			huh.NewOption("Yes, all of them", "all"),
+			huh.NewOption("Pick from the list", "pick"),
+			huh.NewOption("No", "none"),
+		).Value(&choice).Run(); err != nil {
+		return nil, err
+	}
+	switch choice {
+	case "all":
+		return keys, nil
+	case "pick":
+		return pickRepos("Which to clone", keys)
+	}
+	return nil, nil
 }
 
 // provider is the provider a selection searches: --provider's, the only

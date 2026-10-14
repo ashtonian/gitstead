@@ -132,6 +132,8 @@ func printPreviewNext(cfg *config.Config, st *state.State, p *reconcile.Plan, sa
 	fmt.Printf("  gitten discover --apply   makes %d of the %d changes: all but moving or deleting directories\n", safe, len(p.Actions))
 	fmt.Println("  gitten apply              makes them all, asking before moves and deletions")
 	fmt.Println("  gitten setup              changes which repos are tracked")
+	fmt.Println("  gitten clone --org <org> --name <word> --save <rule>")
+	fmt.Println("                            tracks more, showing what it finds first")
 	if len(st.Schedules) == 0 {
 		fmt.Println("No background sync is installed, so nothing changes until you run one of these.")
 		return

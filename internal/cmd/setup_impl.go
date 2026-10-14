@@ -625,7 +625,7 @@ func askAccount(ctx context.Context, det setup.Detected, acct *setup.Account, on
 		if !online || len(acct.Track) == 0 {
 			break
 		}
-		n, keep, err := previewTrack(ctx, *acct)
+		n, keep, err := previewTrack(ctx, acct)
 		if err != nil {
 			return err
 		}
@@ -744,7 +744,7 @@ func askTrack(ctx context.Context, acct *setup.Account, online bool) error {
 			if strings.EqualFold(o, acct.Login) || acct.Login == "" && len(acct.Track) == 0 {
 				kind = "self"
 			}
-			acct.Track = append(acct.Track, keepFilters(setup.Track{Owner: o, Kind: kind}, previous))
+			acct.Track = append(acct.Track, tracksFor(o, kind, previous)...)
 		}
 		return askFilters(acct)
 	}
@@ -777,26 +777,33 @@ func askTrack(ctx context.Context, acct *setup.Account, online bool) error {
 	acct.Track = nil
 	for _, o := range owners {
 		if slices.Contains(chosen, o.Login) {
-			acct.Track = append(acct.Track, keepFilters(setup.Track{Owner: o.Login, Kind: o.Kind}, previous))
+			acct.Track = append(acct.Track, tracksFor(o.Login, o.Kind, previous)...)
 		}
 	}
 	return askFilters(acct)
 }
 
-// keepFilters is t with the filters the same owner had in previous, so a
-// re-run starts from them.
-func keepFilters(t setup.Track, previous []setup.Track) setup.Track {
-	if i := slices.IndexFunc(previous, func(p setup.Track) bool { return strings.EqualFold(p.Owner, t.Owner) }); i >= 0 {
-		p := previous[i]
-		t.Languages, t.Topics, t.Names, t.NamePattern = p.Languages, p.Topics, p.Names, p.NamePattern
+// tracksFor is what owner is tracked by: the tracks it had in previous --
+// each a rule of its own, with its filters, so a re-run starts from them --
+// or a new one when it had none.
+func tracksFor(owner, kind string, previous []setup.Track) []setup.Track {
+	var out []setup.Track
+	for _, p := range previous {
+		if strings.EqualFold(p.Owner, owner) {
+			out = append(out, p)
+		}
 	}
-	return t
+	if len(out) == 0 {
+		out = append(out, setup.Track{Owner: owner, Kind: kind})
+	}
+	return out
 }
 
 // previewTrack looks up what an account's rules find, shows it, and asks
-// whether to track that. It returns how many repos were found (-1 when the
-// lookup failed) and false to choose again.
-func previewTrack(ctx context.Context, acct setup.Account) (int, bool, error) {
+// whether to track that, pick from the list, or choose again; picking off
+// repos adds them to their rule's skip. It returns how many repos are
+// tracked (-1 when the lookup failed) and false to choose again.
+func previewTrack(ctx context.Context, acct *setup.Account) (int, bool, error) {
 	provider, rules := acct.Discovery()
 	cfg := config.Defaults()
 	cfg.Providers, cfg.Discovery = []config.Provider{provider}, rules
@@ -812,6 +819,12 @@ func previewTrack(ctx context.Context, acct setup.Account) (int, bool, error) {
 	for _, r := range discovered {
 		byRule[r.DiscoveredBy] = append(byRule[r.DiscoveredBy], r.Name)
 	}
+	type found struct {
+		track int // index in acct.Track
+		label string
+		names []string
+	}
+	var lists []found
 	failed := false
 	for i, r := range results {
 		label := r.Rule
@@ -826,34 +839,95 @@ func previewTrack(ctx context.Context, acct setup.Account) (int, bool, error) {
 		names := byRule[r.Rule]
 		slices.SortFunc(names, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
 		fmt.Printf("  %s: %d %s\n", label, len(names), plural(len(names), "repo", "repos"))
+		if i < len(acct.Track) && len(acct.Track[i].Names) > 1 && len(names) > 0 {
+			fmt.Printf("    by name: %s\n", matchCounts(acct.Track[i].Names, names))
+		}
 		if len(names) > 0 {
 			fmt.Printf("    %s\n", sample(names, 12))
+			if i < len(acct.Track) {
+				lists = append(lists, found{track: i, label: label, names: names})
+			}
 		}
 		for _, w := range r.Warnings {
 			fmt.Printf("    warning: %s\n", w)
 		}
 	}
 	n := len(discovered)
-	if failed {
-		n = -1
+	choice, title := "keep", fmt.Sprintf("Track these %d repos with %s?", n, acct.Name)
+	options := []huh.Option[string]{
+		huh.NewOption("Yes, all of them", "keep"),
+		huh.NewOption("Pick from the list", "pick"),
+		huh.NewOption("No, change whose repos or the filters", "change"),
 	}
-	keep, title := "keep", fmt.Sprintf("Track these %d repos with %s?", len(discovered), acct.Name)
 	switch {
-	case len(discovered) == 1:
+	case n == 1:
 		title = "Track this repo with " + acct.Name + "?"
-	case len(discovered) == 0 && !failed:
-		keep, title = "change", "Nothing matches. Keep it anyway?"
+	case n == 0 && !failed:
+		choice, title = "change", "Nothing matches. Keep it anyway?"
+		options = slices.Delete(options, 1, 2)
 	}
 	if err := huh.NewSelect[string]().
 		Title(title).
 		Description("Nothing is cloned yet: you choose that at the end.").
-		Options(
-			huh.NewOption("Yes", "keep"),
-			huh.NewOption("No, change whose repos or the filters", "change"),
-		).Value(&keep).Run(); err != nil {
+		Options(options...).Value(&choice).Run(); err != nil {
 		return n, false, err
 	}
-	return n, keep == "keep", nil
+	switch choice {
+	case "change":
+		return n, false, nil
+	case "pick":
+		n = 0
+		for _, l := range lists {
+			kept, err := pickRepos(l.label, l.names)
+			if err != nil {
+				return n, false, err
+			}
+			t := &acct.Track[l.track]
+			for _, name := range l.names {
+				if !slices.Contains(kept, name) {
+					t.Skip = append(t.Skip, name)
+				}
+			}
+			n += len(kept)
+		}
+		fmt.Printf("Tracking %d of %d. The ones you left out are skipped by name from now on; new matches are still found on every sync.\n",
+			n, len(discovered))
+	}
+	if failed {
+		return -1, true, nil
+	}
+	return n, true, nil
+}
+
+// pickRepos asks which of names to keep, every one ticked to start with.
+func pickRepos(what string, names []string) ([]string, error) {
+	kept := slices.Clone(names)
+	opts := make([]huh.Option[string], len(names))
+	for i, name := range names {
+		opts[i] = huh.NewOption(name, name).Selected(true)
+	}
+	err := huh.NewMultiSelect[string]().
+		Title(what).
+		Description("Untick the ones to leave out; / filters the list.").
+		Options(opts...).Filterable(true).Height(min(len(names)+2, 20)).
+		Value(&kept).Run()
+	return kept, err
+}
+
+// matchCounts says how many of names each pattern matches, so a pattern
+// that matches far more than meant stands out.
+func matchCounts(patterns, names []string) string {
+	counts := make([]string, len(patterns))
+	for i, p := range patterns {
+		n := 0
+		for _, name := range names {
+			if config.NameMatches([]string{p}, name) {
+				n++
+			}
+		}
+		counts[i] = fmt.Sprintf("%s %d", p, n)
+	}
+	return strings.Join(counts, ", ")
 }
 
 // trackLabel names what a tracked owner covers: whose repos, and the filters.
@@ -874,6 +948,9 @@ func trackLabel(t setup.Track) string {
 	}
 	if len(t.Topics) > 0 {
 		filters = append(filters, "with topics "+strings.Join(t.Topics, " and "))
+	}
+	if len(t.Skip) > 0 {
+		filters = append(filters, fmt.Sprintf("skipping %d by name", len(t.Skip)))
 	}
 	if len(filters) > 0 {
 		label += ", " + strings.Join(filters, ", ")
@@ -905,16 +982,21 @@ func askFilters(acct *setup.Account) error {
 	for i := range acct.Track {
 		t := &acct.Track[i]
 		if !narrow {
-			t.Languages, t.Topics, t.Names, t.NamePattern = nil, nil, nil, ""
+			t.Languages, t.Topics, t.Names, t.NamePattern, t.Skip = nil, nil, nil, "", nil
 			continue
 		}
 		names, languages, topics := strings.Join(t.Names, ", "), strings.Join(t.Languages, ", "), strings.Join(t.Topics, ", ")
-		namesHelp := "Any of them, comma-separated; * matches anything: *billing*, *payments*, svc-*. Blank for any name."
+		namesHelp := "Any of them, comma-separated. A word matches whole words of the name -- billing matches " +
+			"billing-api and team-billing, not rebilling; with * it's a pattern over the whole name -- svc-* starts with svc-. Blank for any name."
 		if t.NamePattern != "" {
 			namesHelp += fmt.Sprintf(" Your config's name_pattern %q applies too.", t.NamePattern)
 		}
+		title := t.Owner + "'s repos"
+		if t.Rule != "" && slices.ContainsFunc(acct.Track, func(o setup.Track) bool { return o.Owner == t.Owner && o.Rule != t.Rule }) {
+			title += " (rule " + t.Rule + ")"
+		}
 		if err := huh.NewForm(huh.NewGroup(
-			huh.NewNote().Title(t.Owner+"'s repos"),
+			huh.NewNote().Title(title),
 			huh.NewInput().Title("Only names like").Description(namesHelp).Value(&names).Validate(validNameGlobs),
 			huh.NewInput().Title("Only in these languages").Description("Any of them, comma-separated: Go, Rust. Blank for any language.").Value(&languages),
 			huh.NewInput().Title("Only with these topics").Description("All of them, comma-separated. Blank for any topics.").Value(&topics),
