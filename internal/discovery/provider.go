@@ -203,7 +203,7 @@ func requestedFilters(rule config.DiscoveryRule) FilterSet {
 	if len(rule.Topics) > 0 {
 		fs[FilterTopics] = true
 	}
-	if rule.NamePattern != "" {
+	if rule.NamePattern != "" || len(rule.Names) > 0 {
 		fs[FilterName] = true
 	}
 	return fs

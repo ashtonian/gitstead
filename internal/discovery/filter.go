@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ashtonian/gitten/internal/config"
+	"github.com/ashtonian/gitten/internal/repourl"
 )
 
 // FilterRepos applies inclusion and exclusion rules client-side. Filters listed
@@ -40,6 +41,9 @@ func FilterRepos(repos []Repo, rule config.DiscoveryRule, excludes []config.Excl
 			continue
 		}
 		if nameRe != nil && !nameRe.MatchString(repo.Name) {
+			continue
+		}
+		if len(rule.Names) > 0 && !applied.Has(FilterName) && !config.NameMatches(rule.Names, repo.Name) {
 			continue
 		}
 		if isExcluded(repo, excludes) {
@@ -107,7 +111,10 @@ func isExcluded(repo Repo, excludes []config.ExcludeRule) bool {
 				return true
 			}
 		}
-		if slices.Contains(excl.Repos, repo.FullName) {
+		if config.NameMatches(excl.Names, repo.Name) {
+			return true
+		}
+		if slices.ContainsFunc(excl.Repos, func(p string) bool { return repourl.MatchKey(p, repo.Key()) }) {
 			return true
 		}
 	}

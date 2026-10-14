@@ -224,8 +224,8 @@ func validateSelector(r DiscoveryRule, typ string) error {
 		if r.User != "" || r.Org != "" || r.Group != "" {
 			return fmt.Errorf("discovery rule %q: 'query' cannot be combined with user/org/group", r.Name)
 		}
-		if r.Visibility != "" || len(r.Languages) > 0 || len(r.Topics) > 0 || r.NamePattern != "" {
-			return fmt.Errorf("discovery rule %q: 'query' cannot be combined with visibility/languages/topics/name_pattern", r.Name)
+		if r.Visibility != "" || len(r.Languages) > 0 || len(r.Topics) > 0 || r.NamePattern != "" || len(r.Names) > 0 {
+			return fmt.Errorf("discovery rule %q: 'query' cannot be combined with visibility/languages/topics/name_pattern/names", r.Name)
 		}
 		return nil
 	}
@@ -326,8 +326,9 @@ func validateAccounts(cfg *Config) error {
 	return nil
 }
 
-// validatePatterns checks every glob over repo keys config holds: overrides',
-// sets' and workspaces' (see repourl.MatchKey).
+// validatePatterns checks every glob config holds: over repo keys --
+// overrides', sets', workspaces' and excludes' (see repourl.MatchKey) -- and
+// over repo names, rules' and excludes'.
 func validatePatterns(cfg *Config) error {
 	check := func(where string, patterns []string) error {
 		for _, p := range patterns {
@@ -349,6 +350,20 @@ func validatePatterns(cfg *Config) error {
 	}
 	for _, w := range cfg.Workspaces {
 		if err := check("workspace "+w.Name, w.Repos); err != nil {
+			return err
+		}
+	}
+	for i, e := range cfg.Exclude {
+		where := fmt.Sprintf("exclude[%d]", i)
+		if err := check(where+".repos", e.Repos); err != nil {
+			return err
+		}
+		if err := checkNameGlobs(where, e.Names); err != nil {
+			return err
+		}
+	}
+	for _, r := range cfg.Discovery {
+		if err := checkNameGlobs(fmt.Sprintf("discovery rule %q", r.Name), r.Names); err != nil {
 			return err
 		}
 	}

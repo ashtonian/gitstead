@@ -11,7 +11,6 @@ import (
 	"github.com/ashtonian/gitten/internal/config"
 	"github.com/ashtonian/gitten/internal/ctxutil"
 	"github.com/ashtonian/gitten/internal/gitops"
-	"github.com/ashtonian/gitten/internal/shellutil"
 	"github.com/ashtonian/gitten/internal/state"
 	"gopkg.in/yaml.v3"
 )
@@ -280,62 +279,9 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 	return nil
 }
 
-func (c *InitCmd) Run(ctx *Context) error {
-	path := ctx.ConfigPath()
-
-	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("config file already exists: %s", path)
-	}
-
-	cfg := config.Defaults()
-
-	// If the gh CLI is logged in, prefill a ready GitHub provider + discovery
-	// rule so `gitten discover --apply` works with zero editing -- the
-	// zero-setup path for the GitHub + gh majority.
-	detected := ""
-	if !c.NoDetect {
-		if user, ok := detectGitHubCLI(ctx); ok {
-			// The token's own repos, private ones included, with the token
-			// pinned to this account so a later `gh auth switch` can't change it.
-			cfg.Providers = []config.Provider{{Name: "github.com", Type: "github",
-				TokenCommand: "gh auth token --hostname github.com --user " + shellutil.Quote(user)}}
-			cfg.Discovery = []config.DiscoveryRule{{Name: user, Provider: "github.com",
-				Affiliation: []string{"owner"}, Tags: []string{"personal"}}}
-			detected = user
-		}
-	}
-
-	out, err := yaml.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	// Append commented stubs so a first-run user has something to uncomment
-	// instead of an empty providers/discovery list. They stay commented, so the
-	// written config still validates as-is.
-	out = append(out, []byte(initExamples)...)
-
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("creating config dir: %w", err)
-	}
-
-	if err := os.WriteFile(path, out, 0600); err != nil {
-		return err
-	}
-
-	fmt.Printf("Config written to %s\n", path)
-	if detected != "" {
-		fmt.Printf("Detected GitHub login %q via gh -- added a ready provider + discovery rule.\n", detected)
-		fmt.Println("Run 'gitten discover --apply' to clone your repos (or 'gitten bootstrap').")
-	} else {
-		fmt.Println("Uncomment and edit the provider + discovery stubs, then run 'gitten discover'.")
-	}
-	return ctx.finish(map[string]string{"path": path, "github_login": detected}, nil)
-}
-
 // detectGitHubCLI returns the logged-in GitHub user if the gh CLI is installed
-// and authenticated (so `gh auth token` works), else ("", false). Used by init
-// to prefill a ready GitHub provider.
+// and authenticated (so `gh auth token` works), else ("", false). clone uses
+// it to search github.com with no provider configured.
 func detectGitHubCLI(ctx *Context) (string, bool) {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return "", false
@@ -365,29 +311,6 @@ func detectGitHubCLI(ctx *Context) (string, bool) {
 	}
 	return login, true
 }
-
-// initExamples are commented-out config stubs appended by `init` so a fresh
-// config is usable by uncommenting rather than authored from scratch. Field
-// names mirror config.example.yaml.
-const initExamples = `
-# --- Examples: uncomment and edit. Full reference: config.example.yaml ---
-#
-# providers:
-#   - name: "github.com"
-#     type: "github"
-#     token_command: "gh auth token"   # or token_env: GITHUB_TOKEN
-#
-# discovery:
-#   - name: "my-repos"
-#     provider: "github.com"
-#     user: "your-username"            # or: org: "your-org"
-#     tags: ["personal"]
-#
-# workspaces:                          # agents' copies; see config.example.yaml
-#   - name: "app"
-#     repos: ["github.com/your-username/app"]
-#     agents: 4
-`
 
 // asConfigValue is v as config spells it, for JSON: marshalled by its YAML
 // keys, so a duration reads "5m0s" and a field its config key.

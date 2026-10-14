@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/ashtonian/gitten/internal/config"
@@ -94,15 +95,59 @@ func TestFilterReposDimensions(t *testing.T) {
 
 func TestFilterReposNameAndExclude(t *testing.T) {
 	repos := []Repo{
-		{Name: "api-foo", FullName: "o/api-foo"},
-		{Name: "lib-bar", FullName: "o/lib-bar"},
-		{Name: "api-skip", FullName: "o/api-skip"},
+		{Host: "github.com", Name: "api-foo", FullName: "o/api-foo"},
+		{Host: "github.com", Name: "lib-bar", FullName: "o/lib-bar"},
+		{Host: "github.com", Name: "api-skip", FullName: "o/api-skip"},
 	}
 	rule := config.DiscoveryRule{NamePattern: "^api-"}
-	excl := []config.ExcludeRule{{Repos: []string{"o/api-skip"}}}
+	excl := []config.ExcludeRule{{Repos: []string{"github.com/o/api-skip"}}}
 	got := FilterRepos(repos, rule, excl, nil)
 	if len(got) != 1 || got[0].Name != "api-foo" {
 		t.Fatalf("expected only api-foo, got %+v", got)
+	}
+}
+
+// names keeps a repo whose name matches any glob, ignoring case, and with
+// name_pattern a name must match both; an exclude's names and repos globs
+// skip what they match.
+func TestFilterReposNameGlobs(t *testing.T) {
+	repo := func(owner, name string) Repo {
+		return Repo{Host: "github.com", Name: name, FullName: owner + "/" + name}
+	}
+	repos := []Repo{
+		repo("acme", "billing-api"), repo("acme", "BILLING-web"), repo("acme", "payments"), repo("acme", "data-payments-etl"),
+		repo("acme", "search"), repo("acme", "billing-sandbox"), repo("legacy", "billing-old"),
+	}
+	names := func(got []Repo) []string {
+		var out []string
+		for _, r := range got {
+			out = append(out, r.Name)
+		}
+		return out
+	}
+	for _, tt := range []struct {
+		name     string
+		rule     config.DiscoveryRule
+		excludes []config.ExcludeRule
+		want     []string
+	}{
+		{"any glob, any case", config.DiscoveryRule{Names: []string{"*billing*", "*payments*"}}, nil,
+			[]string{"billing-api", "BILLING-web", "payments", "data-payments-etl", "billing-sandbox", "billing-old"}},
+		{"a glob without * is the whole name", config.DiscoveryRule{Names: []string{"payments"}}, nil, []string{"payments"}},
+		{"with name_pattern, both", config.DiscoveryRule{Names: []string{"*billing*", "*payments*"}, NamePattern: "^(billing|payments)"}, nil,
+			[]string{"billing-api", "payments", "billing-sandbox", "billing-old"}},
+		{"excluded by name and by key", config.DiscoveryRule{Names: []string{"*billing*"}},
+			[]config.ExcludeRule{{Names: []string{"*-SANDBOX"}}, {Repos: []string{"github.com/legacy/*"}}},
+			[]string{"billing-api", "BILLING-web"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := names(FilterRepos(repos, tt.rule, tt.excludes, nil)); !slices.Equal(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+	if !requestedFilters(config.DiscoveryRule{Names: []string{"x*"}}).Has(FilterName) {
+		t.Error("names is a name filter")
 	}
 }
 

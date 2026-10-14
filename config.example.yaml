@@ -136,6 +136,12 @@ discovery:
   #   tags: ["work"]
   #   ssh_key: "~/.ssh/id_work"            # Override SSH key for this rule
 
+  # Only some of an org's repos, by name: globs, any of them, ignoring case
+  # - name: "billing"
+  #   provider: "github.com"
+  #   org: "my-company"
+  #   names: ["*billing*", "*payments*"]   # Names containing billing or payments
+
   # Filter by name pattern (regex)
   # - name: "work-services"
   #   provider: "ghes.company.com"
@@ -198,10 +204,13 @@ exclude: []
   # Regex on repo name
   # - name_pattern: "^deprecated-"
   #
-  # Explicit repo list (owner/name)
+  # Globs on repo name, any of them, ignoring case
+  # - names: ["*-sandbox", "*-experiment"]
+  #
+  # Repo keys, or globs over them as in overrides
   # - repos:
-  #   - "my-company/legacy-monolith"
-  #   - "my-company/old-frontend"
+  #   - "github.com/my-company/legacy-monolith"
+  #   - "github.com/my-company/old-*"
 
 # =============================================================================
 # Named Sets
