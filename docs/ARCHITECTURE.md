@@ -2,8 +2,8 @@
 
 This is the map for someone changing gitten: what the parts are, how data
 moves through them, what each lock protects, and what happens when something
-fails. [README.md](../README.md) covers using it; [SPEC.md](../SPEC.md) is the
-command-by-command reference and the record of each design detail.
+fails. The [user guides](README.md) cover using it; [SPEC.md](../SPEC.md)
+is the command-by-command reference and the record of each design detail.
 
 - [Problem and constraints](#problem-and-constraints)
 - [Components](#components)
@@ -18,6 +18,7 @@ command-by-command reference and the record of each design detail.
 - [Durability](#durability)
 - [Failure modes](#failure-modes)
 - [Decisions and trade-offs](#decisions-and-trade-offs)
+- [Code map](#code-map)
 
 ## Problem and constraints
 
@@ -78,7 +79,7 @@ The **inventory** subsystem -- `config`, `discovery`, `reconcile`, `gitops`,
 -- puts agents on repos. Workspaces depend on the inventory, never the
 reverse; `cmd` is the only package that sees both, and only to wire a command
 that spans them (`apply`, or `remove` refusing a repo agents' copies are made
-from). The README's [code map](../README.md#code-map) lists every package.
+from). The [code map](#code-map) lists every package.
 
 ## Where things live
 
@@ -360,3 +361,34 @@ The ones that shape the code most:
   separate `.git`.
 - **No daemon.** The host's scheduler runs `gitten sync`; there is nothing
   to keep alive, and a run that can't finish just waits for the next one.
+
+## Code map
+
+| Package | Owns |
+| --- | --- |
+| `main.go`, `internal/cmd` | The CLI: flags, wiring, output. Commands load config and state, call the packages below, print. |
+| `internal/config` | Loading (on [`github.com/ashtonian/pkg/config`](https://github.com/ashtonian/pkg/tree/main/config)), defaults, validation, per-repo overrides, SSH key and protocol resolution. |
+| `internal/discovery` | Provider clients (GitHub, GitLab, Gitea/Forgejo), rule filtering, stale detection. |
+| `internal/reconcile` | Desired vs recorded vs on-disk for tracked repos, and the plan engine: applies changes, several repos at once, then serial ones. |
+| `internal/state` | The state file: schema, migrations, locking, atomic writes, and `GroupCommit`, which saves concurrent changes in one write. |
+| `internal/gitops` | Everything that runs git: clone, fetch, status, snapshots, backups, restore, archives, copy IDs, worktrees. |
+| `internal/workspace` | Workspaces: resolving config into replicas and copies, planning their changes on the reconcile engine, making, moving and removing copies, health. Depends on the inventory, never the reverse. |
+| `internal/hook` | Running `post_clone` and `post_create` hooks: environment, timeouts, logs. |
+| `internal/agent` | Running agents: profile commands, the lease that marks an agent running, and `ws run` itself. |
+| `internal/launch` | Fleets' terminals: the launch plan, and the tmux, iTerm, Muxy and plugin launchers. |
+| `internal/activity` | Reading agents' terminal activity (tmux panes, Muxy), and watching a pane for an agent waiting. |
+| `internal/view` | `gitten top`: collecting every repo and copy's state and terminal activity, and laying it out. |
+| `internal/jump` | Matching a short query to a repo, workspace, agent or copy, for `cd`, `path` and `open`. |
+| `internal/setup` | `gitten setup`'s logic: detecting what the machine has, proposing answers, rendering them into config, checking it, and the shell's startup-file line. |
+| `internal/repourl` | Parsing remote URLs into host/owner/name keys. |
+| `internal/pathtemplate`, `internal/pathutil`, `internal/shellutil`, `internal/ctxutil`, `internal/procutil` | Path templates; deletion guards, renames that never replace, moves across filesystems and durable writes; shell quoting; optional deadlines; commands that never prompt and die with their context. |
+| `internal/scheduler` | launchd, systemd and cron installation. |
+| `internal/oplog`, `internal/notify` | The operation log and desktop notifications. |
+| `internal/testenv` | Isolating each package's tests from the machine: home, XDG directories, git config, temporary directories. |
+| `e2e/` | End-to-end tests, a module of their own: the built binary against local remotes and a Forgejo container. |
+| `examples/` | Complete configs for common setups, each loaded by the tests, and [what each one produces](../examples/README.md). |
+| `docs/` | [User guides](README.md); [ARCHITECTURE.md](ARCHITECTURE.md), how the parts fit and why; [RELEASING.md](RELEASING.md), cutting a release. |
+| `nix/home-manager.nix`, `flake.nix` | The home-manager module: package, config and schedules as systemd timers or launchd agents. |
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full workflow and
+[SECURITY.md](../SECURITY.md) for the security model and how to report issues.
