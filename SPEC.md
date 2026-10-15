@@ -1805,7 +1805,7 @@ gitstead/
     └── pathtemplate/, pathutil/, shellutil/, ctxutil/
 ```
 
-The README's code map says what each package owns.
+The [architecture code map](docs/ARCHITECTURE.md#code-map) says what each package owns.
 
 ---
 
