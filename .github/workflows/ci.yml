@@ -12,13 +12,13 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    if: github.actor_id == '4212452' && (github.event_name != 'pull_request' || (github.event.pull_request.user.id == 4212452 && github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: arc-gitstead
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: ./.github/actions/setup-go-cache
         with:
           go-version-file: go.mod
-          cache: true
       - name: Build
         run: go build ./...
       - name: Vet
@@ -31,51 +31,60 @@ jobs:
           fi
       - name: Test (race)
         run: go test -race ./...
+      - name: Trim Go build cache
+        uses: ./.github/actions/trim-go-cache
 
   e2e:
-    runs-on: ubuntu-latest
+    if: github.actor_id == '4212452' && (github.event_name != 'pull_request' || (github.event.pull_request.user.id == 4212452 && github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: arc-gitstead
     needs: [test]
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: ./.github/actions/setup-go-cache
         with:
           go-version-file: go.mod
-          cache: true
       # The e2e suite spins up a real Forgejo instance via testcontainers; the
       # ubuntu-latest runner has Docker available out of the box.
       - name: E2E (testcontainers/Forgejo)
-        run: cd e2e && go test -timeout 15m ./...
+        run: cd e2e && go test -count=1 -timeout 15m ./...
+      - name: Trim Go build cache
+        uses: ./.github/actions/trim-go-cache
 
   vuln:
-    runs-on: ubuntu-latest
+    if: github.actor_id == '4212452' && (github.event_name != 'pull_request' || (github.event.pull_request.user.id == 4212452 && github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: arc-gitstead
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: ./.github/actions/setup-go-cache
         with:
           go-version-file: go.mod
-          cache: true
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           "$(go env GOPATH)/bin/govulncheck" ./...
+      - name: Trim Go build cache
+        uses: ./.github/actions/trim-go-cache
 
   lint:
-    runs-on: ubuntu-latest
+    if: github.actor_id == '4212452' && (github.event_name != 'pull_request' || (github.event.pull_request.user.id == 4212452 && github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: arc-gitstead
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: ./.github/actions/setup-go-cache
         with:
           go-version-file: go.mod
-          cache: true
       # Build golangci-lint with this module's Go toolchain so its analysis
       # version isn't lower than the module's go directive.
       - name: golangci-lint
         run: |
           go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
           "$(go env GOPATH)/bin/golangci-lint" run --timeout=5m
+      - name: Trim Go build cache
+        uses: ./.github/actions/trim-go-cache
 
   docker:
-    runs-on: ubuntu-latest
+    if: github.actor_id == '4212452' && (github.event_name != 'pull_request' || (github.event.pull_request.user.id == 4212452 && github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: arc-gitstead
     needs: [test]
     permissions:
       contents: read
@@ -96,6 +105,24 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore Docker Go caches
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build-cache
+          key: docker-go-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Dockerfile', 'go.mod', 'go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            docker-go-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Dockerfile', 'go.mod', 'go.sum') }}-
+            docker-go-v1-${{ runner.os }}-${{ runner.arch }}-
+      - name: Restore BuildKit Go caches
+        uses: reproducible-containers/buildkit-cache-dance@5422eac04292c961a382e0f584ea0f03ad9da723 # v3.4.0
+        with:
+          scratch-dir: ${{ runner.temp }}/buildkit-cache-dance
+          cache-map: |
+            {
+              ".build-cache/go-build": "/root/.cache/go-build",
+              ".build-cache/go-mod": "/go/pkg/mod"
+            }
+
       - name: Build (push :edge from master)
         uses: docker/build-push-action@v7
         with:
@@ -107,5 +134,5 @@ jobs:
           build-args: |
             VERSION=edge
             COMMIT=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=gitstead
+          cache-to: type=gha,mode=max,scope=gitstead
