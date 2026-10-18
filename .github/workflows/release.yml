@@ -10,12 +10,13 @@ permissions:
 
 jobs:
   goreleaser:
-    runs-on: ubuntu-latest
+    if: github.actor_id == '4212452' && (github.event_name != 'pull_request' || (github.event.pull_request.user.id == 4212452 && github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: arc-gitten
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v7
+      - uses: ./.github/actions/setup-go-cache
         with:
           go-version-file: go.mod
       - name: Test (race) before release
@@ -37,3 +38,5 @@ jobs:
           # Private half of ashtonian/homebrew-tap's write deploy key (the
           # default GITHUB_TOKEN can't push to a second repo).
           HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
+      - name: Trim Go build cache
+        uses: ./.github/actions/trim-go-cache
