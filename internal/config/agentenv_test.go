@@ -32,11 +32,11 @@ func TestRenderEnv(t *testing.T) {
 
 func TestCheckEnv(t *testing.T) {
 	for name, env := range map[string]map[string]string{
-		"bad name":      {"1PORT": "x"},
-		"dotted":        {"A.B": "x"},
-		"gitstead's own":  {"GITSTEAD_PORT": "1"},
-		"unknown field": {"PORT": "{{.Prot}}"},
-		"bad template":  {"PORT": "{{.Port"},
+		"bad name":       {"1PORT": "x"},
+		"dotted":         {"A.B": "x"},
+		"gitstead's own": {"GITSTEAD_PORT": "1"},
+		"unknown field":  {"PORT": "{{.Prot}}"},
+		"bad template":   {"PORT": "{{.Port"},
 	} {
 		if err := checkEnv("w", env); err == nil {
 			t.Errorf("%s: accepted %v", name, env)
