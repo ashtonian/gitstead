@@ -8,6 +8,8 @@ module github.com/ashtonian/gitstead-e2e
 
 go 1.26.2
 
+toolchain go1.27.3
+
 require github.com/testcontainers/testcontainers-go/modules/forgejo v0.42.0
 
 require (
