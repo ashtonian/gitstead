@@ -17,8 +17,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: ashtonian/go-ci-actions@470279e1ff775269324ca13b0aaaf7211951215e # v1.0.1
+      - uses: ashtonian/go-ci-actions@78710c0215622d4dd362f4c565de788934051488 # v1.1.0
         with:
+          cache-mode: off
           go-version-file: go.mod
       - name: Test (race) before release
         run: go test -race ./...

@@ -13,12 +13,15 @@ permissions:
 jobs:
   test:
     if: github.actor_id == '4212452' && (github.event_name != 'pull_request' || (github.event.pull_request.user.id == 4212452 && github.event.pull_request.head.repo.full_name == github.repository))
+    permissions:
+      contents: read
+      id-token: write
     runs-on: arc-gitstead
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ashtonian/go-ci-actions@470279e1ff775269324ca13b0aaaf7211951215e # v1.0.1
+      - uses: ashtonian/go-ci-actions@78710c0215622d4dd362f4c565de788934051488 # v1.1.0
         with:
           go-version-file: go.mod
       - name: Build
@@ -35,13 +38,16 @@ jobs:
         run: go test -race ./...
   e2e:
     if: github.actor_id == '4212452' && (github.event_name != 'pull_request' || (github.event.pull_request.user.id == 4212452 && github.event.pull_request.head.repo.full_name == github.repository))
+    permissions:
+      contents: read
+      id-token: write
     runs-on: arc-gitstead
     needs: [test]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ashtonian/go-ci-actions@470279e1ff775269324ca13b0aaaf7211951215e # v1.0.1
+      - uses: ashtonian/go-ci-actions@78710c0215622d4dd362f4c565de788934051488 # v1.1.0
         with:
           go-version-file: go.mod
       # The e2e suite spins up a real Forgejo instance via testcontainers; the
@@ -50,12 +56,15 @@ jobs:
         run: cd e2e && go test -count=1 -timeout 15m ./...
   vuln:
     if: github.actor_id == '4212452' && (github.event_name != 'pull_request' || (github.event.pull_request.user.id == 4212452 && github.event.pull_request.head.repo.full_name == github.repository))
+    permissions:
+      contents: read
+      id-token: write
     runs-on: arc-gitstead
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ashtonian/go-ci-actions@470279e1ff775269324ca13b0aaaf7211951215e # v1.0.1
+      - uses: ashtonian/go-ci-actions@78710c0215622d4dd362f4c565de788934051488 # v1.1.0
         with:
           go-version-file: go.mod
       - name: govulncheck
@@ -64,12 +73,15 @@ jobs:
           "$(go env GOPATH)/bin/govulncheck" ./...
   lint:
     if: github.actor_id == '4212452' && (github.event_name != 'pull_request' || (github.event.pull_request.user.id == 4212452 && github.event.pull_request.head.repo.full_name == github.repository))
+    permissions:
+      contents: read
+      id-token: write
     runs-on: arc-gitstead
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ashtonian/go-ci-actions@470279e1ff775269324ca13b0aaaf7211951215e # v1.0.1
+      - uses: ashtonian/go-ci-actions@78710c0215622d4dd362f4c565de788934051488 # v1.1.0
         with:
           go-version-file: go.mod
       # Build golangci-lint with this module's Go toolchain so its analysis
