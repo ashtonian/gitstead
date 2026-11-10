@@ -29,7 +29,7 @@ go test ./...                 # unit tests; each package's run is isolated from 
 go test -race ./...
 
 # Linting (matches CI)
-go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 golangci-lint run
 
 # Vulnerability scan (matches CI)
