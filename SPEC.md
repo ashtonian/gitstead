@@ -1881,9 +1881,10 @@ All dependencies pinned to latest stable versions at build time. No go-git.
   pull request's run ends by recording a receipt of the tested merge tree and
   the jobs that passed ([go-ci-actions acceptance](https://github.com/ashtonian/go-ci-actions#push-acceptance)).
   The push that merges it skips every check its own scope selects that
-  passed on the same tree, and publishes `:edge` when the image's inputs
-  changed. A squash or rebase merge, a direct push, a re-run or a pull
-  request run older than six hours runs its scoped checks. A newer push to a
+  passed on the same tree, when the commit it merges onto has a green run,
+  and publishes `:edge` when the image's inputs changed. A red parent, a
+  squash or rebase merge, a direct push, a re-run or a pull request run older
+  than six hours runs its scoped checks. A newer push to a
   pull request cancels its run in progress.
 - **Release** (`.github/workflows/release.yml`, on a `v*` tag): the race
   tests, then GoReleaser publishes the archives and checksums, the Homebrew
