@@ -3,3 +3,4 @@ gitstead
 .DS_Store
 dist/
 .claude/
+/build/

@@ -41,6 +41,25 @@ govulncheck ./...
 cd e2e && go test ./...
 ```
 
+## What CI runs
+
+CI runs only the jobs a change needs, over the packages it affects (SPEC.md,
+Build and release). When a test starts reading a file outside its own
+package directory, add the file to `go-owners` in `ci.yml`'s scope step.
+Otherwise a change to that file alone runs every package or, when the file is
+in `go-ignore`, skips the test that reads it. Label a pull request `full-ci`
+to run everything.
+
+## Container image
+
+The image packages a binary built on the host. Build the binaries into the
+per-platform layout the `Dockerfile` copies from, then the image:
+
+```bash
+scripts/build-binaries.sh build/image dev "$(git rev-parse HEAD)" linux/amd64
+docker buildx build --platform linux/amd64 -f Dockerfile -t gitstead:dev build/image
+```
+
 ## Build version information
 
 ```bash

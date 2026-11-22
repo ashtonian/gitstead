@@ -1855,16 +1855,37 @@ All dependencies pinned to latest stable versions at build time. No go-git.
   and printed by `gitstead version`. Nothing hardcodes a version.
 - **Binaries:** `CGO_ENABLED=0`, for linux and darwin on amd64 and arm64
   (`.goreleaser.yaml`).
-- **Images:** `Dockerfile` builds from source in two stages for any platform
-  (CI's multi-arch build, local use); `Dockerfile.goreleaser` packages a
-  release's pre-built binary. Both end on Alpine with `git` and
-  `openssh-client`, which clone and fetch need, and run `gitstead` as the
-  entrypoint.
+- **Images:** one `Dockerfile` packages a binary built on the host: its build
+  context holds one per platform at `<os>/<arch>/gitstead`, laid out by
+  GoReleaser's `dockers_v2` for a release and by `scripts/build-binaries.sh`
+  for CI and local builds, so no platform compiles anything inside the image
+  build. It is Alpine with `git` and `openssh-client`, which clone and fetch
+  need, and runs `gitstead` as the entrypoint.
 - **CI** (`.github/workflows/ci.yml`, on pushes and pull requests to
-  `master`): build, vet, gofmt, race tests; the e2e module against a Forgejo
-  container; govulncheck; golangci-lint; and a linux/amd64 + linux/arm64 image
-  build, pushed as `ghcr.io/ashtonian/gitstead:edge` from `master` with the
-  workflow's own token.
+  `master`, nightly at 04:51 UTC and by hand): build, vet, gofmt, race tests;
+  the e2e module against a Forgejo container; govulncheck; golangci-lint; and
+  the image. A `scope` job ([go-ci-actions scope](https://github.com/ashtonian/go-ci-actions#change-scope))
+  runs only the jobs a change needs, over the packages it affects: the
+  changed packages plus every package that imports one. e2e and the image
+  run when the binary (the root package) is affected or their own files
+  (`e2e/`, `Dockerfile`, `scripts/build-binaries.sh`) change. internal/config's
+  tests read `examples/*.yaml` and `config.example.yaml`, so those count as
+  its files. A pull request is measured from its base, a push from the last
+  green run on `master`. A change to `ci.yml`, `go.mod` or `go.sum`, a file no
+  package owns, or the `full-ci` label runs everything, as do the nightly
+  (skipped when `master` has not moved since the last green one) and a manual
+  run. A pull request builds the image for linux/amd64 only, without
+  provenance or an SBOM; `master` builds linux/amd64 + linux/arm64 and pushes
+  `ghcr.io/ashtonian/gitstead:edge` with the workflow's own token. The
+  binaries are cross-compiled on the runner with its remote build cache. A
+  pull request's run ends by recording a receipt of the tested merge tree and
+  the jobs that passed ([go-ci-actions acceptance](https://github.com/ashtonian/go-ci-actions#push-acceptance)).
+  The push that merges it skips every check its own scope selects that
+  passed on the same tree, when the commit it merges onto has a green run,
+  and publishes `:edge` when the image's inputs changed. A red parent, a
+  squash or rebase merge, a direct push, a re-run or a pull request run older
+  than six hours runs its scoped checks. A newer push to a
+  pull request cancels its run in progress.
 - **Release** (`.github/workflows/release.yml`, on a `v*` tag): the race
   tests, then GoReleaser publishes the archives and checksums, the Homebrew
   cask and the images on ghcr.io. [docs/RELEASING.md](docs/RELEASING.md) has the
