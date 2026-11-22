@@ -41,6 +41,16 @@ govulncheck ./...
 cd e2e && go test ./...
 ```
 
+## Container image
+
+The image packages a binary built on the host. Build the binaries into the
+per-platform layout the `Dockerfile` copies from, then the image:
+
+```bash
+scripts/build-binaries.sh build/image dev "$(git rev-parse HEAD)" linux/amd64
+docker buildx build --platform linux/amd64 -f Dockerfile -t gitstead:dev build/image
+```
+
 ## Build version information
 
 ```bash

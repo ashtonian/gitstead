@@ -1855,16 +1855,19 @@ All dependencies pinned to latest stable versions at build time. No go-git.
   and printed by `gitstead version`. Nothing hardcodes a version.
 - **Binaries:** `CGO_ENABLED=0`, for linux and darwin on amd64 and arm64
   (`.goreleaser.yaml`).
-- **Images:** `Dockerfile` builds from source in two stages for any platform
-  (CI's multi-arch build, local use); `Dockerfile.goreleaser` packages a
-  release's pre-built binary. Both end on Alpine with `git` and
-  `openssh-client`, which clone and fetch need, and run `gitstead` as the
-  entrypoint.
+- **Images:** one `Dockerfile` packages a binary built on the host: its build
+  context holds one per platform at `<os>/<arch>/gitstead`, laid out by
+  GoReleaser's `dockers_v2` for a release and by `scripts/build-binaries.sh`
+  for CI and local builds, so no platform compiles anything inside the image
+  build. It is Alpine with `git` and `openssh-client`, which clone and fetch
+  need, and runs `gitstead` as the entrypoint.
 - **CI** (`.github/workflows/ci.yml`, on pushes and pull requests to
   `master`): build, vet, gofmt, race tests; the e2e module against a Forgejo
-  container; govulncheck; golangci-lint; and a linux/amd64 + linux/arm64 image
-  build, pushed as `ghcr.io/ashtonian/gitstead:edge` from `master` with the
-  workflow's own token.
+  container; govulncheck; golangci-lint; and the image. A pull request builds
+  it for linux/amd64 only, without provenance or an SBOM; `master` builds
+  linux/amd64 + linux/arm64 and pushes `ghcr.io/ashtonian/gitstead:edge` with
+  the workflow's own token. The binaries are cross-compiled on the runner with
+  its remote build cache.
 - **Release** (`.github/workflows/release.yml`, on a `v*` tag): the race
   tests, then GoReleaser publishes the archives and checksums, the Homebrew
   cask and the images on ghcr.io. [docs/RELEASING.md](docs/RELEASING.md) has the

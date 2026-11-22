@@ -10,7 +10,7 @@ then GoReleaser (`.goreleaser.yaml`) builds and publishes everything.
 | Archives for macOS and Linux, amd64 and arm64, with `checksums.txt` | the GitHub release for the tag | `builds`, `archives` |
 | Release notes from the commits since the last tag (`docs:`, `test:` and `ci:` left out) | the GitHub release | `changelog` |
 | Homebrew cask `gitstead` | `ashtonian/homebrew-tap`, `Casks/gitstead.rb` | `homebrew_casks` |
-| Docker image `ghcr.io/ashtonian/gitstead:<version>` and `:latest`, amd64 and arm64 | GitHub Container Registry, linked to this repository | `dockers_v2`, `Dockerfile.goreleaser` |
+| Docker image `ghcr.io/ashtonian/gitstead:<version>` and `:latest`, amd64 and arm64 | GitHub Container Registry, linked to this repository | `dockers_v2`, `Dockerfile` |
 | `go install github.com/ashtonian/gitstead@<version>` | the Go module proxy, from the tag | nothing to do |
 
 A tag with a pre-release suffix (`v1.0.0-rc.1`) is published as a pre-release.
