@@ -1867,7 +1867,12 @@ All dependencies pinned to latest stable versions at build time. No go-git.
   it for linux/amd64 only, without provenance or an SBOM; `master` builds
   linux/amd64 + linux/arm64 and pushes `ghcr.io/ashtonian/gitstead:edge` with
   the workflow's own token. The binaries are cross-compiled on the runner with
-  its remote build cache.
+  its remote build cache. A pull request's run ends by recording a receipt of
+  the tested merge tree ([go-ci-actions acceptance](https://github.com/ashtonian/go-ci-actions#push-acceptance)),
+  and the push that merges it skips the checks that passed on the same tree
+  and only builds and pushes `:edge`; a squash or rebase merge, a direct push,
+  a re-run or a pull request run older than six hours runs them all. A newer
+  push to a pull request cancels its run in progress.
 - **Release** (`.github/workflows/release.yml`, on a `v*` tag): the race
   tests, then GoReleaser publishes the archives and checksums, the Homebrew
   cask and the images on ghcr.io. [docs/RELEASING.md](docs/RELEASING.md) has the
