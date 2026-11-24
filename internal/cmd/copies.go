@@ -34,6 +34,9 @@ type copyJob struct {
 	sshKey  string
 	sync    config.SyncConfig // fetch retries; timeout_per_repo bounds the fetch and the offsite push
 	offsite *offsiteSpec      // nil keeps everything local
+	// maintain clears the copy's old temporary packs and runs git's
+	// maintenance after everything else; nil skips it.
+	maintain *config.MaintenanceConfig
 }
 
 // copyOutcome is what a run did to one copy.
@@ -56,8 +59,13 @@ type copyOutcome struct {
 	// offsiteSubs is what taking each checked-out submodule offsite did, by
 	// path; nil when they weren't listed.
 	offsiteSubs map[string]offsitePush
-	status      *gitops.RepoStatus
-	at          time.Time
+	// upkeep is what maintenance did; upkeepSkipped why it left the copy
+	// alone.
+	upkeep        gitops.MaintainResult
+	upkeepSkipped string
+	upkeepErr     error
+	status        *gitops.RepoStatus
+	at            time.Time
 }
 
 // runCopies backs up and fetches each copy, at most limit at a time. It
@@ -116,6 +124,12 @@ func runCopy(ctx context.Context, log *slog.Logger, job copyJob) copyOutcome {
 		o.offsiteErr = ctxutil.TimedOut(octx, o.offsiteErr, "offsite push", job.sync.TimeoutPerRepo, "sync.timeout_per_repo")
 		cancel()
 	}
+	if job.maintain != nil {
+		o.upkeep, o.upkeepSkipped, o.upkeepErr = upkeep(ctx, job.path, *job.maintain, false)
+		if o.upkeep.Bytes > 0 {
+			log.Info("removed temporary packs", "copy", job.label, "count", len(o.upkeep.Removed), "bytes", o.upkeep.Bytes)
+		}
+	}
 	if job.repoKey != "" {
 		sctx, cancel := ctxutil.WithTimeout(ctx, job.backupTimeout)
 		if rs, err := gitops.GetStatus(sctx, job.path); err == nil {
@@ -143,7 +157,23 @@ func (o copyOutcome) failed() []error {
 	if o.updateErr != nil {
 		errs = append(errs, o.updateErr)
 	}
+	if o.upkeepErr != nil {
+		errs = append(errs, o.upkeepErr)
+	}
 	return errs
+}
+
+// upkeep is the upkeep of the repo at path, under maintenance.timeout. A
+// repo git or another gitstead command is busy in is skipped, with why,
+// rather than failed: the next run gets to it.
+func upkeep(ctx context.Context, path string, mc config.MaintenanceConfig, dryRun bool) (res gitops.MaintainResult, skipped string, err error) {
+	mctx, cancel := ctxutil.WithTimeout(ctx, mc.Timeout)
+	defer cancel()
+	res, err = gitops.Maintain(mctx, path, gitops.MaintainOptions{TempPackAge: mc.TempPackAge, DryRun: dryRun})
+	if errors.Is(err, gitops.ErrBusy) || errors.Is(err, gitops.ErrRepoInUse) {
+		return res, err.Error(), nil
+	}
+	return res, "", ctxutil.TimedOut(mctx, err, "upkeep", mc.Timeout, "maintenance.timeout")
 }
 
 // recordCopies stores outcomes in st. Run it under the state lock. A copy

@@ -90,6 +90,7 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 	}
 
 	d.ok("config valid: " + ctx.ConfigPath())
+	checkMachine(cfg, d)
 
 	// --- base_dir ---
 	if fi, serr := os.Stat(cfg.BaseDir); serr == nil && fi.IsDir() {
@@ -180,13 +181,55 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 	checkLaunchers(cfg, d)
 	checkManifest(cfg, st, d)
 	checkMirrors(cfg, st, d)
-	if n := uncatalogued(cfg, st); n > 0 {
-		d.warn(fmt.Sprintf("%d archives in %s aren't on record, made by a run interrupted before recording them; `gitstead archives ls` lists them", n, cfg.Backup.ArchiveDir))
-	}
+	checkArchives(cfg, st, d)
 
 	fmt.Printf("\n%d problem(s), %d warning(s)\n", d.fails, d.warns)
 	return ctx.finish(doctorJSON{Checks: d.checks, Problems: d.fails, Warnings: d.warns},
 		problems(d.fails, "doctor found %d problem(s)", d.fails))
+}
+
+// checkMachine names the machines: section this machine's config takes, or
+// notes that it takes none.
+func checkMachine(cfg *config.Config, d *doctorReport) {
+	sections := cfg.MachineNames()
+	if len(sections) == 0 {
+		return
+	}
+	name, applied := cfg.MachineSection()
+	if applied {
+		d.ok(fmt.Sprintf("machine %q: its machines: section applies", name))
+		return
+	}
+	d.info(fmt.Sprintf("machine %q has no machines: section (there are %s), so only the top-level settings apply; set machine: or GITSTEAD_MACHINE to take one", name, strings.Join(sections, ", ")))
+}
+
+// checkArchives reports what the archive directory holds and how long it is
+// kept, and the archives there not on record.
+func checkArchives(cfg *config.Config, st *state.State, d *doctorReport) {
+	all := catalog(cfg, st)
+	if n := uncatalogued(all); n > 0 {
+		d.warn(fmt.Sprintf("%d archives in %s aren't on record, made by a run interrupted before recording them; `gitstead archives ls` lists them", n, cfg.Backup.ArchiveDir))
+	}
+	if len(all) == 0 {
+		return
+	}
+	var size int64
+	var oldest time.Time
+	for _, e := range all {
+		size += gitops.ArchiveSize(e.Path)
+		if !e.Created.IsZero() && (oldest.IsZero() || e.Created.Before(oldest)) {
+			oldest = e.Created
+		}
+	}
+	kept := "kept forever (backup.archive_retention: 0)"
+	if r := cfg.Backup.ArchiveRetention; r > 0 {
+		kept = fmt.Sprintf("kept %s (backup.archive_retention)", r)
+	}
+	msg := fmt.Sprintf("%d archives in %s, %s, %s", len(all), cfg.Backup.ArchiveDir, gitops.FormatBytes(size), kept)
+	if !oldest.IsZero() {
+		msg += "; oldest made " + oldest.Local().Format(time.DateOnly)
+	}
+	d.info(msg)
 }
 
 // checkManifest checks the shared manifest can be read and written, and

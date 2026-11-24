@@ -181,10 +181,10 @@ func untrackedSnapshotTree(ctx context.Context, repoPath string, listEnv []strin
 			skipped = append(skipped, SkippedFile{Path: path, Reason: "not a regular file or symlink"})
 			continue
 		case limits.MaxFileBytes > 0 && size > limits.MaxFileBytes:
-			skipped = append(skipped, SkippedFile{Path: path, Reason: fmt.Sprintf("%s is over the %s file limit", formatBytes(size), formatBytes(limits.MaxFileBytes))})
+			skipped = append(skipped, SkippedFile{Path: path, Reason: fmt.Sprintf("%s is over the %s file limit", FormatBytes(size), FormatBytes(limits.MaxFileBytes))})
 			continue
 		case limits.MaxTotalBytes > 0 && total+size > limits.MaxTotalBytes:
-			skipped = append(skipped, SkippedFile{Path: path, Reason: fmt.Sprintf("untracked files are over the %s total limit", formatBytes(limits.MaxTotalBytes))})
+			skipped = append(skipped, SkippedFile{Path: path, Reason: fmt.Sprintf("untracked files are over the %s total limit", FormatBytes(limits.MaxTotalBytes))})
 			continue
 		default:
 			// One unreadable file must not fail the backup of everything else.
@@ -353,9 +353,13 @@ func checkReadable(path string) error {
 	return f.Close()
 }
 
-func formatBytes(n int64) string {
-	const mib = 1 << 20
-	if n >= mib {
+// FormatBytes is n bytes as people read a size: 3.2 GiB, 12.5 MiB, 900 bytes.
+func FormatBytes(n int64) string {
+	const mib, gib = 1 << 20, 1 << 30
+	switch {
+	case n >= gib:
+		return fmt.Sprintf("%.1f GiB", float64(n)/gib)
+	case n >= mib:
 		return fmt.Sprintf("%.1f MiB", float64(n)/mib)
 	}
 	return fmt.Sprintf("%d bytes", n)

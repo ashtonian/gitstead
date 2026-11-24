@@ -6,6 +6,8 @@
 - [Hooks](#hooks)
 - [Manual repos, excludes, overrides, tags](#manual-repos-excludes-overrides-tags)
 - [Several machines](#several-machines)
+  - [Per-machine sections](#per-machine-sections)
+- [Upkeep](#upkeep)
 
 Config lives at `~/.config/gitstead/config.yaml`. [`examples/`](../examples) has
 short, complete configs for common setups -- searches and filters, two
@@ -250,3 +252,88 @@ repo's binding back out. Writes take a lock in your cache directory, never besid
 copying it never sees half a file; two machines writing at the same moment
 through a sync tool can still conflict, as any synced file can, and the
 next `manifest save` puts back an entry a conflict lost.
+
+### Per-machine sections
+
+Machines that share a config still differ: which drive clones and workspaces
+go on, how many agents each runs, repos only one of them works on. A
+`machines:` section holds what one machine does differently, and is laid over
+the rest of the config on that machine:
+
+```yaml
+base_dir: ~/code
+workspace_defaults: { root: ~/workspaces, agents: 2 }
+workspaces:
+  - { name: app, repos: [github.com/your-login/app] }
+
+machines:
+  desktop:
+    base_dir: /Volumes/Fast/code
+    workspace_defaults: { root: /Volumes/Fast/workspaces, agents: 4 }
+    overrides:
+      - { repos: ["github.com/acme/*"], base_dir: /Volumes/Bulk/code }
+    workspaces:
+      - { name: app, agents: 6 }
+  laptop:
+    workspace_defaults: { agents: 1 }
+```
+
+A machine's name is `machine:` -- set it with `GITSTEAD_MACHINE` or
+`--machine`, not in a file every machine reads -- and without it, on macOS
+the local host name (System Settings > General > Sharing, which DHCP doesn't
+change), elsewhere the host name up to its first dot. Section names match it
+ignoring case, and are letters, digits, `-` and `_`.
+
+| Key in a section | How it applies |
+| --- | --- |
+| `base_dir` | Replaces the top-level one. |
+| `workspace_defaults` | Each key it sets replaces the top-level one; `env` adds its names to the top level's, replacing those it shares. |
+| `overrides`, `repos`, `discovery` | Added after the top-level entries. Overrides apply in order, so a section's override wins over a top-level one for the same repos. |
+| `workspaces` | An entry with a top-level workspace's name changes the keys it sets of that one -- `repos`, `set` and `path` replace each other together; `env` adds names -- and keeps the rest. A new name is a workspace on this machine only. |
+| `fleets` | As workspaces: by name, the keys it sets; a new name is this machine's own. |
+
+Lists are added to rather than replaced, so a section never has to repeat
+what every machine shares; to drop a top-level entry on one machine, move it
+into the sections of the machines that keep it. Any other key in a section is
+an error, as a misspelt one anywhere is. Every section is checked on every
+machine -- merged over the top level as on its own machine, and validated --
+so a mistake in the laptop's section shows on the desktop too.
+
+A machine with no section of its own gets the top-level settings: a new
+machine works before it has one, and `gitstead doctor` notes it. `gitstead
+config` prints the settings in effect, headed by the machine and the section
+it took; `gitstead --machine laptop config` (or `plan`) shows another
+machine's without going there.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `machine` | this machine's name | The section to lay over the rest; `GITSTEAD_MACHINE`, `--machine`. |
+| `machines` | `{}` | Each machine's own settings, by name: `base_dir`, `workspace_defaults`, `overrides`, `repos`, `discovery`, `workspaces`, `fleets`. |
+
+## Upkeep
+
+A fetch or repack that is interrupted -- a timeout, a laptop going to sleep,
+a killed run -- leaves its half-written pack in the repo's `objects/pack`, as
+`tmp_pack_*`, `tmp_idx_*` or `.tmp-<pid>-pack-*`. git deletes the `tmp_`
+ones only when `gc` prunes, which it never does in a clone that workspace
+copies borrow objects from (gitstead sets `gc.pruneExpire=never` there so
+their objects stay), and a dead repack's `.tmp-` ones never. They add up to
+gigabytes on a large repo that is fetched often.
+
+After its backups and fetches, `sync` gives each tracked clone and workspace
+copy -- not a worktree, whose objects are its repo's clone's -- upkeep: it
+deletes the temporary packs older than `maintenance.temp_pack_age`, then runs
+`git maintenance run --auto`, which repacks and writes the commit-graph when
+git judges it due, and returns at once when nothing is. A repo another git
+command is at work in (a lock file, a running gc) or that another gitstead
+command is deleting, archiving or moving is skipped until the next run, not
+failed. `gitstead maintain` does the same now, enabled or not, for the repos
+`--repos`, `--tag` or `--set` select and their copies; `--dry-run` lists the
+temporary packs it would delete. `sync --no-maintain` skips upkeep for one
+run.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `maintenance.enabled` | `true` | Upkeep in every `sync`. |
+| `maintenance.temp_pack_age` | `24h` | A temporary pack older than this was left behind; a younger one may still be being written. At least `1h`. |
+| `maintenance.timeout` | `10m` | The limit on one clone's or copy's upkeep; 0 for none. |

@@ -178,22 +178,33 @@ func TestSyncJobs(t *testing.T) {
 			if j.offsite != nil {
 				label += "+offsite"
 			}
+			if j.maintain != nil {
+				label += "+maintain"
+			}
 			out = append(out, label)
 		}
 		return out
 	}
 
-	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+fetch h/o/lib+fetch h/o/old clones/a1+refresh fleet/agent" {
-		t.Errorf("jobs = %s; want each working copy once, the stale repo backed up but not fetched, clones refreshed", got)
+	if got := strings.Join(labels(&SyncCmd{}), " "); got != "h/o/app+fetch+maintain h/o/lib+fetch+maintain h/o/old+maintain clones/a1+refresh+maintain fleet/agent" {
+		t.Errorf("jobs = %s; want each working copy once, the stale repo backed up but not fetched, clones refreshed, upkeep for all but worktrees", got)
 	}
-	if got := strings.Join(labels(&SyncCmd{Tag: "work"}), " "); got != "h/o/app+fetch" {
+	if got := strings.Join(labels(&SyncCmd{Tag: "work"}), " "); got != "h/o/app+fetch+maintain" {
 		t.Errorf("jobs for --tag work = %s; copies of unselected repos should be left out", got)
 	}
-	if got := strings.Join(labels(&SyncCmd{NoBackup: true}), " "); got != "h/o/app+fetch h/o/lib+fetch h/o/old clones/a1+refresh" {
-		t.Errorf("jobs for --no-backup = %s; only clones have more to do than a backup", got)
+	if got := strings.Join(labels(&SyncCmd{NoBackup: true}), " "); got != "h/o/app+fetch+maintain h/o/lib+fetch+maintain h/o/old+maintain clones/a1+refresh+maintain" {
+		t.Errorf("jobs for --no-backup = %s; a worktree has nothing to do but a backup", got)
 	}
+	if got := strings.Join(labels(&SyncCmd{NoBackup: true, NoFetch: true}), " "); got != "h/o/app+maintain h/o/lib+maintain h/o/old+maintain clones/a1+maintain" {
+		t.Errorf("jobs for --no-backup --no-fetch = %s; upkeep alone is a job", got)
+	}
+	if got := strings.Join(labels(&SyncCmd{NoBackup: true, NoFetch: true, NoMaintain: true}), " "); got != "h/o/app h/o/lib h/o/old" {
+		t.Errorf("jobs for --no-backup --no-fetch --no-maintain = %s", got)
+	}
+	// maintenance.enabled: false is --no-maintain on every run.
+	cfg.Maintenance.Enabled = false
 	if got := strings.Join(labels(&SyncCmd{NoBackup: true, NoFetch: true}), " "); got != "h/o/app h/o/lib h/o/old" {
-		t.Errorf("jobs for --no-backup --no-fetch = %s", got)
+		t.Errorf("jobs with maintenance off = %s", got)
 	}
 
 	// remote_sync applies to copies by the repo they copy: an override that

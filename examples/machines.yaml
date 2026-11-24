@@ -1,0 +1,49 @@
+# One config for a desktop with two fast external drives and a laptop: the
+# same repos and workspaces everywhere, each machine with its own disks and
+# agent counts. Each machines: section is laid over the rest on the machine of
+# its name -- GITSTEAD_MACHINE, else the macOS local host name or the host
+# name. `gitstead config` shows what applies on this machine; `gitstead
+# --machine desktop config` previews the desktop's.
+base_dir: ~/code
+layout: owner/name
+
+repos:
+  - url: git@github.com:your-login/app.git
+  - url: git@github.com:your-login/api.git
+
+workspace_defaults:
+  root: ~/workspaces
+  agents: 2
+
+workspaces:
+  - name: app
+    repos: [github.com/your-login/app]
+  - name: api
+    repos: [github.com/your-login/api]
+
+machines:
+  desktop:
+    base_dir: /Volumes/Fast/code
+    workspace_defaults:
+      root: /Volumes/Fast/workspaces
+      agents: 4
+    overrides:
+      - repos: ["github.com/acme/*"]      # the work repos go on the other drive
+        base_dir: /Volumes/Bulk/code
+    repos:
+      - url: git@github.com:acme/platform.git   # tracked on the desktop only
+    workspaces:
+      - name: app
+        agents: 6
+      - name: platform
+        repos: [github.com/acme/platform]
+        root: /Volumes/Bulk/workspaces
+  laptop:
+    workspace_defaults:
+      agents: 1
+
+backup:
+  archive_retention: 2160h    # keep what deleting saved for 90 days
+
+maintenance:
+  temp_pack_age: 12h          # clear half-written packs from interrupted fetches sooner

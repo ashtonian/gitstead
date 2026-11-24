@@ -125,6 +125,23 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		return fmt.Errorf("recording the sync: %w", err)
 	}
 
+	// Archive retention, once this run's backups and archives are recorded.
+	if cfg.Backup.ArchiveRetention > 0 {
+		pruned, err := pruneArchives(ctx, cfg, st, time.Now(), false)
+		doc.Archives = &pruned
+		tried += len(pruned.Deleted) + len(pruned.Failed)
+		for _, f := range pruned.Failed {
+			failures = append(failures, syncError{f.Target, fmt.Errorf("pruning archive: %s", f.Error)})
+		}
+		if err != nil {
+			tried++
+			failures = append(failures, syncError{"archives", err})
+		}
+		if len(pruned.Deleted) > 0 {
+			log.Info("pruned archives", "count", len(pruned.Deleted), "bytes", pruned.Bytes, "retention", cfg.Backup.ArchiveRetention)
+		}
+	}
+
 	// Mirrors after fetches, which a slow mirror mustn't hold up.
 	mirrored := 0
 	if !c.NoFetch {
@@ -144,11 +161,19 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		}
 	}
 
-	fetched, skippedLocked, backedUp, updated := 0, 0, 0, 0
+	fetched, skippedLocked, backedUp, updated, maintained := 0, 0, 0, 0, 0
+	var tempPackBytes int64
 	for _, o := range outcomes {
 		if o.job.backup != nil {
 			tried++
 		}
+		if o.job.maintain != nil {
+			tried++
+		}
+		if o.upkeep.Maintained {
+			maintained++
+		}
+		tempPackBytes += o.upkeep.Bytes
 		if o.fetched {
 			tried++
 		}
@@ -175,8 +200,12 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	if cfg.Notify.Enabled {
 		notifySync(ctx, cfg.Notify, len(failures), fetched, backedUp, doc.Stale)
 	}
-	logEvent(ctx, "sync", "", fmt.Sprintf("fetched=%d backed_up=%d mirrored=%d failed=%d skipped_recent=%d skipped_locked=%d",
-		fetched, backedUp, mirrored, len(failures), skippedRecent, skippedLocked))
+	pruned := 0
+	if doc.Archives != nil {
+		pruned = len(doc.Archives.Deleted)
+	}
+	logEvent(ctx, "sync", "", fmt.Sprintf("fetched=%d backed_up=%d mirrored=%d failed=%d skipped_recent=%d skipped_locked=%d maintained=%d temp_pack_bytes=%d archives_pruned=%d",
+		fetched, backedUp, mirrored, len(failures), skippedRecent, skippedLocked, maintained, tempPackBytes, pruned))
 	if !ctx.Quiet {
 		fmt.Printf("Synced: %d fetched, %d skipped (recent), %d skipped (locked), %d failed, %d backed up",
 			fetched, skippedRecent, skippedLocked, len(failures), backedUp)
@@ -186,6 +215,12 @@ func (c *SyncCmd) Run(ctx *Context) error {
 		if mirrored > 0 {
 			fmt.Printf(", %d mirrored", mirrored)
 		}
+		if tempPackBytes > 0 {
+			fmt.Printf(", %s of temporary packs removed", gitops.FormatBytes(tempPackBytes))
+		}
+		if pruned > 0 {
+			fmt.Printf(", %d archives pruned (%s)", pruned, gitops.FormatBytes(doc.Archives.Bytes))
+		}
 		fmt.Println()
 	}
 	for _, e := range failures {
@@ -193,7 +228,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	}
 	doc.Changes, doc.Copies = ctx.changes, copiesJSON(outcomes)
 	doc.Fetched, doc.SkippedRecent, doc.SkippedLocked, doc.BackedUp, doc.Mirrored = fetched, skippedRecent, skippedLocked, backedUp, mirrored
-	doc.Updated = updated
+	doc.Updated, doc.Maintained, doc.TempPackBytes = updated, maintained, tempPackBytes
 	for _, e := range failures {
 		doc.Failures = append(doc.Failures, targetError{e.repo, e.err.Error()})
 	}
@@ -206,17 +241,23 @@ func (c *SyncCmd) Run(ctx *Context) error {
 
 // syncJSON is what sync --json prints.
 type syncJSON struct {
-	Changes       changesJSON   `json:"changes"`
-	Stale         *staleJSON    `json:"stale,omitempty"`
-	Copies        []copyJSON    `json:"copies"`
-	Mirrors       []mirrorJSON  `json:"mirrors,omitempty"`
-	Fetched       int           `json:"fetched"`
-	Updated       int           `json:"updated"`
-	SkippedRecent int           `json:"skipped_recent"`
-	SkippedLocked int           `json:"skipped_locked"`
-	BackedUp      int           `json:"backed_up"`
-	Mirrored      int           `json:"mirrored"`
-	Failures      []targetError `json:"failures,omitempty"`
+	Changes       changesJSON  `json:"changes"`
+	Stale         *staleJSON   `json:"stale,omitempty"`
+	Copies        []copyJSON   `json:"copies"`
+	Mirrors       []mirrorJSON `json:"mirrors,omitempty"`
+	Fetched       int          `json:"fetched"`
+	Updated       int          `json:"updated"`
+	SkippedRecent int          `json:"skipped_recent"`
+	SkippedLocked int          `json:"skipped_locked"`
+	BackedUp      int          `json:"backed_up"`
+	Mirrored      int          `json:"mirrored"`
+	// Maintained counts the copies git's maintenance ran in;
+	// TempPackBytes is what removing their old temporary packs freed.
+	Maintained    int   `json:"maintained"`
+	TempPackBytes int64 `json:"temp_pack_bytes"`
+	// Archives is what archive retention deleted; nil when it is off.
+	Archives *archivePrune `json:"archives,omitempty"`
+	Failures []targetError `json:"failures,omitempty"`
 }
 
 type syncError struct {
@@ -257,6 +298,7 @@ func (c *SyncCmd) jobs(cfg *config.Config, st *state.State, pass func(string, *s
 		if policy := cfg.RemoteSyncFor(key, repo.DiscoveredBy); policy.Enabled && machine != "" && !stale {
 			job.offsite = offsiteFor(cfg, policy, machine, identityOf(repo), job.sshKey, repo.OffsiteStatus)
 		}
+		job.maintain = c.maintenance(cfg)
 		jobs = append(jobs, job)
 	}
 
@@ -271,12 +313,30 @@ func (c *SyncCmd) jobs(cfg *config.Config, st *state.State, pass func(string, *s
 		if !c.NoFetch {
 			job.refresh = refreshSource(cfg, st, ws, cs)
 		}
-		if job.backup == nil && job.offsite == nil && job.refresh == "" {
+		if ownsObjects(ws) {
+			job.maintain = c.maintenance(cfg)
+		}
+		if job.backup == nil && job.offsite == nil && job.refresh == "" && job.maintain == nil {
 			return nil
 		}
 		return &job
 	})
 	return jobs, skippedRecent
+}
+
+// maintenance is the upkeep this run gives each copy, nil for none.
+func (c *SyncCmd) maintenance(cfg *config.Config) *config.MaintenanceConfig {
+	if c.NoMaintain || !cfg.Maintenance.Enabled {
+		return nil
+	}
+	return &cfg.Maintenance
+}
+
+// ownsObjects reports that ws's copies keep objects of their own, which
+// upkeep looks after; a worktree's are its repo's clone's, looked after
+// with the clone.
+func ownsObjects(ws *state.WorkspaceState) bool {
+	return ws.Isolation != config.IsolationWorktree
 }
 
 // refreshSource is the clone a workspace copy is refreshed from: its repo's,

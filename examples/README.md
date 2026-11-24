@@ -13,6 +13,7 @@ tests, so they stay correct.
 | [self-hosted.yaml](self-hosted.yaml) | A self-hosted GitLab and a Forgejo instance, over HTTPS. |
 | [agents.yaml](agents.yaml) | Coding agents in workspaces, opened side by side in tmux. |
 | [safety-net.yaml](safety-net.yaml) | Backups, offsite copies, mirrors, and archiving instead of deleting. |
+| [machines.yaml](machines.yaml) | One config for several machines, each with its own drives, agents and repos. |
 
 Preview any of them without changing anything, then make it yours:
 
@@ -175,3 +176,29 @@ repo deleted upstream, 30 days later:
 `gitstead restore <repo>` brings back uncommitted work, `gitstead archives
 restore <id>` an archived clone, and `gitstead remote-sync --list` shows what
 another machine can fetch from the backup remote.
+
+## machines.yaml: one config, several machines
+
+The top level is what every machine shares; each section changes only what
+differs on its machine. On the desktop:
+
+```
+$ gitstead config | head -3
+# Machine "desktop": its machines: section is applied below (sections: desktop, laptop).
+base_dir: /Volumes/Fast/code
+layout: owner/name
+```
+
+```
+desktop                                       laptop
+-------                                       ------
+/Volumes/Fast/code/your-login/app             ~/code/your-login/app
+/Volumes/Fast/code/your-login/api             ~/code/your-login/api
+/Volumes/Bulk/code/acme/platform              (not tracked here)
+/Volumes/Fast/workspaces/app     6 agents     ~/workspaces/app   1 agent
+/Volumes/Fast/workspaces/api     4 agents     ~/workspaces/api   1 agent
+/Volumes/Bulk/workspaces/platform 4 agents
+```
+
+A machine with no section of its own -- a new one -- gets the top level, and
+`gitstead doctor` notes it.

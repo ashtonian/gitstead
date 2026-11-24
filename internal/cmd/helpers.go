@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/ashtonian/gitstead/internal/config"
@@ -138,11 +137,7 @@ func leansOn(st *state.State, archiveDir, key, path string) bool {
 		if err != nil {
 			return true
 		}
-		if meta.Bundle == "" || meta.Complete {
-			continue
-		}
-		base := filepath.Clean(meta.Base)
-		if meta.Repo == key || base == filepath.Clean(path) || strings.HasPrefix(base, filepath.Clean(path)+string(filepath.Separator)) {
+		if meta.LeansOn(key, path) {
 			return true
 		}
 	}

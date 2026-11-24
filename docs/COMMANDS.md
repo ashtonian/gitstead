@@ -11,10 +11,11 @@
 | `gitstead setup` (`init`) | Set up gitstead, or change your setup: layout, accounts, what to track (showing what it finds, to keep, pick from or change), features. `--yes`, `--answers`, `--save-answers`, `--dry-run`, `--offline`. |
 | `gitstead bootstrap` | Set up a fresh machine in one command: setup → doctor → discover --apply → sync → install agent. `--profile`, `--no-agent`, `--dry-run`. |
 | `gitstead discover` | Discover repos from providers and show the plan, changing nothing; `--apply` makes the changes that move and delete nothing (clone new repos, update URLs, managed git config, tags). `--rule`, `--tag` to scope. |
-| `gitstead sync` | Discover, apply config changes as far as `reconcile.auto` allows, fetch all repos, back up uncommitted changes and, with `remote_sync.enabled`, take them offsite (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--force`. |
+| `gitstead sync` | Discover, apply config changes as far as `reconcile.auto` allows, fetch all repos, back up uncommitted changes and, with `remote_sync.enabled`, take them offsite, clear old temporary packs and run git's maintenance ([Upkeep](CONFIGURATION.md#upkeep)), and prune archives past `backup.archive_retention` (the cron command). `--no-backup`, `--no-fetch`, `--no-discover`, `--no-maintain`, `--force`. |
 | `gitstead plan` | Show what config would change on disk and in state, without changing anything. `--json`. See [Config changes](RECONCILIATION.md#config-changes-plan-and-apply). |
 | `gitstead apply` | Make repos and workspaces match config, including the moves and removals sync leaves for you. Asks first; `--yes`. |
 | `gitstead backup` | Back up only (no fetch). `--list` to see backups, `--restore <id>` for instructions. |
+| `gitstead maintain` | Upkeep now, whether `maintenance.enabled` or not: delete the temporary packs interrupted fetches and repacks left in tracked clones and workspace copies, older than `maintenance.temp_pack_age`, and run `git maintenance run --auto` in each. A repo git or another gitstead command is busy in is skipped. `--repos`/`--tag`/`--set`, `--dry-run`. See [Upkeep](CONFIGURATION.md#upkeep). |
 | `gitstead restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` to clone+apply into a scratch dir, or `--apply` onto the tree (dirty-guarded). |
 | `gitstead top` | A live view of every workspace copy (agent state, terminal activity, branch, dirty, ahead/behind, last backup, PR) and every repo needing attention. See [Live view](SHELL.md#live-view-gitstead-top). |
 | `gitstead status` | Table of managed repos. `--live` inspects working trees now (dirty + ahead/behind, no network); `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
@@ -26,14 +27,14 @@
 | `gitstead run -- <cmd>` | Run a command in each matching repo (parallel). `--repos`/`--tag`/`--set`, `--fail-fast`. |
 | `gitstead manifest export\|import\|save` | Portable `{url,tags,path}` manifest: export and import to rehydrate a new machine, `save` to put the repos tracked by hand here into the shared manifest. See [Several machines](CONFIGURATION.md#several-machines). |
 | `gitstead remote-sync` | Back up and take WIP and unpushed commits offsite now, under `remote_sync`. `--repos`, `--tag`, `--set`, `--dry-run`; `--list` shows what every machine left offsite and how to restore it. |
-| `gitstead config` | Print resolved config. `--validate`, `--edit`, `--path`, `--for-repo <key>`, `--redact`. |
+| `gitstead config` | Print resolved config: this machine's `machines:` section laid over the rest, headed by which section applied. `--validate`, `--edit`, `--path`, `--for-repo <key>`, `--redact`; `--machine <name>` previews another machine's. |
 | `gitstead report` / `log` | Summarize / list recent activity (clones, backups, syncs…) from the operation log. `--since`, `-n`. |
 | `gitstead workspace` (`ws`, `wg`) | Manage workspaces: repos × agents, each agent in a copy of its own. See [Workspaces](WORKSPACES.md#workspaces). |
 | `gitstead fleet` | Open several workspaces' agents side by side with tmux, iTerm, Muxy or a plugin; `open`, `plan`, `ls`, `status`, `stop`. See [Fleets](LAUNCHERS.md#fleets-and-launchers). |
 | `gitstead mirror` | Make or update full mirrors of repos' upstreams now; `sync` does it every `mirror.interval`. `--repos`/`--tag`/`--set`, `--force`. See [Mirrors](BACKUPS.md#mirrors-surviving-the-host). |
 | `gitstead hooks post-clone\|post-create` | Run repos' `post_clone` or a workspace's `post_create` hooks again, output on the terminal. See [Hooks](CONFIGURATION.md#hooks). |
 | `gitstead accounts ls\|gitconfig` | List accounts and their folders; make each account's identity your git's own under its folders with `includeIf` (`--write`, `--install`). See [Accounts](AUTHENTICATION.md#accounts). |
-| `gitstead archives ls\|show\|restore\|rm` | The catalog of what was saved before copies and repos were taken away -- bundles of unique work, and whole clones -- and how to restore each; `restore` moves an archived clone back or rebuilds a clone from a bundle, `rm` deletes archives for good. |
+| `gitstead archives ls\|show\|restore\|rm\|prune` | The catalog of what was saved before copies and repos were taken away -- bundles of unique work, and whole clones -- and how to restore each; `restore` moves an archived clone back or rebuilds a clone from a bundle, `rm` deletes archives for good, `prune` deletes those past `backup.archive_retention` now (`--dry-run`). See [Retention](ARCHIVES.md#retention). |
 | `gitstead cd\|path\|open <query>` | Jump to, print, or open in your editor (`--web`: the repo's page) a repo, workspace or agent's folder from part of its name. See [Jump and open](SHELL.md#jump-and-open). |
 | `gitstead shell-init bash\|zsh\|fish` | Print the shell integration: the function that makes `gitstead cd` change directory, and tab completion. `setup` adds it to your shell. |
 | `gitstead install-agent` | Install, list (`--list`) or remove (`--uninstall`) background syncs (launchd/systemd/cron); `--name` and `--repos`/`--tag`/`--set` for several. |
@@ -41,7 +42,8 @@
 | `gitstead version` | Print version, commit, build date. |
 
 Global flags: `--config`, `--state`, `--verbose`/`-v`, `--quiet`/`-q`,
-`--concurrency`/`-j`, `--json`.
+`--concurrency`/`-j`, `--json`, `--machine` (the `machines:` section to use,
+see [Per-machine sections](CONFIGURATION.md#per-machine-sections)).
 
 ## JSON output
 
@@ -114,4 +116,5 @@ never change a gitstead run inside a workspace. Notable ones:
 | `GITSTEAD_STATE` | State file path (same as `--state`); unset, `$XDG_DATA_HOME/gitstead/state.yaml` (`~/.local/share/gitstead/state.yaml`). |
 | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` | Where the default config, data and cache directories are (see [Configuration](CONFIGURATION.md#configuration)). |
 | `GITSTEAD_BASE_DIR` | Override `base_dir`. |
+| `GITSTEAD_MACHINE` | This machine's name for `machines:` (same as `--machine`); unset, the macOS local host name or the host name. |
 | `GITHUB_TOKEN` / `GITLAB_TOKEN` / `GITEA_TOKEN` / `FORGEJO_TOKEN` | Default provider tokens. |

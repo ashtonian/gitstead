@@ -58,7 +58,8 @@ func Defaults() *Config {
 
 // Load reads the config file at path over the struct-tag defaults, with
 // GITSTEAD_* environment variables and then flags (WithFlags) over it, and
-// validates the result. An empty path reads no file. A path that does not
+// validates the result, with this machine's machines: section laid over it
+// (applyMachines). An empty path reads no file. A path that does not
 // exist is ErrNotFound unless WithOptionalFile is given; a file that exists
 // must read and parse.
 //
@@ -79,6 +80,7 @@ func Load(ctx context.Context, path string, opts ...Option) (*Config, error) {
 		pkgconfig.WithValidator(tagValidator()),
 		pkgconfig.WithPostLoad(loadManifest),
 		pkgconfig.WithPostLoad(normalize),
+		pkgconfig.WithPostLoad(applyMachines),
 	}
 	switch {
 	case path == "":
