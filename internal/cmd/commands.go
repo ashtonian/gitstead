@@ -28,6 +28,7 @@ type SyncCmd struct {
 	NoBackup   bool   `help:"Skip the backup step." default:"false" name:"no-backup"`
 	NoFetch    bool   `help:"Skip fetching and mirrors, only back up." default:"false" name:"no-fetch"`
 	NoDiscover bool   `help:"Skip auto-discovery." default:"false" name:"no-discover"`
+	NoMaintain bool   `help:"Skip upkeep: clearing old temporary packs and git maintenance (maintenance.enabled)." default:"false" name:"no-maintain"`
 	Force      bool   `help:"Ignore min_fetch_interval and mirror.interval." default:"false"`
 }
 

@@ -16,8 +16,11 @@ Runs on **macOS and Linux**. Requires `git` on `PATH`.
   with optional offsite copies and upstream mirrors.
 - **Parallel coding agents.** Give each agent its own branch and worktree or
   clone, then open them side by side with tmux, iTerm or Muxy.
-- **Portable setup.** Share configuration and a manifest across machines;
+- **Portable setup.** Share one configuration and a manifest across
+  machines, with a section per machine for its own drives, agents and repos;
   preview configuration changes with `plan` before applying them.
+- **Bounded upkeep.** Sync clears the half-written packs interrupted fetches
+  leave behind, runs git's maintenance, and prunes old archives.
 
 Backups leave the working tree, index and branches untouched. Branch
 fast-forwarding, offsite pushes and cleanup follow explicit configuration;
@@ -90,14 +93,14 @@ profiles also support Codex and custom commands. See
 
 | Task | Guide |
 |---|---|
-| Set up or move to another machine | [Setup](docs/SETUP.md), [shared manifests](docs/CONFIGURATION.md#several-machines) |
+| Set up or move to another machine | [Setup](docs/SETUP.md), [shared manifests and per-machine sections](docs/CONFIGURATION.md#several-machines) |
 | Find and clone repos | [Discovery and filters](docs/DISCOVERY.md) |
 | Configure layout, clone shapes, hooks and sets | [Configuration](docs/CONFIGURATION.md), [example configs](examples/README.md) |
 | Manage accounts, SSH keys and signing | [Authentication and accounts](docs/AUTHENTICATION.md) |
 | Understand configuration changes | [Plan and apply](docs/RECONCILIATION.md) |
-| Protect and recover work | [Backups, offsite copies and mirrors](docs/BACKUPS.md), [archives](docs/ARCHIVES.md) |
+| Protect and recover work | [Backups, offsite copies and mirrors](docs/BACKUPS.md), [archives and their retention](docs/ARCHIVES.md) |
 | Run agents across one or more repos | [Workspaces](docs/WORKSPACES.md), [fleets and launchers](docs/LAUNCHERS.md) |
-| Schedule sync and diagnose failures | [Scheduling](docs/SCHEDULING.md), [operations](docs/OPERATIONS.md) |
+| Schedule sync, keep clones lean and diagnose failures | [Scheduling](docs/SCHEDULING.md), [upkeep](docs/CONFIGURATION.md#upkeep), [operations](docs/OPERATIONS.md) |
 | Find a command, flag or exit code | [Command reference](docs/COMMANDS.md), [shell integration](docs/SHELL.md) |
 | Contribute | [Contributing](CONTRIBUTING.md), [architecture](docs/ARCHITECTURE.md), [detailed spec](SPEC.md) |
 

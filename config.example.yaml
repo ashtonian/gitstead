@@ -438,6 +438,31 @@ backup:
   # Default: ~/.local/share/gitstead/archive/
   archive_dir: ""
 
+  # How long an archive is kept. sync, after its backups, and `gitstead
+  # archives prune` delete the archives older than this, on record or not --
+  # except an archive of a repo's whole history that a kept workspace-copy
+  # archive may need to be restored. 0 keeps archives forever.
+  archive_retention: "4320h"   # 180 days
+
+# =============================================================================
+# Upkeep
+# =============================================================================
+# A fetch or repack that is interrupted -- a timeout, sleep, a killed run --
+# leaves its half-written pack in objects/pack as tmp_pack_* or
+# .tmp-<pid>-pack-*. git removes the tmp_ ones only when gc prunes, which it
+# never does in a clone workspace copies borrow objects from, and a dead
+# repack's .tmp- ones never. sync removes those older
+# than temp_pack_age from each tracked clone and workspace copy (a worktree's
+# are its repo's), when no git command or other gitstead command is at work
+# there, and then runs `git maintenance run --auto`, which repacks and writes
+# the commit-graph when git judges it due. `gitstead maintain` does the same
+# on demand, enabled or not; `sync --no-maintain` skips it for one run.
+
+maintenance:
+  enabled: true
+  temp_pack_age: "24h"   # younger ones may still be being written; at least 1h
+  timeout: "10m"         # per clone or copy; 0 = none
+
 # =============================================================================
 # Mirrors
 # =============================================================================
@@ -690,3 +715,46 @@ launchers:
 
   plugins: {}         # options for gitstead-launch-<name> executables
     # wezterm: {tabs: per-agent}
+
+# =============================================================================
+# Machines
+# =============================================================================
+# One config file for several machines: each machines: section is laid over
+# the rest of the config on the machine of its name. That name is machine:,
+# set with $GITSTEAD_MACHINE or --machine; without it, on macOS the local host
+# name (System Settings > General > Sharing), elsewhere the host name up to its
+# first dot. Names match ignoring case. A machine without a section gets the
+# top-level settings, and `gitstead doctor` says so. `gitstead config` prints
+# the settings in effect and the section they took; `gitstead --machine
+# <name> config` shows another machine's.
+#
+# A section sets:
+#   base_dir             replaces the top-level one.
+#   workspace_defaults   each key it sets replaces the top-level one; env adds
+#                        its names to the top level's.
+#   overrides, repos, discovery
+#                        added after the top-level lists, so an override here
+#                        wins over a top-level one for the same repos.
+#   workspaces, fleets   an entry with a top-level one's name changes the keys
+#                        it sets of that one (repos, set and path replace
+#                        together; env adds names); a new name is declared on
+#                        this machine only.
+# Any other key is an error. Every section is checked on every machine, so a
+# mistake in one shows wherever the file is loaded.
+
+# machine: ""    # set it per machine, with GITSTEAD_MACHINE, not in a shared file
+machines: {}
+  # desktop:
+  #   base_dir: /Volumes/Fast/repos
+  #   workspace_defaults:
+  #     root: /Volumes/Fast/workspaces
+  #     agents: 4
+  #   overrides:
+  #     - repos: ["github.com/acme/*"]
+  #       base_dir: /Volumes/Bulk/repos
+  #   workspaces:
+  #     - name: app
+  #       agents: 6
+  # laptop:
+  #   workspace_defaults:
+  #     agents: 1

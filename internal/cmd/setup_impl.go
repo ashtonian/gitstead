@@ -285,7 +285,9 @@ func printSetupDone(configPath string, a setup.Answers, det setup.Detected, done
 	fmt.Println("  gitstead doctor            if anything looks wrong")
 }
 
-// existingConfig loads the config at path, or nil if there is none yet.
+// existingConfig loads the config at path, or nil if there is none yet. It
+// is the top level, without this machine's machines: section: setup writes
+// its answers to the top level.
 func existingConfig(ctx context.Context, path string) (*config.Config, error) {
 	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -294,7 +296,7 @@ func existingConfig(ctx context.Context, path string) (*config.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s is invalid; fix it or move it aside before running setup: %w", path, err)
 	}
-	return cfg, nil
+	return cfg.TopLevel(), nil
 }
 
 // loadCandidate loads a rendered config without writing it in place.

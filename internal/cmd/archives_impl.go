@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -27,6 +28,7 @@ type ArchivesCmd struct {
 	Show    ArchivesShowCmd    `cmd:"" help:"Show an archive: what it saved, and how to restore it."`
 	Restore ArchivesRestoreCmd `cmd:"" help:"Put an archive back: move an archived clone back, or rebuild a clone from a bundle, and track a repo's again."`
 	Remove  ArchivesRemoveCmd  `cmd:"" name:"rm" help:"Delete archives, for good, and drop them from the catalog."`
+	Prune   ArchivesPruneCmd   `cmd:"" help:"Delete archives older than backup.archive_retention, keeping any a younger copy's archive needs to restore."`
 }
 
 // ArchivesListCmd lists the catalog.
@@ -290,6 +292,195 @@ func (c *ArchivesRemoveCmd) Run(ctx *Context) error {
 		outcome(len(failed), len(doomed), "archives could not be deleted: %s", strings.Join(failed, ", ")))
 }
 
+// ArchivesPruneCmd deletes archives past their retention.
+type ArchivesPruneCmd struct {
+	DryRun bool `help:"List what would be deleted, and what is kept past its retention and why." name:"dry-run"`
+}
+
+func (c *ArchivesPruneCmd) Run(ctx *Context) error {
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return err
+	}
+	st, err := ctx.LoadState()
+	if err != nil {
+		return err
+	}
+	if cfg.Backup.ArchiveRetention == 0 {
+		fmt.Println("backup.archive_retention is 0: archives are kept forever.")
+		return ctx.finish(archivePrune{Deleted: []prunedArchive{}}, nil)
+	}
+	res, err := pruneArchives(ctx, cfg, st, time.Now(), c.DryRun)
+	verb := "Deleted"
+	if c.DryRun {
+		verb = "Would delete"
+	}
+	for _, a := range res.Deleted {
+		fmt.Printf("  %s %s, made %s (%s)\n", verb, a.ID, a.Created.Local().Format(time.DateOnly), gitops.FormatBytes(a.Bytes))
+	}
+	for _, k := range res.Kept {
+		fmt.Printf("  Kept %s: %s\n", k.ID, k.Reason)
+	}
+	for _, f := range res.Failed {
+		fmt.Fprintf(os.Stderr, "  %s: %s\n", f.Target, f.Error)
+	}
+	fmt.Printf("%s %d archives older than %s, %s.\n", verb, len(res.Deleted), cfg.Backup.ArchiveRetention, gitops.FormatBytes(res.Bytes))
+	if err != nil {
+		return ctx.finish(res, err)
+	}
+	return ctx.finish(res, outcome(len(res.Failed), len(res.Deleted)+len(res.Failed), "archives could not be deleted"))
+}
+
+// archivePrune is what pruning the archives did, or would do.
+type archivePrune struct {
+	Deleted []prunedArchive `json:"deleted"`
+	Bytes   int64           `json:"bytes"`
+	// Kept are archives past their retention left in place, with why.
+	Kept   []keptArchive `json:"kept,omitempty"`
+	Failed []targetError `json:"failed,omitempty"`
+}
+
+type prunedArchive struct {
+	ID      string    `json:"id"`
+	Repo    string    `json:"repo,omitempty"`
+	Created time.Time `json:"created"`
+	Bytes   int64     `json:"bytes"`
+}
+
+type keptArchive struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
+}
+
+// pruneArchives deletes the archives made before now less
+// backup.archive_retention, on record or not, and drops them from the
+// catalog. An archive of a repo's whole history stays while an archive that
+// holds only what that repo lacked stays, since restoring that one may need
+// it; so does every whole-history archive while a description in the
+// archive directory can't be read, since that one might. dryRun deletes
+// nothing. Weighing the whole-history archives is O(whole x thin): retention
+// bounds both, and whole-history archives are made only of a deleted repo
+// other archives lean on, or by cleanup's archive-clone.
+func pruneArchives(ctx *Context, cfg *config.Config, st *state.State, now time.Time, dryRun bool) (archivePrune, error) {
+	res := archivePrune{Deleted: []prunedArchive{}}
+	cutoff := now.Add(-cfg.Backup.ArchiveRetention)
+
+	var expired, expiredWhole []prunable
+	var leaners []prunable // thin archives that stay
+	for _, e := range catalog(cfg, st) {
+		a, err := describeArchive(e)
+		if err != nil {
+			res.Kept = append(res.Kept, keptArchive{e.ID, fmt.Sprintf("its description can't be read: %v", err)})
+			continue
+		}
+		old := !a.created.IsZero() && a.created.Before(cutoff)
+		switch {
+		case a.created.IsZero():
+			res.Kept = append(res.Kept, keptArchive{e.ID, "it records no creation time"})
+			if a.meta.Thin() {
+				leaners = append(leaners, a)
+			}
+		case old && a.whole():
+			expiredWhole = append(expiredWhole, a)
+		case old:
+			expired = append(expired, a)
+		case a.meta.Thin():
+			leaners = append(leaners, a)
+		}
+	}
+
+	deleted := map[string]bool{}
+	remove := func(a prunable) bool {
+		if !dryRun {
+			if err := gitops.DeleteArchive(a.entry.Path); err != nil {
+				res.Failed = append(res.Failed, targetError{a.entry.ID, err.Error()})
+				return false
+			}
+			deleted[a.entry.ID] = true
+			logEvent(ctx, "archive-prune", a.entry.Repo, a.entry.ID)
+		}
+		res.Deleted = append(res.Deleted, prunedArchive{ID: a.entry.ID, Repo: a.entry.Repo, Created: a.created, Bytes: a.bytes})
+		res.Bytes += a.bytes
+		return true
+	}
+	// Whole-history archives last: a thin one that fails to go still needs
+	// its repo's.
+	for _, a := range expired {
+		if !remove(a) && a.meta.Thin() {
+			leaners = append(leaners, a)
+		}
+	}
+	unreadable := unreadableDescriptions(cfg.Backup.ArchiveDir)
+	for _, a := range expiredWhole {
+		if len(unreadable) > 0 {
+			res.Kept = append(res.Kept, keptArchive{a.entry.ID, fmt.Sprintf("it holds a repo's whole history, and %s can't be read to tell whether that archive needs it", unreadable[0])})
+			continue
+		}
+		repo := cmp.Or(a.entry.Repo, a.meta.Repo)
+		if i := slices.IndexFunc(leaners, func(l prunable) bool { return l.meta.LeansOn(repo, a.meta.Source) }); i >= 0 {
+			res.Kept = append(res.Kept, keptArchive{a.entry.ID, fmt.Sprintf("archive %s, which stays, may need it to restore", leaners[i].entry.ID)})
+			continue
+		}
+		remove(a)
+	}
+
+	if len(deleted) == 0 {
+		return res, nil
+	}
+	err := st.Update(cfg.LockTimeout, func(st *state.State) error {
+		st.Archives = slices.DeleteFunc(st.Archives, func(e state.ArchiveEntry) bool { return deleted[e.ID] })
+		return nil
+	})
+	if err != nil {
+		return res, fmt.Errorf("dropping %d deleted archives from the catalog: %w", len(deleted), err)
+	}
+	return res, nil
+}
+
+// prunable is a catalog entry with what pruning weighs it by.
+type prunable struct {
+	entry   state.ArchiveEntry
+	meta    gitops.ArchiveMeta
+	created time.Time
+	bytes   int64
+}
+
+// describeArchive reads e's description. One whose files are gone reads as
+// empty, so its entry can go from the catalog.
+func describeArchive(e state.ArchiveEntry) (prunable, error) {
+	a := prunable{entry: e, created: e.Created}
+	meta, _, err := gitops.ReadArchive(e.Path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return a, err
+	default:
+		a.meta = meta
+	}
+	if a.created.IsZero() {
+		a.created = meta.Created
+	}
+	a.bytes = gitops.ArchiveSize(e.Path)
+	return a, nil
+}
+
+// whole reports that a holds a repo's whole history: a complete bundle or
+// the clone itself.
+func (a prunable) whole() bool { return a.entry.Clone || a.meta.Clone != "" || a.meta.Complete }
+
+// unreadableDescriptions lists the archive descriptions in dir that can't
+// be read.
+func unreadableDescriptions(dir string) []string {
+	var bad []string
+	descriptions, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+	for _, d := range descriptions {
+		if _, _, err := gitops.ReadArchive(d); err != nil {
+			bad = append(bad, d)
+		}
+	}
+	return bad
+}
+
 // catalog is every archive: the catalog in state, then any archive in
 // backup.archive_dir it lacks -- one a run made and was interrupted before
 // recording, which would otherwise be on disk with nothing to find it by.
@@ -332,9 +523,15 @@ func catalog(cfg *config.Config, st *state.State) []state.ArchiveEntry {
 	return entries
 }
 
-// Uncatalogued counts the archives in backup.archive_dir not on record.
-func uncatalogued(cfg *config.Config, st *state.State) int {
-	return len(catalog(cfg, st)) - len(st.Archives)
+// uncatalogued counts the archives of a catalog not on record.
+func uncatalogued(all []state.ArchiveEntry) int {
+	n := 0
+	for _, a := range all {
+		if a.Uncatalogued {
+			n++
+		}
+	}
+	return n
 }
 
 // catalogEntry is the catalog's entry for archive id.

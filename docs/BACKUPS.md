@@ -64,8 +64,10 @@ Guarantees:
 | `backup.max_per_copy` | `100` | And at most this many per working copy. |
 | `backup.patch_dir` | `~/.local/share/gitstead/patches` | Where patch backups go. |
 | `backup.archive_dir` | `~/.local/share/gitstead/archive` | Where what is saved before deleting goes (see [Deleting without losing work](ARCHIVES.md#deleting-without-losing-work)). |
+| `backup.archive_retention` | `4320h` (180 days) | How long an archive is kept; `sync` and `archives prune` delete older ones, except a whole-history archive a kept archive needs (see [Retention](ARCHIVES.md#retention)). `0` keeps archives forever. |
 
-Each can be set per repo in `overrides[].backup`, except `archive_dir`.
+Each can be set per repo in `overrides[].backup`, except `archive_dir` and
+`archive_retention`.
 
 ```bash
 gitstead backup --list --repos "*/my-repo"

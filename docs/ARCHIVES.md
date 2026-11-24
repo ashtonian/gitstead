@@ -4,6 +4,7 @@
 
 - [Deleting without losing work](#deleting-without-losing-work)
 - [Archiving instead of deleting](#archiving-instead-of-deleting)
+- [Retention](#retention)
 
 ## Deleting without losing work
 
@@ -64,8 +65,10 @@ git for-each-ref refs/restored   # heads/*, tags/*, gitstead/archive/<id>/{head,
 ```
 
 The `worktree` ref is a stash-shaped commit of the index, working tree and
-untracked files; `git stash apply --index <ref>` brings them back. Archives are
-never pruned automatically; `gitstead archives rm <id>` deletes one for good.
+untracked files; `git stash apply --index <ref>` brings them back. Archives
+are kept for `backup.archive_retention` (180 days by default) and then pruned
+(see [Retention](#retention)); `gitstead archives rm <id>` deletes one for
+good sooner.
 
 ## Archiving instead of deleting
 
@@ -96,3 +99,37 @@ A restored clone is tracked by hand, so discovery never judges it stale
 again. If its repo is tracked again meanwhile -- found upstream once more and
 cloned afresh -- `restore` refuses its old place and `--to` puts it elsewhere,
 untracked.
+
+## Retention
+
+Every archive is deleted once it is older than `backup.archive_retention`
+(default `4320h`, 180 days), so the archive directory can't grow without
+bound. `sync` prunes after its backups, every run; `gitstead archives prune`
+does it on demand, and `--dry-run` lists what it would delete, and what past
+its retention it keeps and why, without deleting anything. `0` keeps archives
+forever, as before there was a retention.
+
+Pruning covers every archive in `backup.archive_dir` -- on record or not --
+and removes the whole archive: its bundle or archived clone, its description,
+its LFS objects and its submodules' archives. Deleted archives leave the
+catalog; a retired copy's tombstone in `ws show` names its archive as
+`(deleted)`. Each deletion is written to the operation log as
+`archive-prune`. The bundles `remote_sync.unpushed: bundle` keeps in
+`archive_dir/unpushed/` are not archives and are left alone.
+
+An archive of a repo's whole history -- a complete bundle, or an archived
+clone -- is kept past its retention while an archive that leans on it stays:
+a workspace copy's thin bundle of the same repo, or one based on that repo's
+clone or a submodule inside it, since restoring the thin one may need it.
+Thin archives are pruned first, so a whole-history archive goes in the same
+run as the last archive that leaned on it. While any description in the
+archive directory can't be read, every whole-history archive is kept, since
+the unreadable one might lean on it; `archives prune --dry-run` names it.
+An archive that records no creation time, or whose description can't be
+read, is kept and listed.
+
+```bash
+gitstead archives prune --dry-run       # what retention would delete now, and what it keeps and why
+gitstead archives prune                 # delete it
+gitstead doctor                         # how many archives, their size, the oldest, the retention
+```

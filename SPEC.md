@@ -98,6 +98,7 @@ gitstead [global flags] <command> [command flags] [args]
 | `--verbose` / `-v` | false | Verbose output |
 | `--quiet` / `-q` | false | Suppress non-error output |
 | `--concurrency` / `-j` | 8 | Max concurrent git operations: fetches, backups, and the clones and other changes of different repos that `sync` and `apply` make |
+| `--machine` | this machine's name | The `machines:` section of config to lay over the rest (config `machine`, `GITSTEAD_MACHINE`); see [Per-machine sections](#per-machine-sections) |
 
 ### Commands
 
@@ -223,6 +224,7 @@ creates, moves or removes workspace copies; it backs them up.
 | `--no-backup` | Skip the backup step |
 | `--no-fetch` | Skip fetching, only backup |
 | `--no-discover` | Skip auto-discovery (even if enabled in config) |
+| `--no-maintain` | Skip upkeep (`maintenance.enabled`) |
 | `--force` | Ignore min_fetch_interval, fetch everything |
 
 ```
@@ -242,6 +244,8 @@ Syncing 83 repos (concurrency: 8)...
 - Backs up each working copy first on `sync.backup_timeout`, then fetches on `sync.timeout_per_repo`; tracked repos run first, then workspace copies, each phase on the `concurrency` pool, and each working copy is visited once
 - Workspace clones aren't fetched: once their repo's clone has fetched, their `refs/remotes/origin/*` are refreshed from it (`git fetch <clone> +refs/remotes/origin/*:refs/remotes/origin/*`), without the network; worktrees share their repo's refs
 - Respects `min_fetch_interval` -- skips repos fetched within the window
+- Last in each working copy's job, upkeep (`maintenance.enabled`): the temporary packs in its `objects/pack` older than `maintenance.temp_pack_age` -- `tmp_pack_*`, `tmp_idx_*` and the like from interrupted fetches, `.tmp-<pid>-pack-*` from interrupted repacks -- are deleted, then `git -c maintenance.autoDetach=false -c gc.autoDetach=false maintenance run --auto` runs, all on `maintenance.timeout`. Worktree copies are skipped; their objects are their repo's clone's. A repo with a git lock (`index.lock`, a ref's `.lock`, `gc.pid`) or whose repo lock another gitstead command holds is skipped and reported (`maintain_skipped`), not failed
+- After recording the run, archives older than `backup.archive_retention` are pruned as `archives prune` does; each one deleted, or that fails to be, counts as an operation of the run
 - All errors are collected, not fatal -- partial success is fine
 
 #### `gitstead backup [flags]`
@@ -270,6 +274,30 @@ To restore backup 20261012T155117.905Z of github.com/ashtonian/gitstead (onto a 
   git stash apply --index refs/gitstead/backups/8ed3b5a3e9e769c3/20261012T155117.905Z
   (not in this backup: huge.bin (3.0 MiB is over the 1.0 MiB file limit))
   tar -xzf ~/.local/share/gitstead/patches/.../untracked.tar.gz
+```
+
+#### `gitstead maintain [flags]`
+
+Upkeep now, as `sync` gives it under `maintenance.enabled` -- whether or not
+that is on -- for every tracked clone and every workspace copy that isn't a
+worktree, at most `concurrency` at a time.
+
+| Flag | Description |
+|---|---|
+| `--repos <glob>`, `--tag <tag>`, `--set <name>` | Only these repos, and their workspace copies |
+| `--dry-run` | List the temporary packs that would be deleted; delete nothing and run no maintenance |
+
+A copy whose upkeep fails makes the command exit 1, or 3 when others
+succeeded; a busy one is skipped and doesn't count. Each copy that had
+temporary packs deleted is logged as a `maintain` event with their count and
+size. `--json` prints the copies as `sync --json` does, with `temp_packs`,
+`temp_pack_bytes`, `maintained`, `maintain_skipped` and `maintain_error`.
+
+```
+$ gitstead maintain
+  github.com/acme/monorepo: removed 14 temporary packs, 7.4 GiB
+  app/agent-2: skipped, git is busy in it: ~/workspaces/app/agent-2/.git/index.lock exists; if no git command is running there, delete it
+Upkeep: 23 copies, 7.4 GiB of temporary packs removed, 22 maintained, 1 skipped (busy), 0 failed.
 ```
 
 #### `gitstead status [flags]`
@@ -387,7 +415,7 @@ Runs hooks again, printing their output as well as logging it.
 
 Exits non-zero (3) when any hook fails.
 
-#### `gitstead archives ls|show|restore|rm`
+#### `gitstead archives ls|show|restore|rm|prune`
 
 The catalog of archives gitstead made before taking copies and repos away:
 verified bundles of unique work, and whole clones moved by `remove --archive`
@@ -400,6 +428,7 @@ or the directory `<archive_dir>/<id>/`, with `<id>.json` describing it.
 | `show <id>` | The description -- for a bundle, whether it holds the repo's whole history or leans on a base -- and the restore steps, by hand as well. |
 | `restore <id> [--to path] [--base path]` | Put an archive back where it was (or `--to`). An archived clone is moved back and dropped from the catalog; a bundle is rebuilt into a clone -- branches, tags, remotes, HEAD, stash list, index, working tree, untracked files, LFS objects, submodules' archives -- and stays in the catalog. A bundle that leans on a base is restored into a clone of it (`--base` names another, such as a restored archive of that repo), or of origin when it is gone. A repo's archive is then tracked by hand (`adopt`), so it is never judged stale again; a workspace copy's is not tracked. Refuses an occupied destination and -- without `--to` -- a repo tracked again meanwhile; with `--to` such a repo's archive is restored untracked. |
 | `rm <id>... [--yes]` | Delete archives for good -- bundle or clone, description, LFS objects, submodules' archives -- and drop them from the catalog. Only files named for the archive, beside it, are deleted. Asks first; without a terminal, needs `--yes`. |
+| `prune [--dry-run]` | Delete, as `rm` does, every archive -- on record or not -- made more than `backup.archive_retention` ago, and drop it from the catalog; `sync` does this every run. Kept past retention, and listed with why: an archive of a repo's whole history (a complete bundle, or an archived clone) while a thin bundle that may lean on it stays -- one of the same repo (`ArchiveMeta.LeansOn`), or based on its clone or a submodule inside it; every such archive while any description in `archive_dir` can't be read; an archive whose description can't be read or that records no creation time. Thin bundles go first, so a whole-history archive goes in the same run as the last archive leaning on it. With `archive_retention: 0`, nothing. Each deletion is an `archive-prune` event. |
 
 #### `gitstead accounts ls|gitconfig`
 
@@ -478,6 +507,14 @@ Print resolved configuration.
 | `--edit` | Open config in the editor `open` uses -- config's `editor`, else `$VISUAL`, else `$EDITOR`, else `vi` -- run by the shell with the path as an argument of its own, so a path with spaces or shell characters is passed whole |
 | `--validate` | Validate config and exit |
 | `--path` | Print config file path |
+| `--for-repo <key>` | The settings one repo resolves to |
+| `--redact` | Blank inline provider tokens |
+
+The full config is printed as it applies on this machine: its `machines:`
+section laid over the rest, `machines:` itself left out, and a comment line
+first naming the machine, whether a section applied, and every section's
+name. `--json` adds `machine_applied` when there are sections. With
+`--machine <name>`, another machine's.
 
 #### `gitstead cd|path|open <query>`
 
@@ -907,6 +944,19 @@ backup:
   # Default: ~/.local/share/gitstead/archive/
   archive_dir: ""
 
+  # How long an archive is kept; sync and `archives prune` delete older ones,
+  # except a whole-history archive a kept thin one may need. 0 = forever.
+  archive_retention: "4320h"
+
+# ============================================================================
+# Upkeep
+# ============================================================================
+
+maintenance:
+  enabled: true                   # sync clears old temporary packs and runs git maintenance
+  temp_pack_age: "24h"            # older ones were left behind (min 1h)
+  timeout: "10m"                  # per clone or copy; 0 = none
+
 # ============================================================================
 # Mirrors
 # ============================================================================
@@ -1001,7 +1051,47 @@ log:
   # Log file path. Empty = stderr only. Useful for cron.
   # Logs always go to stderr; this adds a file output in addition.
   file: ""                        # e.g., "~/.local/share/gitstead/gitstead.log"
+
+# ============================================================================
+# Machines
+# ============================================================================
+
+# machine: ""                     # GITSTEAD_MACHINE / --machine; default this machine's name
+machines: {}                      # by machine name: base_dir, workspace_defaults,
+                                  # overrides, repos, discovery, workspaces, fleets
 ```
+
+### Per-machine sections
+
+`config.Load` runs `applyMachines` after `normalize`. With `machines:` empty
+it does nothing. Otherwise:
+
+1. The machine is `machine` (file, `GITSTEAD_MACHINE`, `--machine`), else on
+   darwin `scutil --get LocalHostName` (bounded by 2 s), else `os.Hostname()`
+   up to its first `.`.
+2. Every section's name must be a valid name (letters, digits, `-`, `_`, no
+   `.`), and every section is merged over the top level and normalized and
+   validated as the whole config is -- errors are prefixed `machines.<name>:`
+   -- so one machine's mistake fails the load on every machine. Unknown keys
+   in a section are rejected by the loader as anywhere else.
+3. The section whose name equals the machine's ignoring case (an exact match
+   preferred) replaces the config with its merge, and `MachineSection()`
+   reports it; with none, the top level stands.
+
+The merge, per key of a section:
+
+| Key | Merge |
+|---|---|
+| `base_dir` | Replaces when set. |
+| `workspace_defaults` | Pointer fields: each set one replaces; `env` merges by name. |
+| `overrides`, `repos`, `discovery` | Appended; `ResolveForRepo` applies overrides in order, so the section's win. |
+| `workspaces` | By name: `Workspace.over` replaces each non-zero key -- `repos`/`set`/`path` as one -- and merges `env`; a new name is appended. |
+| `fleets` | By name: `Fleet.over` replaces each non-empty key; a new name is appended. |
+
+A reflection test fills every field of `Workspace`, `Fleet` and
+`MachineWorkspaceDefaults` and checks the merge carries each, so a key added
+to one of those types without a merge rule fails. `machine` here is not the
+name offsite refs use: state's `machine`, chosen once on first offsite push.
 
 ---
 

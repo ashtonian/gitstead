@@ -28,6 +28,8 @@ type CLI struct {
 	// Concurrency reaches config through ConfigFlags, not this field.
 	Concurrency int  `help:"Max concurrent git operations (config concurrency, default 8)." short:"j"`
 	JSON        bool `help:"Print the command's result as one JSON document on stdout; everything else goes to stderr."`
+	// Machine reaches config through ConfigFlags, not this field.
+	Machine string `help:"Use this machine's machines: section of the config instead of this machine's own ($GITSTEAD_MACHINE); with config, preview it."`
 
 	// Commands
 	Version    VersionCmd    `cmd:"" help:"Print version information."`
@@ -38,6 +40,7 @@ type CLI struct {
 	Plan       PlanCmd       `cmd:"" help:"Show what applying config would change, without changing anything."`
 	Apply      ApplyCmd      `cmd:"" help:"Make repos and workspaces match config, including moves and removals."`
 	Backup     BackupCmd     `cmd:"" help:"Backup uncommitted changes."`
+	Maintain   MaintainCmd   `cmd:"" help:"Remove the temporary packs interrupted fetches left in clones and workspace copies, and run git's maintenance in them."`
 	Restore    RestoreCmd    `cmd:"" help:"Restore a backup (print steps, apply, or --into a scratch dir)."`
 	Status     StatusCmd     `cmd:"" help:"Show state of all managed repos."`
 	Top        TopCmd        `cmd:"" help:"A live view of every repo and workspace copy: working trees, agents, activity."`
@@ -71,6 +74,7 @@ type CLI struct {
 // them.
 var ConfigFlags = map[string]string{
 	"concurrency": "concurrency",
+	"machine":     "machine",
 }
 
 // Context is passed to all command Run methods.

@@ -702,6 +702,9 @@ func printAgents(st *state.State, name string, runs map[string]agentRun) {
 		line := fmt.Sprintf("retired %s/%s %s", t.Workspace, t.Agent, t.Retired.Local().Format(time.DateTime))
 		if t.Archive != "" {
 			line += ", archive " + t.Archive
+			if !slices.ContainsFunc(st.Archives, func(a state.ArchiveEntry) bool { return a.ID == t.Archive }) {
+				line += " (deleted)"
+			}
 		}
 		if t.PR != "" {
 			line += ", " + t.PR

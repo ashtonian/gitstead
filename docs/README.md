@@ -11,14 +11,14 @@
 
 ## Configuration and accounts
 
-- [Configuration](CONFIGURATION.md): layout, clone options, hooks, overrides, tags, sets and shared manifests.
+- [Configuration](CONFIGURATION.md): layout, clone options, hooks, overrides, tags, sets, shared manifests, per-machine sections and upkeep.
 - [Authentication and accounts](AUTHENTICATION.md): provider tokens, Git transport, account selection and signing.
 - [Plan and apply](RECONCILIATION.md): desired configuration, drift, moves and removals.
 
 ## Protecting work
 
 - [Backups](BACKUPS.md): snapshots, patch backups, retention, offsite refs and upstream mirrors.
-- [Archives and safe removal](ARCHIVES.md): inspection, bundles, archiving whole clones and recovery.
+- [Archives and safe removal](ARCHIVES.md): inspection, bundles, archiving whole clones, recovery and retention.
 
 ## Coding agents
 

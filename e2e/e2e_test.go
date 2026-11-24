@@ -2345,3 +2345,174 @@ func mustRead(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+// plantTempPack leaves a temporary pack in repo's objects/pack as an
+// interrupted fetch or repack does, written age ago.
+func plantTempPack(t *testing.T, repo, name string, age time.Duration) string {
+	t.Helper()
+	path := filepath.Join(repo, ".git", "objects", "pack", name)
+	if err := os.WriteFile(path, make([]byte, 4096), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().Add(-age)
+	if err := os.Chtimes(path, at, at); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestE2E_MachinesAndUpkeep: this machine's machines: section places its
+// clones and declares its workspace; maintain --dry-run lists the temporary
+// packs interrupted fetches left in the repo's clone and the workspace's
+// copy, and sync removes them, leaving a young one a fetch may be writing.
+func TestE2E_MachinesAndUpkeep(t *testing.T) {
+	env := newLocalEnv(t)
+	env.extraEnv = []string{"GITSTEAD_MACHINE=e2e-box"}
+	tmp := t.TempDir()
+	remote := filepath.Join(tmp, "remotes", "app.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	seed := filepath.Join(tmp, "seed")
+	gitCmd(t, tmp, "clone", "-q", remote, seed)
+	gitCmd(t, seed, "config", "user.email", "e2e@test.local")
+	gitCmd(t, seed, "config", "user.name", "e2e")
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("# app"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, seed, "add", ".")
+	gitCmd(t, seed, "commit", "-qm", "init")
+	gitCmd(t, seed, "push", "-q", "origin", "HEAD:main")
+
+	root := filepath.Join(tmp, "workspaces")
+	cfg := fmt.Sprintf(`base_dir: %s
+repos:
+  - url: %s
+machines:
+  e2e-box:
+    base_dir: %s
+    workspace_defaults:
+      root: %s
+    workspaces:
+      - name: app
+        repos: [local/remotes/app]
+        isolation: clone
+`, filepath.Join(tmp, "elsewhere"), remote, env.baseDir, root)
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code := env.run(t, "config")
+	if code != 0 || !strings.Contains(out, `# Machine "e2e-box": its machines: section is applied below`) || !strings.Contains(out, "base_dir: "+env.baseDir) {
+		t.Fatalf("config exit %d:\n%s", code, out)
+	}
+	if out, _ := env.run(t, "--machine", "other-box", "config"); !strings.Contains(out, `# Machine "other-box" has no machines: section`) {
+		t.Errorf("config --machine other-box:\n%s", out)
+	}
+	if out, code := env.run(t, "sync"); code != 0 {
+		t.Fatalf("sync exit %d:\n%s", code, out)
+	}
+	clone := filepath.Join(env.baseDir, "local", "remotes", "app")
+	if !gitOK(filepath.Join(clone, ".git")) {
+		t.Fatalf("the machine's base_dir should hold the clone, at %s", clone)
+	}
+	if out, code := env.run(t, "ws", "create", "app"); code != 0 {
+		t.Fatalf("ws create exit %d:\n%s", code, out)
+	}
+	copyPath := filepath.Join(root, "app", "agent-1")
+
+	old := []string{
+		plantTempPack(t, clone, "tmp_pack_Q3x9Zk", 48*time.Hour),
+		plantTempPack(t, copyPath, ".tmp-4242-pack-5f3c.pack", 30*time.Hour),
+	}
+	young := plantTempPack(t, clone, "tmp_pack_Ab3dE7", 0)
+
+	var listed []struct {
+		Path      string   `json:"path"`
+		TempPacks []string `json:"temp_packs"`
+	}
+	if stderr, code := env.runJSON(t, &listed, "maintain", "--dry-run"); code != 0 {
+		t.Fatalf("maintain --dry-run exit %d:\n%s", code, stderr)
+	}
+	found := 0
+	for _, c := range listed {
+		found += len(c.TempPacks)
+	}
+	if found != len(old) {
+		t.Errorf("maintain --dry-run listed %d temporary packs, want %d: %+v", found, len(old), listed)
+	}
+	for _, p := range append(old, young) {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("a dry run removed %s", p)
+		}
+	}
+
+	out, code = env.run(t, "sync")
+	if code != 0 || !strings.Contains(out, "of temporary packs removed") {
+		t.Fatalf("sync exit %d:\n%s", code, out)
+	}
+	for _, p := range old {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("sync left %s", p)
+		}
+	}
+	if _, err := os.Stat(young); err != nil {
+		t.Errorf("sync removed a temporary pack younger than temp_pack_age: %v", err)
+	}
+	gitCmd(t, clone, "fsck", "--no-progress")
+	gitCmd(t, copyPath, "fsck", "--no-progress")
+}
+
+// TestE2E_ArchivePrune: archives prune --dry-run lists what retention has
+// passed and deletes nothing; archives prune deletes it and drops it from
+// the catalog.
+func TestE2E_ArchivePrune(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+	archiveDir := filepath.Join(tmp, "archive")
+	remote := filepath.Join(tmp, "remotes", "app.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	clone := filepath.Join(env.baseDir, "app")
+	gitCmd(t, tmp, "clone", "-q", remote, clone)
+	gitCmd(t, clone, "config", "user.email", "e2e@test.local")
+	gitCmd(t, clone, "config", "user.name", "e2e")
+	if err := os.WriteFile(filepath.Join(clone, "notes.txt"), []byte("notes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Every archive is past a nanosecond's retention by the time it is
+	// looked at.
+	cfg := fmt.Sprintf("base_dir: %s\nbackup:\n  archive_dir: %s\n  archive_retention: 1ns\n", env.baseDir, archiveDir)
+	if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := env.run(t, "adopt", clone); code != 0 {
+		t.Fatalf("adopt exit %d:\n%s", code, out)
+	}
+	if out, code := env.run(t, "remove", "local/remotes/app", "--archive", "--yes"); code != 0 {
+		t.Fatalf("remove --archive exit %d:\n%s", code, out)
+	}
+	entries, _ := os.ReadDir(archiveDir)
+	if len(entries) == 0 {
+		t.Fatal("remove --archive made no archive")
+	}
+
+	var dry struct {
+		Deleted []struct {
+			ID string `json:"id"`
+		} `json:"deleted"`
+	}
+	if stderr, code := env.runJSON(t, &dry, "archives", "prune", "--dry-run"); code != 0 || len(dry.Deleted) != 1 {
+		t.Fatalf("archives prune --dry-run exit %d, %+v:\n%s", code, dry, stderr)
+	}
+	if after, _ := os.ReadDir(archiveDir); len(after) != len(entries) {
+		t.Errorf("a dry run deleted files: %d left of %d", len(after), len(entries))
+	}
+	out, code := env.run(t, "archives", "prune")
+	if code != 0 || !strings.Contains(out, "Deleted "+dry.Deleted[0].ID) {
+		t.Fatalf("archives prune exit %d:\n%s", code, out)
+	}
+	if after, _ := os.ReadDir(archiveDir); len(after) != 0 {
+		t.Errorf("archives prune left %d files behind", len(after))
+	}
+	if out, _ := env.run(t, "archives", "ls"); !strings.Contains(out, "No archives on record.") {
+		t.Errorf("a pruned archive should leave the catalog:\n%s", out)
+	}
+}

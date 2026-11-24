@@ -50,6 +50,31 @@ Then:
 - **An agent's copy is missing, or an agent shows as retiring.** `gitstead ws
   ensure <name>` makes missing copies; `gitstead ws retire <name> <agent>`
   finishes a retire that was cut short.
+- **A clone or copy takes far more disk than its history.** Check
+  `.git/objects/pack` for `tmp_pack_*` or `.tmp-*-pack*` files: packs from
+  fetches or repacks that were interrupted. `gitstead maintain --dry-run`
+  lists those older than `maintenance.temp_pack_age`, and `gitstead maintain`
+  deletes them; `sync` does it every run unless `maintenance.enabled: false`.
+  A copy reported `skipped` has a git lock (`index.lock`, `gc.pid`, a ref's
+  `.lock`) or is being deleted or moved by another gitstead command: if no
+  git command is running there, delete the lock it names. A `maintain_error`
+  of `upkeep timed out` means `git maintenance` outran `maintenance.timeout`
+  on a big repo; raise it, or run `git maintenance run --auto` there once by
+  hand.
+- **The archive directory keeps growing.** `gitstead doctor` prints how many
+  archives there are, their size and the oldest. Archives older than
+  `backup.archive_retention` are pruned by every `sync`; `gitstead archives
+  prune --dry-run` lists what it would delete now and what it keeps past
+  retention and why -- a whole-history archive a younger copy's archive
+  leans on (it goes with that one), or every such archive while some
+  description in `archive_dir` can't be read (`doctor` and the reason name it:
+  fix or delete it). `archive_retention: 0` keeps everything forever.
+- **The wrong machine's settings apply.** `gitstead config` names the machine
+  and whether a `machines:` section applied; `gitstead doctor` notes a machine
+  with none. The name is `GITSTEAD_MACHINE`, else the macOS local host name
+  (`scutil --get LocalHostName`), else the host name: rename the section, or
+  set `GITSTEAD_MACHINE` in the shell and in the background sync's
+  environment.
 
 ### Stale repos
 

@@ -263,7 +263,13 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 			}
 		}
 	}
-	out, err := yaml.Marshal(cfg)
+	// This machine's section is already laid over the rest; the others'
+	// are only named.
+	machine, applied := cfg.MachineSection()
+	sections := cfg.MachineNames()
+	effective := *cfg
+	effective.Machines = nil
+	out, err := yaml.Marshal(&effective)
 	if err != nil {
 		return err
 	}
@@ -273,7 +279,16 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 		if err := yaml.Unmarshal(out, &doc); err != nil {
 			return err
 		}
+		if len(sections) > 0 {
+			doc["machine_applied"] = applied
+		}
 		return ctx.Emit(doc)
+	}
+	switch {
+	case applied:
+		fmt.Printf("# Machine %q: its machines: section is applied below (sections: %s).\n", machine, strings.Join(sections, ", "))
+	case len(sections) > 0:
+		fmt.Printf("# Machine %q has no machines: section; the top-level settings apply (sections: %s).\n", machine, strings.Join(sections, ", "))
 	}
 	fmt.Print(string(out))
 	return nil

@@ -32,7 +32,7 @@ func TestCatalog_FindsArchivesNotOnRecord(t *testing.T) {
 	if len(all) != 2 || all[1].ID != "app-1" || !all[1].Uncatalogued || all[1].Path != filepath.Join(dir, "app-1.bundle") || all[1].Source != "/src/app" {
 		t.Fatalf("catalog = %+v", all)
 	}
-	if n := uncatalogued(cfg, st); n != 1 {
+	if n := uncatalogued(all); n != 1 {
 		t.Errorf("uncatalogued = %d", n)
 	}
 	if a, err := catalogEntry(cfg, st, "app-1"); err != nil || a.Work != "1 unpushed commit" {

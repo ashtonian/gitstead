@@ -47,6 +47,21 @@ type Config struct {
 	Workspaces        []Workspace       `koanf:"workspaces"         yaml:"workspaces,omitempty" validate:"dive"`
 	Fleets            []Fleet           `koanf:"fleets"             yaml:"fleets,omitempty"     validate:"dive"`
 	Launchers         LaunchersConfig   `koanf:"launchers"          yaml:"launchers"`
+
+	// Maintenance is the upkeep sync gives every clone and workspace copy.
+	Maintenance MaintenanceConfig `koanf:"maintenance" yaml:"maintenance"`
+
+	// Machine names the machines: section laid over this config. Empty
+	// means this machine's own name; set it with GITSTEAD_MACHINE or
+	// --machine to use, or preview, another machine's.
+	Machine string `koanf:"machine" yaml:"machine,omitempty"`
+	// Machines are settings for one machine each, by machine name.
+	Machines map[string]Machine `koanf:"machines" yaml:"machines,omitempty" validate:"dive"`
+
+	// machineApplied records that Machines[Machine] was laid over the rest;
+	// topLevel is the config as it was before.
+	machineApplied bool
+	topLevel       *Config
 }
 
 // Account is one identity on one or more hosts: the SSH key and commit
@@ -410,6 +425,26 @@ type BackupCfg struct {
 	// clones archived instead of deleted. A clone it can't inspect or archive
 	// isn't deleted, unless asked to discard its work.
 	ArchiveDir string `koanf:"archive_dir" yaml:"archive_dir"`
+	// ArchiveRetention is how long an archive in ArchiveDir is kept; sync
+	// and `archives prune` delete older ones, except whole-repo archives a
+	// kept copy's archive needs to restore. 0 keeps archives forever.
+	ArchiveRetention time.Duration `koanf:"archive_retention" yaml:"archive_retention" default:"4320h" validate:"min=0"`
+}
+
+// MaintenanceConfig is the upkeep of the repos in tracked clones and
+// workspace copies: temporary packs that interrupted fetches and repacks
+// leave behind, which git never removes on its own until gc prunes, and
+// git's own maintenance.
+type MaintenanceConfig struct {
+	// Enabled makes sync clear each clone's and copy's old temporary packs
+	// and run `git maintenance run --auto` in it; `gitstead maintain` does
+	// it on demand either way.
+	Enabled bool `koanf:"enabled" yaml:"enabled" default:"true"`
+	// TempPackAge is how old a temporary pack must be to count as left
+	// behind; one a running fetch or repack is writing is younger.
+	TempPackAge time.Duration `koanf:"temp_pack_age" yaml:"temp_pack_age" default:"24h" validate:"min=1h"`
+	// Timeout bounds the upkeep of one clone or copy.
+	Timeout time.Duration `koanf:"timeout" yaml:"timeout" default:"10m" validate:"min=0"`
 }
 
 // ReconcileConfig controls how config changes reach repos already on disk.

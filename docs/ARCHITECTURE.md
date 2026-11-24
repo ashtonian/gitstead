@@ -147,17 +147,21 @@ gitstead sync
   |-- each working copy, up to `concurrency` at once
   |     repos first, then agents' copies (refreshed from the repo clone just fetched)
   |
-  |       backup --> fetch (or refresh) --> fast-forward --> offsite push --> status
-  |       (own        (retries,             (sync.update,    (remote_sync)
-  |        deadline)   timeout_per_repo)     clean only)
+  |       backup --> fetch (or refresh) --> fast-forward --> offsite push --> upkeep --> status
+  |       (own        (retries,             (sync.update,    (remote_sync)   (old temp packs,
+  |        deadline)   timeout_per_repo)     clean only)                      git maintenance;
+  |                                                                           not worktrees)
   |
   |-- record              every outcome in one state write
+  |-- archive retention   archives past backup.archive_retention, but not a
+  |                       whole-history one a kept thin bundle leans on
   |-- mirrors             full mirrors due for an update
   `-- notify, oplog       a desktop notification on failures; one log line
 ```
 
 A copy whose fetch finds git's own lock taken is skipped, not failed, and
-retried next run. The exit code is 0, 3 when some operations failed, and 75
+retried next run; so is a copy upkeep finds git or another gitstead command
+busy in. The exit code is 0, 3 when some operations failed, and 75
 when nothing could run because another command held what it needed.
 
 ## Config changes: plan and apply
@@ -237,6 +241,12 @@ when the repo lacks something. A repo that thin bundles lean on -- on record
 or found on disk -- is bundled whole when it is deleted, so they stay
 restorable. `remove --archive` and `cleanup.policy: archive` move the whole
 clone into the archive instead.
+
+Archives are kept for `backup.archive_retention` (180 days), then pruned by
+`sync` or `archives prune`. The same rule decides what a thin bundle leans on
+for both sides (`ArchiveMeta.LeansOn`): deleting a repo bundles it whole when
+one does, and pruning keeps a whole-history archive while one does that
+stays.
 
 ## Workspaces
 
@@ -367,11 +377,11 @@ The ones that shape the code most:
 | Package | Owns |
 | --- | --- |
 | `main.go`, `internal/cmd` | The CLI: flags, wiring, output. Commands load config and state, call the packages below, print. |
-| `internal/config` | Loading (on [`github.com/ashtonian/pkg/config`](https://github.com/ashtonian/pkg/tree/main/config)), defaults, validation, per-repo overrides, SSH key and protocol resolution. |
+| `internal/config` | Loading (on [`github.com/ashtonian/pkg/config`](https://github.com/ashtonian/pkg/tree/main/config)), defaults, validation, per-repo overrides, per-machine sections (`machines.go`), SSH key and protocol resolution. |
 | `internal/discovery` | Provider clients (GitHub, GitLab, Gitea/Forgejo), rule filtering, stale detection. |
 | `internal/reconcile` | Desired vs recorded vs on-disk for tracked repos, and the plan engine: applies changes, several repos at once, then serial ones. |
 | `internal/state` | The state file: schema, migrations, locking, atomic writes, and `GroupCommit`, which saves concurrent changes in one write. |
-| `internal/gitops` | Everything that runs git: clone, fetch, status, snapshots, backups, restore, archives, copy IDs, worktrees. |
+| `internal/gitops` | Everything that runs git: clone, fetch, status, snapshots, backups, restore, archives, upkeep (`maintain.go`), copy IDs, worktrees. |
 | `internal/workspace` | Workspaces: resolving config into replicas and copies, planning their changes on the reconcile engine, making, moving and removing copies, health. Depends on the inventory, never the reverse. |
 | `internal/hook` | Running `post_clone` and `post_create` hooks: environment, timeouts, logs. |
 | `internal/agent` | Running agents: profile commands, the lease that marks an agent running, and `ws run` itself. |

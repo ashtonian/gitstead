@@ -99,6 +99,14 @@ type copyJSON struct {
 	OffsiteError string   `json:"offsite_error,omitempty"`
 	// OffsiteSubmodules is, by path, what each submodule's push did.
 	OffsiteSubmodules map[string][]string `json:"offsite_submodules,omitempty"`
+	// TempPacks are the temporary packs upkeep removed, TempPackBytes
+	// their size; Maintained reports that git's maintenance ran, and
+	// MaintainSkipped why upkeep left the copy alone.
+	TempPacks       []string `json:"temp_packs,omitempty"`
+	TempPackBytes   int64    `json:"temp_pack_bytes,omitempty"`
+	Maintained      bool     `json:"maintained,omitempty"`
+	MaintainSkipped string   `json:"maintain_skipped,omitempty"`
+	MaintainError   string   `json:"maintain_error,omitempty"`
 }
 
 func copiesJSON(outcomes []copyOutcome) []copyJSON {
@@ -109,6 +117,8 @@ func copiesJSON(outcomes []copyOutcome) []copyJSON {
 			OK: len(o.failed()) == 0, BackupError: errString(o.backupErr),
 			Fetched: o.fetched, FetchError: errString(o.fetchErr), OffsiteError: errString(o.offsiteErr),
 			Updated: o.updated, UpdateSkipped: o.updateSkipped, UpdateError: errString(o.updateErr),
+			TempPacks: o.upkeep.Removed, TempPackBytes: o.upkeep.Bytes, Maintained: o.upkeep.Maintained,
+			MaintainSkipped: o.upkeepSkipped, MaintainError: errString(o.upkeepErr),
 		}
 		if o.backup != nil {
 			c.Backup, c.BackupID = o.backup.Outcome.String(), o.backup.ID

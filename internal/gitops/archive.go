@@ -56,6 +56,27 @@ type ArchiveMeta struct {
 	Clone string `json:"clone,omitempty"`
 }
 
+// Thin reports that the archive's bundle holds only what its base lacked,
+// so restoring it may need that repository's history.
+func (m ArchiveMeta) Thin() bool { return m.Bundle != "" && !m.Complete }
+
+// LeansOn reports whether restoring the archive may need the history of
+// tracked repo, whose clone is at path: it is thin and is of that repo, or
+// was based on its clone or on a submodule inside it.
+func (m ArchiveMeta) LeansOn(repo, path string) bool {
+	if !m.Thin() {
+		return false
+	}
+	if repo != "" && m.Repo == repo {
+		return true
+	}
+	if m.Base == "" || path == "" {
+		return false
+	}
+	base, path := filepath.Clean(m.Base), filepath.Clean(path)
+	return base == path || strings.HasPrefix(base, path+string(filepath.Separator))
+}
+
 type archiveScope int
 
 const (
@@ -365,6 +386,41 @@ func DeleteArchive(path string) error {
 		}
 	}
 	return nil
+}
+
+// ArchiveSize is the bytes the archive at path takes on disk: its bundle or
+// archived clone, its description, its LFS objects and its submodules'
+// archives. What is gone counts nothing.
+func ArchiveSize(path string) int64 {
+	base := archiveBase(path)
+	total := treeSize(base+".bundle") + treeSize(base+".json") + treeSize(base+".lfs")
+	meta, _, err := ReadArchive(path)
+	if err != nil {
+		return total
+	}
+	if path == base && meta.Clone == path {
+		total += treeSize(path)
+	}
+	for _, sub := range meta.Submodules {
+		total += ArchiveSize(sub)
+	}
+	return total
+}
+
+// treeSize is the bytes of the regular files at path, a file or a
+// directory, without following links.
+func treeSize(path string) int64 {
+	var total int64
+	_ = filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
 }
 
 // archiveBase is an archive's path without extension: its archived clone,
