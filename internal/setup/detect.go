@@ -102,6 +102,11 @@ type Detected struct {
 	// Schedule is the background sync setup installs, when one is; the
 	// caller fills it in from state.
 	Schedule *InstalledSchedule
+	// OtherSchedule describes the background sync another tool -- a dotfiles
+	// repo, home-manager -- installed under gitstead's name, when one did:
+	// its job and where it is. The caller fills it in. Setup installs no
+	// schedule of its own beside it, and leaves it alone.
+	OtherSchedule string
 }
 
 // InstalledSchedule is a background sync already installed.

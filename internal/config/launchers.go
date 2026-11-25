@@ -28,7 +28,8 @@ type Fleet struct {
 // LaunchersConfig is how fleets and `ws open` open terminals.
 type LaunchersConfig struct {
 	// Default is the launcher used when a fleet or `ws open` names none:
-	// auto picks tmux inside tmux, iTerm inside iTerm, else tmux.
+	// auto picks tmux inside tmux ($TMUX), Muxy inside Muxy ($MUXY_SESSION_ID
+	// or TERM_PROGRAM=muxy), iTerm inside iTerm, else tmux.
 	Default string `koanf:"default" yaml:"default" default:"auto"`
 	// Title names each agent's terminal ({{.Fleet}}, {{.Workspace}},
 	// {{.Agent}}, {{.Profile}}).

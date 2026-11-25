@@ -15,14 +15,38 @@ import (
 )
 
 // Document is a config file edited in place: changes go into its YAML tree,
-// so comments and the order of everything left alone survive.
+// so comments and the order of everything left alone survive. Its fragments
+// are read alongside and never written: a change to a setting or entry one
+// of them sets is refused, naming it, so a write never makes a second
+// source for a fact.
 type Document struct {
-	path string
-	root *yaml.Node // a DocumentNode holding the top-level mapping
+	path      string
+	root      *yaml.Node // a DocumentNode holding the top-level mapping
+	fragments []fragmentDoc
 }
 
-// OpenDocument reads the config file at path for editing. A missing file
-// starts empty.
+// fragmentDoc is a fragment of a document's config, as read when it was
+// opened.
+type fragmentDoc struct {
+	path string
+	top  *yaml.Node // its top-level mapping; nil when it holds none
+}
+
+// FragmentError is a write a Document refuses: what it would change is set
+// in a fragment, which gitstead leaves to whoever owns it.
+type FragmentError struct {
+	// What names the setting or entry: sync.update, workspaces entry "app".
+	What string
+	// Fragment is the file that sets it; Config the file writes go to.
+	Fragment, Config string
+}
+
+func (e *FragmentError) Error() string {
+	return fmt.Sprintf("%s is set in %s, and gitstead writes only %s: change it there", e.What, e.Fragment, e.Config)
+}
+
+// OpenDocument reads the config file at path for editing, with its
+// fragments. A missing file starts empty.
 func OpenDocument(path string) (*Document, error) {
 	path = ExpandHome(path)
 	root, err := loadOrInitDocument(path)
@@ -32,17 +56,44 @@ func OpenDocument(path string) (*Document, error) {
 	if len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("config %s is not a YAML mapping", path)
 	}
-	return &Document{path: path, root: root}, nil
+	paths, err := fragmentPaths(path)
+	if err != nil {
+		return nil, err
+	}
+	d := &Document{path: path, root: root}
+	for _, p := range paths {
+		data, err := readConfigFile(p)
+		if err != nil {
+			return nil, err
+		}
+		var froot yaml.Node
+		if err := yaml.Unmarshal(data, &froot); err != nil {
+			return nil, fmt.Errorf("config %s does not parse: %w", p, err)
+		}
+		f := fragmentDoc{path: p}
+		if len(froot.Content) > 0 && froot.Content[0].Kind == yaml.MappingNode {
+			f.top = froot.Content[0]
+		}
+		d.fragments = append(d.fragments, f)
+	}
+	return d, nil
 }
 
 func (d *Document) top() *yaml.Node { return d.root.Content[0] }
 
 // Set sets the value at a dotted key path, such as "backup.enabled",
-// creating the mappings on the way.
+// creating the mappings on the way. A key a fragment sets is refused, unless
+// the fragment already gives it value.
 func (d *Document) Set(key string, value any) error {
 	node, err := encode(value)
 	if err != nil {
 		return err
+	}
+	if frag, have := d.fragmentSetting(key); have != nil {
+		if sameValue(have, node) {
+			return nil
+		}
+		return &FragmentError{What: key, Fragment: frag, Config: d.path}
 	}
 	m := d.top()
 	parts := strings.Split(key, ".")
@@ -58,13 +109,17 @@ func (d *Document) Set(key string, value any) error {
 	return nil
 }
 
-// Delete removes the value at a dotted key path, if present.
-func (d *Document) Delete(key string) {
+// Delete removes the value at a dotted key path, if present. A key a
+// fragment sets is refused: deleting it here would leave it set.
+func (d *Document) Delete(key string) error {
+	if frag, have := d.fragmentSetting(key); have != nil {
+		return &FragmentError{What: key, Fragment: frag, Config: d.path}
+	}
 	m := d.top()
 	parts := strings.Split(key, ".")
 	for _, p := range parts[:len(parts)-1] {
 		if m = mappingValue(m, p); m == nil || m.Kind != yaml.MappingNode {
-			return
+			return nil
 		}
 	}
 	for i := 0; i+1 < len(m.Content); i += 2 {
@@ -75,13 +130,14 @@ func (d *Document) Delete(key string) {
 				next.HeadComment = strings.TrimSpace(head + "\n" + next.HeadComment)
 			}
 			m.Content = append(m.Content[:i], m.Content[i+2:]...)
-			return
+			return nil
 		}
 	}
+	return nil
 }
 
-// Has reports whether the top-level sequence seqKey holds an entry matched
-// by match.
+// Has reports whether the document's own top-level sequence seqKey holds an
+// entry matched by match.
 func (d *Document) Has(seqKey string, match func(*yaml.Node) bool) bool {
 	seq := mappingValue(d.top(), seqKey)
 	if seq == nil || seq.Kind != yaml.SequenceNode {
@@ -96,11 +152,18 @@ func (d *Document) Has(seqKey string, match func(*yaml.Node) bool) bool {
 }
 
 // Upsert puts value into the top-level sequence seqKey: in place of the entry
-// match selects, keeping the comments on fields that remain, or appended.
+// match selects, keeping the comments on fields that remain, or appended. An
+// entry match selects in a fragment is refused, unless it is value already.
 func (d *Document) Upsert(seqKey string, match func(*yaml.Node) bool, value any) error {
 	node, err := encode(value)
 	if err != nil {
 		return err
+	}
+	if frag, have := d.fragmentEntry(seqKey, match); have != nil {
+		if sameValue(have, node) {
+			return nil
+		}
+		return &FragmentError{What: entryName(seqKey, have), Fragment: frag, Config: d.path}
 	}
 	seq := findOrCreateSeq(d.top(), seqKey)
 	for i, item := range seq.Content {
@@ -113,14 +176,98 @@ func (d *Document) Upsert(seqKey string, match func(*yaml.Node) bool, value any)
 	return nil
 }
 
-// Remove drops every entry of the top-level sequence seqKey that match
-// selects.
-func (d *Document) Remove(seqKey string, match func(*yaml.Node) bool) {
+// UpsertRepo adds entry to repos:, or updates the entry for its repo there
+// or in a fragment, which keeps naming the repo as it does: by url or by repo
+// key.
+func (d *Document) UpsertRepo(entry ManualRepo) error {
+	match := MatchesRepo(manualKey(entry))
+	var listed ManualRepo
+	if have := d.entry("repos", match); have != nil && have.Decode(&listed) == nil {
+		entry = entry.namedAs(listed)
+	}
+	return d.Upsert("repos", match, entry)
+}
+
+// entry is the entry of the sequence seqKey that match selects, in a
+// fragment or the config file; nil when there is none.
+func (d *Document) entry(seqKey string, match func(*yaml.Node) bool) *yaml.Node {
+	if _, node := d.fragmentEntry(seqKey, match); node != nil {
+		return node
+	}
 	seq := mappingValue(d.top(), seqKey)
 	if seq == nil || seq.Kind != yaml.SequenceNode {
-		return
+		return nil
+	}
+	if i := slices.IndexFunc(seq.Content, match); i >= 0 {
+		return seq.Content[i]
+	}
+	return nil
+}
+
+// Remove drops every entry of the top-level sequence seqKey that match
+// selects. One a fragment holds is refused: removing it here would leave it.
+func (d *Document) Remove(seqKey string, match func(*yaml.Node) bool) error {
+	if frag, have := d.fragmentEntry(seqKey, match); have != nil {
+		return &FragmentError{What: entryName(seqKey, have), Fragment: frag, Config: d.path}
+	}
+	seq := mappingValue(d.top(), seqKey)
+	if seq == nil || seq.Kind != yaml.SequenceNode {
+		return nil
 	}
 	seq.Content = slices.DeleteFunc(seq.Content, match)
+	return nil
+}
+
+// fragmentSetting is the first fragment that sets the dotted key, and its
+// value there.
+func (d *Document) fragmentSetting(key string) (string, *yaml.Node) {
+	for _, f := range d.fragments {
+		v := f.top
+		for _, p := range strings.Split(key, ".") {
+			if v = mappingValue(v, p); v == nil {
+				break
+			}
+		}
+		if v != nil {
+			return f.path, v
+		}
+	}
+	return "", nil
+}
+
+// fragmentEntry is the first fragment whose top-level sequence seqKey holds
+// an entry match selects, and that entry.
+func (d *Document) fragmentEntry(seqKey string, match func(*yaml.Node) bool) (string, *yaml.Node) {
+	for _, f := range d.fragments {
+		seq := mappingValue(f.top, seqKey)
+		if seq == nil || seq.Kind != yaml.SequenceNode {
+			continue
+		}
+		for _, item := range seq.Content {
+			if match(item) {
+				return f.path, item
+			}
+		}
+	}
+	return "", nil
+}
+
+// entryName names a sequence entry in an error: by its name, URL, repo key or
+// account.
+func entryName(seqKey string, entry *yaml.Node) string {
+	for _, field := range []string{"name", "url", "repo", "account"} {
+		if v := mappingValue(entry, field); v != nil && v.Kind == yaml.ScalarNode {
+			return fmt.Sprintf("%s entry %q", seqKey, v.Value)
+		}
+	}
+	return seqKey + " entry"
+}
+
+// sameValue reports whether two YAML values decode to the same thing,
+// however each is written.
+func sameValue(a, b *yaml.Node) bool {
+	var av, bv any
+	return a.Decode(&av) == nil && b.Decode(&bv) == nil && reflect.DeepEqual(av, bv)
 }
 
 // Named matches a sequence entry by its name field.
@@ -148,16 +295,23 @@ func (d *Document) Bytes() ([]byte, error) {
 	return yaml.Marshal(d.root)
 }
 
-// Save writes the document atomically, then loads it back so an invalid
-// config is never left in place without an error.
+// Check loads the config the document makes, with its fragments, without
+// writing it.
+func (d *Document) Check(ctx context.Context) (*Config, error) {
+	data, err := d.Bytes()
+	if err != nil {
+		return nil, err
+	}
+	return Load(ctx, d.path, withMainData(data))
+}
+
+// Save checks the config the document makes and then writes it atomically,
+// so an invalid config is never written.
 func (d *Document) Save(ctx context.Context) error {
-	if err := writeDocumentAtomic(d.path, d.root); err != nil {
-		return err
+	if _, err := d.Check(ctx); err != nil {
+		return fmt.Errorf("checking %s before writing it: %w", d.path, err)
 	}
-	if _, err := Load(ctx, d.path); err != nil {
-		return fmt.Errorf("config invalid after saving: %w", err)
-	}
-	return nil
+	return writeDocumentAtomic(d.path, d.root)
 }
 
 // Path is the file the document is saved to.

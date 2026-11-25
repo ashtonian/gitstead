@@ -1,5 +1,17 @@
 # gitstead configuration
 # Copy to ~/.config/gitstead/config.yaml
+#
+# Fragments: every *.yaml and *.yml file in config.d beside this file (not
+# hidden ones) is read after it, in byte order of its name, and merged with
+# it -- one per context, such as personal work and each client, each kept in
+# that context's own dotfiles and linked in. Any key below may go in one. A
+# setting, a section's key, or a named entry (accounts, providers, discovery,
+# sets, agents, workspaces, fleets; env and plugin names) is set in one file
+# only, two being an error; repos, overrides and exclude are added to in file
+# order; machines: sections merge by machine name, by the same rules. machine:
+# can't be set in a fragment. gitstead writes only this file, never a
+# fragment, and `gitstead config` names every file it read. See
+# docs/CONFIGURATION.md, Config fragments, and examples/fragments.
 
 # Where to clone repos. Supports ~ expansion.
 base_dir: "~/repos"
@@ -23,6 +35,8 @@ path_template: "{{.Host}}/{{.Owner}}/{{.Name}}"
 #   https - uses git's own credential helper for auth (e.g. `gh auth setup-git`,
 #           osxkeychain, or a PAT via the manager) -- gitstead does not store
 #           credentials. Override per repo set under `overrides:`.
+# It applies to discovered repos and to repos: entries given by repo key; a
+# url: entry keeps its URL's transport.
 clone_protocol: "ssh"
 
 # Max concurrent git operations: fetches, backups, and the clones and other
@@ -182,6 +196,15 @@ discovery:
 # Individual repos to manage without discovery rules.
 # Useful for one-off repos that don't fit any discovery pattern.
 
+# Each names its repo by exactly one of:
+#   url:  cloned from that URL, over its own transport (an https:// URL over
+#         HTTPS whatever clone_protocol says); any URL git takes, a custom port
+#         or path prefix included.
+#   repo: its key, host/owner/name, cloned over clone_protocol (an override's,
+#         else the top level's) from git@host:owner/name.git or
+#         https://host/owner/name.git. A host whose URLs differ from those
+#         needs url.
+
 repos: []
   # - url: "git@github.com:someone/useful-fork.git"
   #   tags: ["libs"]
@@ -191,6 +214,8 @@ repos: []
   #
   # - url: "git@gitlab.com:other-org/special-project.git"
   #   tags: ["work"]
+  #
+  # - repo: github.com/acme/CamelCase   # SSH or HTTPS as clone_protocol says
 
 # A shared file of repos tracked by hand -- cloned, adopted, imported -- that
 # every machine reads as more repos: entries and gitstead keeps up to date:
@@ -729,9 +754,15 @@ launchers:
 # <name> config` shows another machine's.
 #
 # A section sets:
-#   base_dir             replaces the top-level one.
+#   base_dir, clone_protocol
+#                        replace the top-level ones. clone_protocol is the
+#                        transport of discovered repos and repo-key entries
+#                        that no override's clone_protocol covers.
 #   workspace_defaults   each key it sets replaces the top-level one; env adds
 #                        its names to the top level's.
+#   backup               each key it sets replaces the top-level one; any
+#                        backup key, archive_dir and patch_dir included.
+#                        An override's backup keys still win for its repos.
 #   overrides, repos, discovery
 #                        added after the top-level lists, so an override here
 #                        wins over a top-level one for the same repos.
@@ -756,5 +787,9 @@ machines: {}
   #     - name: app
   #       agents: 6
   # laptop:
+  #   clone_protocol: https           # no SSH key on the forge from here
   #   workspace_defaults:
   #     agents: 1
+  #   backup:
+  #     archive_dir: ~/archive/gitstead
+  #     patch_dir: ~/archive/gitstead-patches

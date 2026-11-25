@@ -17,8 +17,10 @@ Runs on **macOS and Linux**. Requires `git` on `PATH`.
 - **Parallel coding agents.** Give each agent its own branch and worktree or
   clone, then open them side by side with tmux, iTerm or Muxy.
 - **Portable setup.** Share one configuration and a manifest across
-  machines, with a section per machine for its own drives, agents and repos;
-  preview configuration changes with `plan` before applying them.
+  machines, with a section per machine for its own drives, agents and repos,
+  and a fragment per context in `config.d` -- personal work, each client --
+  kept in that context's own dotfiles; preview configuration changes with
+  `plan` before applying them.
 - **Bounded upkeep.** Sync clears the half-written packs interrupted fetches
   leave behind, runs git's maintenance, and prunes old archives.
 

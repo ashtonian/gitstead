@@ -1,0 +1,23 @@
+# The base every context shares, kept in public dotfiles: where clones and
+# workspaces go, and how sync treats them. It names no account or repo.
+# Each file in config.d beside it adds one context's own (see config.d/), and
+# gitstead merges them all into one config: a setting or named entry in one
+# file only, lists added to in file order.
+base_dir: ~/code
+layout: owner/name
+
+sync:
+  update: ff-only-clean       # fast-forward clean clones after each fetch
+
+workspace_defaults:
+  root: ~/workspaces
+  agents: 2
+
+machines:
+  desktop:
+    base_dir: /Volumes/Fast/code
+    workspace_defaults:
+      root: /Volumes/Fast/workspaces
+  laptop:
+    workspace_defaults:
+      agents: 1

@@ -105,7 +105,11 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 	}
 
 	if !c.Apply {
-		printPreviewNext(cfg, st, plan, safe)
+		others, err := unmanagedHere(ctx, st, "")
+		printPreviewNext(cfg, st, others, plan, safe)
+		if err != nil {
+			fmt.Printf("(Looking for a background sync another tool installed: %v)\n", err)
+		}
 		return ctx.finish(doc, nil)
 	}
 	fmt.Printf("State updated: %d repos tracked.\n", len(st.Repos))
@@ -114,8 +118,8 @@ func (c *DiscoverCmd) Run(ctx *Context) error {
 
 // printPreviewNext says that a preview changed nothing, what would make its
 // changes, and whether anything will without being asked: a background sync
-// applies what reconcile.auto allows.
-func printPreviewNext(cfg *config.Config, st *state.State, p *reconcile.Plan, safe int) {
+// applies what reconcile.auto allows, gitstead's or one others installed.
+func printPreviewNext(cfg *config.Config, st *state.State, others []scheduler.Definition, p *reconcile.Plan, safe int) {
 	if len(p.Actions) == 0 {
 		return
 	}
@@ -134,13 +138,16 @@ func printPreviewNext(cfg *config.Config, st *state.State, p *reconcile.Plan, sa
 	fmt.Println("  gitstead setup              changes which repos are tracked")
 	fmt.Println("  gitstead clone --org <org> --name <word> --save <rule>")
 	fmt.Println("                            tracks more, showing what it finds first")
-	if len(st.Schedules) == 0 {
+	if len(st.Schedules) == 0 && len(others) == 0 {
 		fmt.Println("No background sync is installed, so nothing changes until you run one of these.")
 		return
 	}
 	var every []string
 	for _, name := range slices.Sorted(maps.Keys(st.Schedules)) {
 		every = append(every, fmt.Sprintf("%s every %s", name, scheduler.FormatInterval(st.Schedules[name].Interval)))
+	}
+	for _, other := range others {
+		every = append(every, other.Job()+", another tool's")
 	}
 	auto := reconcile.AutoFilter(cfg.Reconcile.Auto)
 	bySync := 0

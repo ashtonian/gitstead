@@ -1,8 +1,9 @@
 # Example configs
 
 Each file here is a complete config for one way of using gitstead, short
-enough to read in a minute. Every one is loaded and validated by gitstead's
-tests, so they stay correct.
+enough to read in a minute, and [fragments/](fragments) is a config directory:
+a `config.yaml` and the fragments in its `config.d`. Every one is loaded and
+validated by gitstead's tests, so they stay correct.
 
 | Example | For |
 | --- | --- |
@@ -14,12 +15,14 @@ tests, so they stay correct.
 | [agents.yaml](agents.yaml) | Coding agents in workspaces, opened side by side in tmux. |
 | [safety-net.yaml](safety-net.yaml) | Backups, offsite copies, mirrors, and archiving instead of deleting. |
 | [machines.yaml](machines.yaml) | One config for several machines, each with its own drives, agents and repos. |
+| [fragments/](fragments) | One config from several files: a shared base and a fragment per context -- personal work, a client's -- each from its own dotfiles. |
 
 Preview any of them without changing anything, then make it yours:
 
 ```bash
 gitstead --config examples/searches.yaml discover    # what its rules find, and where each repo goes
 gitstead --config examples/agents.yaml plan          # everything it would clone and create
+gitstead --config examples/fragments/config.yaml config | head -1   # the files it merges
 cp examples/personal.yaml ~/.config/gitstead/config.yaml   # or let `gitstead setup` write one
 ```
 
@@ -184,9 +187,9 @@ differs on its machine. On the desktop:
 
 ```
 $ gitstead config | head -3
+# Files read, in merge order: ~/.config/gitstead/config.yaml
 # Machine "desktop": its machines: section is applied below (sections: desktop, laptop).
 base_dir: /Volumes/Fast/code
-layout: owner/name
 ```
 
 ```
@@ -202,3 +205,42 @@ desktop                                       laptop
 
 A machine with no section of its own -- a new one -- gets the top level, and
 `gitstead doctor` notes it.
+
+## fragments/: one config from several files
+
+[`config.yaml`](fragments/config.yaml) is the base every context shares --
+layout, sync, workspace defaults, each machine's drives -- and names no
+account and no repo, so it can live in public dotfiles.
+[`config.d/personal.yaml`](fragments/config.d/personal.yaml) and
+[`config.d/work.yaml`](fragments/config.d/work.yaml) each add one context's
+accounts, repos and workspaces, with `machines:` sections of their own, and
+would each be linked in from that context's private dotfiles. gitstead merges
+the three:
+
+```
+$ gitstead --machine desktop config | head -3
+# Files read, in merge order: ~/.config/gitstead/config.yaml, ~/.config/gitstead/config.d/personal.yaml, ~/.config/gitstead/config.d/work.yaml
+# Machine "desktop": its machines: section is applied below (sections: desktop, laptop).
+base_dir: /Volumes/Fast/code
+```
+
+The desktop's section comes from all three files: its drive from the base,
+the app workspace's agents from `personal.yaml`, and where acme's repos and
+workspace go from `work.yaml`. `gitstead plan` on each machine:
+
+```
+desktop                                        laptop
+-------                                        ------
+/Volumes/Fast/code/your-login/app              ~/code/your-login/app
+/Volumes/Fast/code/your-login/dotfiles         ~/code/your-login/dotfiles
+/Volumes/Bulk/code/acme/api                    ~/work/acme/api
+/Volumes/Bulk/code/acme/web                    ~/work/acme/web
+/Volumes/Fast/workspaces/app     4 agents      ~/workspaces/app    1 agent
+/Volumes/Bulk/workspaces/acme    3 agents      ~/workspaces/acme   1 agent
+```
+
+Each fact is in one file: a second file setting `base_dir`, or defining an
+account named `work` again, stops gitstead with `base_dir is set in both
+<config.yaml> and <the fragment>: each setting may be set in only one file`,
+naming both files in full. See [Config
+fragments](../docs/CONFIGURATION.md#config-fragments).

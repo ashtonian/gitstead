@@ -1,0 +1,32 @@
+# One client's work, from that client's overlay alone, linked in as
+# ~/.config/gitstead/config.d/work.yaml. Nothing here appears in the other
+# files, and nothing of theirs here.
+accounts:
+  - name: work
+    hosts: [github.com]
+    owners: [acme]
+    ssh_key: ~/.ssh/id_work
+    git: { name: Your Name, email: you@acme.example }
+    signing: { mode: required, key: ~/.ssh/id_work.pub }
+
+repos:
+  - url: git@github.com:acme/api.git
+  - url: git@github.com:acme/web.git
+
+overrides:
+  - repos: ["github.com/acme/*"]
+    base_dir: ~/work         # the client's repos apart from yours
+
+workspaces:
+  - name: acme
+    repos: [github.com/acme/api, github.com/acme/web]
+
+machines:
+  desktop:
+    overrides:
+      - repos: ["github.com/acme/*"]
+        base_dir: /Volumes/Bulk/code
+    workspaces:
+      - name: acme
+        root: /Volumes/Bulk/workspaces
+        agents: 3

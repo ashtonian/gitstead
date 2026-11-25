@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/ashtonian/gitstead/internal/config"
@@ -156,11 +155,20 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 		}
 	}
 
-	// Include manual repos from config
-	for _, mr := range cfg.Repos {
+	if err := addManualRepos(cfg.Repos, tagFilter, discovered); err != nil {
+		return nil, nil, err
+	}
+	return results, discovered, nil
+}
+
+// addManualRepos adds repos: entries, those with tagFilter when it is set, to
+// what the rules discovered. An entry for a repo a rule found replaces it,
+// keeping that rule as its discoverer and adding the entry's tags.
+func addManualRepos(entries []config.ManualRepo, tagFilter string, discovered map[string]Repo) error {
+	for _, mr := range entries {
 		parsed, err := parseManualRepo(mr)
 		if err != nil {
-			return nil, nil, fmt.Errorf("manual repo %q: %w", mr.URL, err)
+			return fmt.Errorf("manual repo %q: %w", mr.Ref(), err)
 		}
 		if tagFilter != "" && !hasTag(parsed.Tags, tagFilter) {
 			continue
@@ -173,8 +181,7 @@ func RunDiscovery(ctx context.Context, cfg *config.Config, ruleFilter, tagFilter
 		}
 		discovered[parsed.Key()] = *parsed
 	}
-
-	return results, discovered, nil
+	return nil
 }
 
 // applyFilters runs the client-side portion of discovery: it skips filters the
@@ -234,14 +241,15 @@ func applyFilters(ctx context.Context, provider Provider, res ProviderResult, ru
 	return repos, warnings, incomplete
 }
 
-// parseManualRepo converts a ManualRepo config entry into a Repo. It accepts any
-// URL form git does (ssh, scp, https, git://, local) via repourl.Parse and
-// records it under the matching transport, so a `repos:` entry given as https is
-// cloned over https -- the URL's scheme decides, no clone_protocol needed.
+// parseManualRepo converts a ManualRepo config entry into a Repo. A url is any
+// form git takes (ssh, scp, https, git://, local), recorded under its own
+// transport, so an entry given as https is cloned over https whatever
+// clone_protocol says. A repo key gets both conventional URLs, as a provider
+// gives a discovered repo, so clone_protocol chooses between them.
 func parseManualRepo(mr config.ManualRepo) (*Repo, error) {
-	id, err := repourl.Parse(mr.URL)
+	id, err := mr.Identity()
 	if err != nil {
-		return nil, fmt.Errorf("%q: %w", mr.URL, err)
+		return nil, err
 	}
 	r := &Repo{
 		Host:         id.Host,
@@ -252,9 +260,12 @@ func parseManualRepo(mr config.ManualRepo) (*Repo, error) {
 		DiscoveredBy: ManualRule,
 		Path:         mr.Path,
 	}
-	if strings.HasPrefix(mr.URL, "http://") || strings.HasPrefix(mr.URL, "https://") {
+	switch {
+	case mr.Repo != "":
+		r.SSHURL, r.HTTPURL = id.SSHURL, id.HTTPSURL()
+	case repourl.IsHTTP(mr.URL):
 		r.HTTPURL = mr.URL
-	} else {
+	default:
 		r.SSHURL = mr.URL
 	}
 	return r, nil

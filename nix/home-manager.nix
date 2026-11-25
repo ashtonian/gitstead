@@ -1,5 +1,6 @@
-# home-manager module for gitstead: the package, its config, and named
-# background syncs as systemd user timers (Linux) or launchd agents (macOS).
+# home-manager module for gitstead: the package, its config and config
+# fragments, and named background syncs as systemd user timers (Linux) or
+# launchd agents (macOS).
 #
 # `gitstead install-agent` refuses a binary in /nix/store, which moves on every
 # upgrade and is garbage-collected after; here the units are rebuilt with the
@@ -32,9 +33,19 @@ let
     else if i.n < 24 then "*-*-* 00/${toString i.n}:00:00"
     else "*-*-* 00:00:00";
 
+  # A fragment's file in config.d. gitstead skips hidden files, and a slash
+  # would leave the directory.
+  fragmentFile = name:
+    if builtins.match "[A-Za-z0-9][A-Za-z0-9._-]*" name != null then "${name}.yaml"
+    else throw "programs.gitstead.fragments.\"${name}\": a fragment's name is its file name in config.d: letters, digits, '.', '-' and '_', starting with a letter or digit";
+
   # The unit or agent name: gitstead for the default schedule, else
   # gitstead-<name>, as install-agent names them.
   unitName = name: if name == "default" then "gitstead" else "gitstead-${name}";
+
+  # The launchd label, which names the agent's plist: install-agent's, so
+  # gitstead knows the agent as a schedule another tool installed.
+  launchdLabel = name: if name == "default" then "com.ashtonian.gitstead" else "com.ashtonian.gitstead.${name}";
 
   globalArgs =
     lib.optionals (cfg.configFile != null) [ "--config" cfg.configFile ]
@@ -123,6 +134,28 @@ in
       '';
     };
 
+    fragments = mkOption {
+      type = types.attrsOf yaml.type;
+      default = { };
+      example = lib.literalExpression ''
+        {
+          work = {
+            accounts = [ { name = "work"; hosts = [ "github.com" ]; owners = [ "acme" ]; } ];
+            machines.desktop.overrides = [ { repos = [ "github.com/acme/*" ]; base_dir = "/Volumes/Bulk/code"; } ];
+          };
+        }
+      '';
+      description = ''
+        Config fragments, each written to
+        ~/.config/gitstead/config.d/<name>.yaml and merged with config.yaml,
+        in name order: a setting or named entry in one file only, lists
+        added to (docs/CONFIGURATION.md, Config fragments). A module per
+        context -- personal, each client -- can each add its own. gitstead
+        reads the config.d beside the config file in use, so with
+        configFile elsewhere these are not read there.
+      '';
+    };
+
     configFile = mkOption {
       type = types.nullOr types.str;
       default = null;
@@ -190,6 +223,12 @@ in
       };
     }
 
+    {
+      xdg.configFile = lib.mapAttrs' (name: settings: lib.nameValuePair "gitstead/config.d/${fragmentFile name}" {
+        source = yaml.generate "gitstead-fragment-${name}.yaml" settings;
+      }) cfg.fragments;
+    }
+
     (mkIf pkgs.stdenv.hostPlatform.isLinux {
       systemd.user.services = lib.mapAttrs' (name: s: lib.nameValuePair (unitName name) {
         Unit.Description = "gitstead sync (${name})";
@@ -217,6 +256,7 @@ in
       launchd.agents = lib.mapAttrs' (name: s: lib.nameValuePair (unitName name) {
         enable = true;
         config = {
+          Label = launchdLabel name;
           ProgramArguments = argv s;
           EnvironmentVariables = environment s;
           StartInterval = (parseInterval name s.interval).seconds;

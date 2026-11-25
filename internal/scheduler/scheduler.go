@@ -18,8 +18,12 @@ import (
 	"github.com/ashtonian/gitstead/internal/shellutil"
 )
 
-// labelPrefix names every schedule's launchd label and crontab marker.
-const labelPrefix = "com.ashtonian.gitstead"
+// labelPrefix names every schedule's launchd label and crontab marker, and
+// unitPrefix its systemd units.
+const (
+	labelPrefix = "com.ashtonian.gitstead"
+	unitPrefix  = "gitstead"
+)
 
 // DefaultName is the schedule installed when none is named.
 const DefaultName = "default"
@@ -94,19 +98,39 @@ func (s Schedule) Validate() error {
 }
 
 // Label is the schedule's launchd label and crontab marker.
-func (s Schedule) Label() string {
-	if s.Name == DefaultName {
-		return labelPrefix
-	}
-	return labelPrefix + "." + s.Name
-}
+func (s Schedule) Label() string { return namedID(labelPrefix, ".", s.Name) }
 
 // unit is the schedule's systemd unit name, without the suffix.
-func (s Schedule) unit() string {
-	if s.Name == DefaultName {
-		return "gitstead"
+func (s Schedule) unit() string { return namedID(unitPrefix, "-", s.Name) }
+
+// Job is what the scheduler calls the schedule: its launchd label or crontab
+// marker, or its systemd timer.
+func (s Schedule) Job() string {
+	if s.Kind == Systemd {
+		return s.unit() + ".timer"
 	}
-	return "gitstead-" + s.Name
+	return s.Label()
+}
+
+// namedID is the default schedule's prefix, and any other's prefix, sep and
+// name.
+func namedID(prefix, sep, name string) string {
+	if name == DefaultName {
+		return prefix
+	}
+	return prefix + sep + name
+}
+
+// nameOfID is the schedule name whose namedID is id, if id is one.
+func nameOfID(prefix, sep, id string) (string, bool) {
+	if id == prefix {
+		return DefaultName, true
+	}
+	name, ok := strings.CutPrefix(id, prefix+sep)
+	if !ok || name == DefaultName || !validName.MatchString(name) {
+		return "", false
+	}
+	return name, true
 }
 
 // Every is the interval as people write it: 15m, 2h.
@@ -122,21 +146,6 @@ func (s Schedule) Argv() []string {
 	args := append([]string{s.Bin}, s.Global...)
 	args = append(args, "sync", "--quiet")
 	return append(args, s.Sync...)
-}
-
-// Files are where the schedule's definition lives; cron keeps it in the
-// crontab instead.
-func (s Schedule) Files(home string) []string {
-	switch {
-	case s.Kind == Launchd && s.Daemon:
-		return []string{filepath.Join("/Library/LaunchDaemons", s.Label()+".plist")}
-	case s.Kind == Launchd:
-		return []string{filepath.Join(home, "Library", "LaunchAgents", s.Label()+".plist")}
-	case s.Kind == Systemd:
-		dir := filepath.Join(home, ".config", "systemd", "user")
-		return []string{filepath.Join(dir, s.unit()+".service"), filepath.Join(dir, s.unit()+".timer")}
-	}
-	return nil
 }
 
 // ValidInterval reports whether a sync can be scheduled every d: d must

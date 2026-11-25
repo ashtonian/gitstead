@@ -4,6 +4,7 @@
 
 - [Logging and notifications](#logging-and-notifications)
 - [Installing a schedule](#installing-a-schedule)
+- [A schedule another tool manages](#a-schedule-another-tool-manages)
 - [With Nix: home-manager](#with-nix-home-manager)
 
 `gitstead sync` is built to run unattended. Only one sync runs at a time; a
@@ -90,7 +91,9 @@ Each schedule has a name (`default` unless you give one) and its own
 selection of repos, so a work schedule and a personal one live side by side;
 installing a name again replaces it. `bootstrap --profile work` installs a
 `work` schedule that syncs `--tag work`. Schedules are recorded in the state
-file, and `gitstead doctor` checks each one.
+file, and `gitstead doctor` checks each one. One of the name that another
+tool installed is left alone ([A schedule another tool
+manages](#a-schedule-another-tool-manages)).
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -102,6 +105,7 @@ file, and `gitstead doctor` checks each one.
 | `--daemon` | off | macOS: a LaunchDaemon that runs as you while nobody is logged in. Installed with `sudo`. |
 | `--linger` | off | Linux: `loginctl enable-linger`, so the timer runs while you are logged out. |
 | `--log` | `~/.local/share/gitstead/gitstead.log` | Output of launchd and cron runs; systemd runs log to the journal (`journalctl --user -u gitstead`). |
+| `--force` | off | Replace a schedule of this name another tool installed, or with `--uninstall` remove it. |
 
 What install does, so a background run behaves like one from your shell:
 
@@ -130,6 +134,50 @@ What install does, so a background run behaves like one from your shell:
   file before each change. Only lines ending in the schedule's own marker
   (`# com.ashtonian.gitstead[.<name>]`) are touched.
 
+## A schedule another tool manages
+
+A config manager -- a dotfiles repo, home-manager, Ansible -- may own the
+background sync instead of `install-agent`: it writes the launchd agent,
+systemd units or crontab line itself, often to run sync through a wrapper
+(`flock -n /tmp/gitstead.lock gitstead sync --quiet`, say). gitstead knows
+such a job by the names `install-agent` gives its own, and knows its own from
+the state file's `schedules:`:
+
+| Scheduler | `default` schedule | Schedule `<name>` |
+| --- | --- | --- |
+| launchd agent | `~/Library/LaunchAgents/com.ashtonian.gitstead.plist` | `~/Library/LaunchAgents/com.ashtonian.gitstead.<name>.plist` |
+| launchd daemon | `/Library/LaunchDaemons/com.ashtonian.gitstead.plist` | `/Library/LaunchDaemons/com.ashtonian.gitstead.<name>.plist` |
+| systemd user units | `~/.config/systemd/user/gitstead.service`, `gitstead.timer` | `gitstead-<name>.service`, `gitstead-<name>.timer` |
+| crontab | a line ending `# com.ashtonian.gitstead` | a line ending `# com.ashtonian.gitstead.<name>` |
+
+A job at one of these that state doesn't record as gitstead's -- of that name
+and scheduler -- is another tool's, and gitstead leaves it alone:
+
+- **`install-agent`** refuses, naming it, and changes nothing:
+  `background sync com.ashtonian.gitstead is installed by another tool
+  (~/Library/LaunchAgents/com.ashtonian.gitstead.plist), which manages it:
+  gitstead has no record of installing it, so it leaves it alone; --force
+  replaces it`. With `--force` it is replaced -- written over, or, in another
+  scheduler, removed -- and the new one is gitstead's. `install-agent
+  --uninstall` refuses the same way; `--force` removes it.
+- **`setup`** doesn't ask about a background sync, installs none and removes
+  none, and says it left the other tool's alone. **`bootstrap`** skips its
+  `install-agent` step, saying why, and finishes without it.
+- **`doctor`** reports it, and checks nothing of it -- what it runs and in
+  what environment are its owner's:
+  `-- background sync com.ashtonian.gitstead is installed by another tool
+  (~/Library/LaunchAgents/com.ashtonian.gitstead.plist); doctor does not
+  check its environment`. Check it with the scheduler (`launchctl print
+  gui/$(id -u)/com.ashtonian.gitstead`, `systemctl --user status
+  gitstead.timer`) and its own log.
+- **`discover`**'s preview counts it among the background syncs that apply
+  changes on their next run.
+
+Give the job one of these names so gitstead sees it; under another name
+gitstead knows nothing of it, and `install-agent` would add a second sync
+beside it. To hand the job back to gitstead, remove it from the tool that
+owns it and run `gitstead install-agent`.
+
 ## With Nix: home-manager
 
 `install-agent` refuses a binary in `/nix/store`; with home-manager, declare
@@ -149,6 +197,7 @@ The flake exposes the module as `homeManagerModules.default`:
     schedules.default.interval = "15m";
     schedules.work = { interval = "5m"; tag = "work"; };
     settings = { base_dir = "~/projects"; layout = "owner/name"; };   # optional
+    fragments.work = { accounts = [ { name = "work"; hosts = [ "github.com" ]; owners = [ "acme" ]; } ]; };  # optional
   };
 }
 ```
@@ -158,6 +207,7 @@ The flake exposes the module as `homeManagerModules.default`:
 | `enable` | `false` | Install gitstead and its schedules. |
 | `package` | required | The gitstead package. |
 | `settings` | `{}` | Written to `~/.config/gitstead/config.yaml` when set; the file is then read-only, so `setup` and `ws create --save` can't edit it. |
+| `fragments.<name>` | none | Written to `~/.config/gitstead/config.d/<name>.yaml` and merged with `config.yaml` ([Config fragments](CONFIGURATION.md#config-fragments)). Names are letters, digits, `.`, `-` and `_`, starting with a letter or digit. Read only beside the default config file, not one `configFile` names elsewhere. |
 | `configFile`, `stateFile` | gitstead's defaults | Passed to the schedules as `--config`, `--state`. |
 | `path` | `[ git openssh ]` | The schedules' `PATH`, with gitstead itself. |
 | `sshAuthSock` | none | The schedules' `SSH_AUTH_SOCK` (systemd specifiers work). |
@@ -166,10 +216,12 @@ The flake exposes the module as `homeManagerModules.default`:
 
 Each schedule is a systemd user service and timer (`gitstead` for `default`,
 else `gitstead-<name>`) with `OnCalendar=`, `Persistent=true`, `Nice=10` and
-idle I/O on Linux, and a launchd agent with the same priority on macOS: the
-units `install-agent` writes. `gitstead doctor` checks only schedules
-`install-agent` recorded; check these with `systemctl --user list-timers` or
-`launchctl list`.
+idle I/O on Linux, and a launchd agent labelled `com.ashtonian.gitstead` (else
+`com.ashtonian.gitstead.<name>`) with the same priority on macOS: the units
+`install-agent` writes, under the same names, so gitstead treats them
+as [another tool's](#a-schedule-another-tool-manages): `install-agent` and
+`setup` leave them alone, and `gitstead doctor` reports them without checking
+them; check them with `systemctl --user list-timers` or `launchctl list`.
 
 `gitstead doctor` checks each recorded schedule: still installed, its binary
 present, lingering on (systemd), and it runs its own checks again in the

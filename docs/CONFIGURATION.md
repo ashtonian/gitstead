@@ -7,9 +7,12 @@
 - [Manual repos, excludes, overrides, tags](#manual-repos-excludes-overrides-tags)
 - [Several machines](#several-machines)
   - [Per-machine sections](#per-machine-sections)
+- [Config fragments](#config-fragments)
 - [Upkeep](#upkeep)
 
-Config lives at `~/.config/gitstead/config.yaml`. [`examples/`](../examples) has
+Config lives at `~/.config/gitstead/config.yaml`, with any fragments in
+`~/.config/gitstead/config.d/` merged into it ([Config
+fragments](#config-fragments)). [`examples/`](../examples) has
 short, complete configs for common setups -- searches and filters, two
 accounts, self-hosted forges, agents, a full safety net -- with what each one
 produces; [`config.example.yaml`](../config.example.yaml) is the fully annotated
@@ -154,7 +157,33 @@ repos:
   - url: "git@github.com:me/notes.git"
     path: "~/notes"                    # not where path_template puts it: absolute,
                                        # ~-relative, or relative to its base_dir
+  - repo: github.com/acme/CamelCase     # by key: cloned over clone_protocol
+```
 
+Each entry names its repo by exactly one of `url` and `repo`; any other key it
+has (`tags`, `path`, `account`, `ssh_key`) means the same for both.
+
+- **`url`** is cloned from that URL, over its own transport: an `https://` URL
+  over HTTPS whatever `clone_protocol` says. Any URL git takes works: a custom
+  port (`ssh://git@ghes.example.com:2222/team/svc.git`), a path prefix, a local
+  path.
+- **`repo`** is the repo's key, `host/owner/name` (a GitLab owner may be
+  `group/subgroup`), and is cloned over the transport a discovered repo would
+  be: a matching override's `clone_protocol`, else the top-level one, from
+  `git@<host>:<owner>/<name>.git` or `https://<host>/<owner>/<name>.git`, the
+  key's case kept. So one list shared by several machines clones over SSH on
+  one and HTTPS on another, as each machine's section sets it. Those are the URLs providers give and clones
+  record, so changing an entry from `url` to `repo` changes nothing in `plan`.
+  A host whose URLs don't follow them -- SSH on another port, a path prefix
+  before the owner -- needs `url`.
+
+The entries gitstead writes -- `manifest export`, the shared manifest's
+entries for repos you clone or adopt, `manifest save` -- name their repo by
+`url`; `manifest import` keeps an entry as the imported file names it. An
+update to an entry that's already there, in `repos:` or the shared manifest,
+keeps naming the repo as the entry does, so a `repo` entry stays one.
+
+```yaml
 # Skip repos even if a rule matched them.
 exclude:
   - name_pattern: "^deprecated-"                # a regular expression on the name
@@ -275,11 +304,14 @@ machines:
     workspaces:
       - { name: app, agents: 6 }
   laptop:
+    clone_protocol: https              # its SSH key isn't on the forge
     workspace_defaults: { agents: 1 }
+    backup: { archive_dir: ~/archive/gitstead, patch_dir: ~/archive/patches }
 ```
 
 A machine's name is `machine:` -- set it with `GITSTEAD_MACHINE` or
-`--machine`, not in a file every machine reads -- and without it, on macOS
+`--machine`, not in a file every machine reads (a [fragment](#config-fragments)
+can't set it) -- and without it, on macOS
 the local host name (System Settings > General > Sharing, which DHCP doesn't
 change), elsewhere the host name up to its first dot. Section names match it
 ignoring case, and are letters, digits, `-` and `_`.
@@ -287,7 +319,9 @@ ignoring case, and are letters, digits, `-` and `_`.
 | Key in a section | How it applies |
 | --- | --- |
 | `base_dir` | Replaces the top-level one. |
+| `clone_protocol` | Replaces the top-level one: the transport of discovered repos and [`repo` entries](#manual-repos-excludes-overrides-tags) no override's `clone_protocol` covers. A `url` entry keeps its URL's. |
 | `workspace_defaults` | Each key it sets replaces the top-level one; `env` adds its names to the top level's, replacing those it shares. |
+| `backup` | Each key it sets replaces the top-level one: any [backup key](BACKUPS.md), `archive_dir` and `patch_dir` included. An override's `backup` keys still win for the repos it covers. |
 | `overrides`, `repos`, `discovery` | Added after the top-level entries. Overrides apply in order, so a section's override wins over a top-level one for the same repos. |
 | `workspaces` | An entry with a top-level workspace's name changes the keys it sets of that one -- `repos`, `set` and `path` replace each other together; `env` adds names -- and keeps the rest. A new name is a workspace on this machine only. |
 | `fleets` | As workspaces: by name, the keys it sets; a new name is this machine's own. |
@@ -301,14 +335,193 @@ so a mistake in the laptop's section shows on the desktop too.
 
 A machine with no section of its own gets the top-level settings: a new
 machine works before it has one, and `gitstead doctor` notes it. `gitstead
-config` prints the settings in effect, headed by the machine and the section
-it took; `gitstead --machine laptop config` (or `plan`) shows another
+config` prints the settings in effect, headed by the files it read and then
+the machine and the section it took; `gitstead --machine laptop config` (or
+`plan`) shows another
 machine's without going there.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `machine` | this machine's name | The section to lay over the rest; `GITSTEAD_MACHINE`, `--machine`. |
-| `machines` | `{}` | Each machine's own settings, by name: `base_dir`, `workspace_defaults`, `overrides`, `repos`, `discovery`, `workspaces`, `fleets`. |
+| `machines` | `{}` | Each machine's own settings, by name: `base_dir`, `clone_protocol`, `workspace_defaults`, `backup`, `overrides`, `repos`, `discovery`, `workspaces`, `fleets`. |
+
+## Config fragments
+
+One machine can hold work from several contexts -- your own, and each
+client's -- whose repos, accounts and workspaces must each live in that
+context's own private dotfiles, never in another's. One `config.yaml` would
+have to hold them all. Instead, each context keeps a fragment: a YAML file in
+`config.d` beside the config file, which gitstead reads with it and merges
+into one config. A public dotfiles repo links a generic `config.yaml`, and
+each context's private overlay links its own fragment:
+
+```
+~/.config/gitstead/
+  config.yaml          -> ~/dotfiles/gitstead/config.yaml              the shared base: layout, sync, defaults
+  config.d/
+    personal.yaml      -> ~/dotfiles-personal/gitstead/personal.yaml   your accounts, repos and workspaces
+    work.yaml          -> ~/dotfiles-work/gitstead/work.yaml           one client's, and nothing else
+```
+
+Every file is a config file in its own right -- any key, `machines:`
+sections included -- so each context says where its repos and workspaces go
+on each machine. [`examples/fragments`](../examples/fragments) is a complete
+set:
+
+```yaml
+# config.yaml: names no account and no repo.
+base_dir: ~/code
+layout: owner/name
+sync:
+  update: ff-only-clean
+workspace_defaults:
+  root: ~/workspaces
+  agents: 2
+machines:
+  desktop:
+    base_dir: /Volumes/Fast/code
+    workspace_defaults:
+      root: /Volumes/Fast/workspaces
+  laptop:
+    workspace_defaults:
+      agents: 1
+```
+
+```yaml
+# config.d/personal.yaml
+accounts:
+  - name: personal
+    hosts: [github.com]
+    owners: [your-login]
+    ssh_key: ~/.ssh/id_personal
+repos:
+  - url: git@github.com:your-login/app.git
+workspaces:
+  - name: app
+    repos: [github.com/your-login/app]
+machines:
+  desktop:
+    workspaces:
+      - name: app
+        agents: 4
+```
+
+```yaml
+# config.d/work.yaml
+accounts:
+  - name: work
+    hosts: [github.com]
+    owners: [acme]
+    ssh_key: ~/.ssh/id_work
+repos:
+  - url: git@github.com:acme/api.git
+overrides:
+  - repos: ["github.com/acme/*"]
+    base_dir: ~/work
+workspaces:
+  - name: acme
+    repos: [github.com/acme/api]
+machines:
+  desktop:
+    overrides:
+      - repos: ["github.com/acme/*"]
+        base_dir: /Volumes/Bulk/code
+    workspaces:
+      - name: acme
+        root: /Volumes/Bulk/workspaces
+        agents: 3
+```
+
+On the desktop, acme's repos go to `/Volumes/Bulk/code` and its workspace has
+three agents; on the laptop they go to `~/work`, every workspace with one.
+Neither fragment mentions the other, and the base mentions neither.
+
+**Which files.** The fragments are the files in `config.d` beside the config
+file in use -- the default `~/.config/gitstead/config.yaml`, or the one
+`--config` or `GITSTEAD_CONFIG` names, whose own `config.d` is read -- whose
+names end in `.yaml` or `.yml`, without hidden ones (a leading `.`). They are
+read after `config.yaml`, in byte order of their names (`B.yaml` before
+`a.yaml`; prefix names with numbers to choose the order). Links are followed,
+to a fragment and to `config.d` itself. Anything else in `config.d` is left
+alone. When only fragments exist, they are the config; a file `--config` or
+`GITSTEAD_CONFIG` names must still exist. A `config.d` or fragment that can't
+be read -- a broken link, a fragment that is a directory, a directory you
+can't list -- is an error, never a config without it.
+
+**Checks.** Each file must parse and hold only settings, checked on its own,
+so an error names the file it is in:
+`config /Users/you/.config/gitstead/config.d/work.yaml is invalid: "sync.timout_per_repo" is not a setting (did you mean "sync.timeout_per_repo"?)`.
+Everything else is checked once, on the merged config, so a fragment may name
+an account, profile or provider another file defines, and an error there
+names every file read.
+
+**How the files merge.** Each fact comes from one file: nothing set in one
+file is silently replaced by another.
+
+| What | Keys | Merge |
+| --- | --- | --- |
+| A setting | Every single value, a section's keys included (`base_dir`, `sync.update`, `backup.archive_retention`), and a list that is one setting's value (`hooks.post_clone`, `clone.sparse`) | One file sets it. Set in two -- even to the same value -- it is an error. |
+| A section | `sync`, `backup`, `launchers`, `workspace_defaults`, `remote_sync` and the rest | Key by key: different files may set different keys of it. |
+| Entries | `repos`, `overrides`, `exclude` | Every file's, in file order: `config.yaml`'s first, then each fragment's. Overrides apply in order, so a later file's override wins for the repos it shares with an earlier one, as a later override does within a file. |
+| Named entries | `accounts`, `providers`, `discovery`, `sets`, `agents`, `workspaces`, `fleets` | Every file's, in file order; a name defined in two files is an error. |
+| Maps | `workspace_defaults.env`, `launchers.plugins` | Name by name; a name in two files is an error. |
+| Machine sections | `machines` | By machine name, ignoring case and spelled as the first file spells it. One machine's sections from several files merge by these same rules: `machines.desktop.base_dir` or `machines.desktop.clone_protocol` in two files is an error, as is one `backup` key, `overrides` and `repos` are added to, and `discovery`, `workspaces` and `fleets` merge by name. The merged section is then laid over the rest as [Per-machine sections](#per-machine-sections) says. |
+| The machine | `machine` | Only in `config.yaml`. A fragment, which every machine reads, can't choose the machine: use `GITSTEAD_MACHINE` or `--machine`. |
+
+Environment variables and flags still override the merged files, as they
+override one file. Every machine checks every section, whichever files they
+came from.
+
+**What gitstead writes.** `setup`, `clone --save`, `manifest import` and
+`ws create --save` edit `config.yaml` alone, never a fragment, which belongs to
+whoever links it. A change to something a fragment sets -- a setting, or a
+named entry such as an account or a workspace -- is refused, naming the
+fragment, unless the fragment already has it so; a new entry, such as another
+repo or rule, goes into `config.yaml` as ever. The edited config is merged
+with the fragments and checked before anything is written. So `setup` stops
+with `account "work": accounts entry "work" is set in
+/Users/you/.config/gitstead/config.d/work.yaml, and gitstead writes only
+/Users/you/.config/gitstead/config.yaml: change it there` when its answers
+would change an account a fragment holds.
+
+**Seeing what was read.** `gitstead config` heads its output with the files it
+read, in merge order, before the machine line:
+
+```
+$ gitstead --machine desktop config | head -3
+# Files read, in merge order: ~/.config/gitstead/config.yaml, ~/.config/gitstead/config.d/personal.yaml, ~/.config/gitstead/config.d/work.yaml
+# Machine "desktop": its machines: section is applied below (sections: desktop, laptop).
+base_dir: /Volumes/Fast/code
+```
+
+`gitstead config --json` (and `config --validate --json`) lists them as
+`files`; `gitstead doctor`'s `config valid:` line names them too.
+
+**When it goes wrong:**
+
+- `base_dir is set in both <file> and <file>: each setting may be set in only
+  one file` -- two files set one setting or define one name. Keep it in the
+  file of the context it belongs to and delete it from the other; for a
+  per-machine difference, put it in that machine's `machines:` section in one
+  file.
+- `"machine" can't be set in a fragment` -- move `machine:` to
+  `GITSTEAD_MACHINE` (or `config.yaml`, on a machine whose config is its own).
+- `reading config fragments <dir>/config.d: ...` or `reading config
+  <dir>/config.d/work.yaml: ... no such file or directory`
+  -- a link points at an overlay that isn't there (an unmounted drive, a
+  removed checkout). Restore its target or remove the link; gitstead won't run
+  without a context's config.
+- A fragment seems ignored -- check its name ends in `.yaml` or `.yml` and
+  doesn't start with `.`, and that `config.d` sits beside the config file in
+  use (`gitstead config --path`); `gitstead config | head -1` lists what was
+  read.
+
+The home-manager module writes fragments from
+`programs.gitstead.fragments.<name>` ([Scheduling](SCHEDULING.md#with-nix-home-manager)).
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `config.d/*.yaml`, `config.d/*.yml` | none | Fragments, read after the config file in byte order of their names and merged with it, as above. Not keys: files. |
 
 ## Upkeep
 

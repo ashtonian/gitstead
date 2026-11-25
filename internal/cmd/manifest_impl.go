@@ -87,10 +87,16 @@ func (c *ManifestImportCmd) Run(ctx *Context) error {
 			errs = append(errs, err)
 			continue
 		}
-		id, perr := repourl.Parse(mr.URL)
+		id, perr := mr.Identity()
 		if perr != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", mr.URL, perr))
+			errs = append(errs, fmt.Errorf("%s: %w", mr.Ref(), perr))
 			continue
+		}
+		if mr.Repo != "" {
+			id.URL = id.SSHURL
+			if cfg.CloneProtocolFor(id.Key(), "") == "https" {
+				id.URL = id.HTTPSURL()
+			}
 		}
 		if _, exists := st.Repos[id.Key()]; exists {
 			skipped++
@@ -109,7 +115,7 @@ func (c *ManifestImportCmd) Run(ctx *Context) error {
 		// keeps them on every later run.
 		if (mr.Account != "" || mr.SSHKey != "") && !c.DryRun {
 			if err := keepBinding(ctx, cfg, id.Key(), mr); err != nil {
-				errs = append(errs, fmt.Errorf("%s: %w", mr.URL, err))
+				errs = append(errs, fmt.Errorf("%s: %w", mr.Ref(), err))
 				continue
 			}
 			if cfg, err = ctx.ReloadConfig(); err != nil {
@@ -156,10 +162,9 @@ func keepBinding(ctx *Context, cfg *config.Config, key string, mr config.ManualR
 	if mr.Account != "" && cfg.FindAccount(mr.Account) == nil {
 		return fmt.Errorf("names unknown account %q", mr.Account)
 	}
-	entry := config.ManualRepo{URL: mr.URL, Tags: mr.Tags, Path: mr.Path, Account: mr.Account, SSHKey: mr.SSHKey}
 	if cfg.Manifest != "" {
 		return config.UpdateManifest(cfg.Manifest, func(m *config.Manifest) error {
-			m.Upsert(entry)
+			m.Upsert(mr)
 			return nil
 		})
 	}
@@ -167,7 +172,7 @@ func keepBinding(ctx *Context, cfg *config.Config, key string, mr config.ManualR
 	if err != nil {
 		return err
 	}
-	if err := doc.Upsert("repos", config.MatchesRepo(key), entry); err != nil {
+	if err := doc.UpsertRepo(mr); err != nil {
 		return err
 	}
 	if err := doc.Save(ctx.GoCtx()); err != nil {

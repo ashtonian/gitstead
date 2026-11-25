@@ -62,6 +62,8 @@ type Config struct {
 	// topLevel is the config as it was before.
 	machineApplied bool
 	topLevel       *Config
+	// files are the config files read, in the order they merged.
+	files []string
 }
 
 // Account is one identity on one or more hosts: the SSH key and commit
@@ -139,9 +141,13 @@ var Layouts = map[string]string{
 	"name":            "{{.Name}}",
 }
 
-// ManualRepo allows specifying individual repos to manage without discovery rules.
+// ManualRepo allows specifying individual repos to manage without discovery
+// rules. It names the repo by exactly one of URL, cloned over the URL's own
+// transport, and Repo, its key (host/owner/name), cloned over the transport
+// CloneProtocolFor gives it at the conventional SSH or HTTPS URL.
 type ManualRepo struct {
-	URL     string   `koanf:"url"     yaml:"url"              validate:"required"`
+	URL     string   `koanf:"url"     yaml:"url,omitempty"`
+	Repo    string   `koanf:"repo"    yaml:"repo,omitempty"`
 	Tags    []string `koanf:"tags"    yaml:"tags,omitempty"`
 	SSHKey  string   `koanf:"ssh_key" yaml:"ssh_key,omitempty"`
 	Account string   `koanf:"account" yaml:"account,omitempty"`

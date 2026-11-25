@@ -162,8 +162,8 @@ func TestLabels_NamedSchedulesDontCollide(t *testing.T) {
 	if def.Label() != "com.ashtonian.gitstead" || work.Label() != "com.ashtonian.gitstead.work" {
 		t.Errorf("labels = %s, %s", def.Label(), work.Label())
 	}
-	home := "/home/me"
-	if a, b := sched(kind(scheduler.Systemd)).Files(home), sched(kind(scheduler.Systemd), named("work")).Files(home); a[1] == b[1] {
+	h := scheduler.Host{Home: "/home/me"}
+	if a, b := h.Files(sched(kind(scheduler.Systemd))), h.Files(sched(kind(scheduler.Systemd), named("work"))); a[1] == b[1] {
 		t.Errorf("both schedules use %s", a[1])
 	}
 }

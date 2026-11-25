@@ -145,6 +145,38 @@ func splitOwnerRepo(p string) (owner, name string, err error) {
 	return owner, name, nil
 }
 
+// ParseKey parses a repo key, host/owner/name, into the identity it names:
+// one with no URL of its own, whose SSHURL and HTTPSURL are the conventional
+// git@host:owner/name.git and https://host/owner/name.git, the key's case
+// kept. The owner may have several segments (GitLab subgroups). A local
+// repo's key names no URL, so it is refused.
+func ParseKey(key string) (*Identity, error) {
+	if key == "" {
+		return nil, fmt.Errorf("empty repo key")
+	}
+	if strings.ContainsAny(key, " \t\n:@\\") || strings.HasSuffix(key, ".git") {
+		return nil, fmt.Errorf("repo key %q is not host/owner/name: give a URL as url", key)
+	}
+	segments := strings.Split(key, "/")
+	if len(segments) < 3 {
+		return nil, fmt.Errorf("repo key %q is not host/owner/name", key)
+	}
+	for _, s := range segments {
+		if s == "" || s == "." || s == ".." {
+			return nil, fmt.Errorf("repo key %q is not host/owner/name", key)
+		}
+	}
+	if segments[0] == "local" {
+		return nil, fmt.Errorf("repo key %q is a local repo's, which has no URL to build: give its path as url", key)
+	}
+	last := len(segments) - 1
+	return identity(segments[0], strings.Join(segments[1:last], "/"), segments[last]), nil
+}
+
+// HTTPSURL is the conventional HTTPS URL for the identity's host and name:
+// https://host/owner/name.git.
+func (id *Identity) HTTPSURL() string { return "https://" + id.Host + "/" + id.FullName + ".git" }
+
 // identity assembles an Identity, defaulting SSHURL to the canonical
 // git@host:owner/repo.git form.
 func identity(host, owner, name string) *Identity {

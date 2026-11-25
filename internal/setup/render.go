@@ -25,7 +25,9 @@ func Render(doc *config.Document, a Answers) error {
 		if err := set("layout", a.Layout); err != nil {
 			return err
 		}
-		doc.Delete("path_template")
+		if err := doc.Delete("path_template"); err != nil {
+			return err
+		}
 	}
 	for _, acct := range a.Accounts {
 		if err := renderAccount(doc, acct); err != nil {
@@ -68,8 +70,8 @@ func Render(doc *config.Document, a Answers) error {
 			if err := set("workspace_defaults.agent", w.Agent); err != nil {
 				return err
 			}
-		} else {
-			doc.Delete("workspace_defaults.agent")
+		} else if err := doc.Delete("workspace_defaults.agent"); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -96,13 +98,16 @@ func renderAccount(doc *config.Document, acct Account) error {
 	}
 	// Rules setup manages that are no longer tracked go; searches and other
 	// rules it doesn't manage stay as they are.
-	doc.Remove("discovery", func(n *yaml.Node) bool {
+	err := doc.Remove("discovery", func(n *yaml.Node) bool {
 		var r config.DiscoveryRule
 		if !config.Field("provider", acct.Name)(n) || n.Decode(&r) != nil || !acct.Manages(r) {
 			return false
 		}
 		return !slices.ContainsFunc(names, func(name string) bool { return config.Named(name)(n) })
 	})
+	if err != nil {
+		return err
+	}
 
 	if acct.BaseDir == "" {
 		return nil
