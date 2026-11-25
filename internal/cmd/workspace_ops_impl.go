@@ -237,10 +237,10 @@ func (c *WSCommitCmd) Run(ctx *Context) error {
 	return reportOps(ctx, spec, "committed", results)
 }
 
-// WSPullCmd pulls every copy.
+// WSPullCmd brings every copy up to what ws status compares it with.
 type WSPullCmd struct {
 	Name        string `arg:"" help:"Workspace name." predictor:"workspace"`
-	Rebase      bool   `help:"Use --rebase instead of the default --ff-only."`
+	Rebase      bool   `help:"Rebase onto the upstream, or for a branch without one the base it started from, instead of only fast-forwarding."`
 	BackupFirst bool   `help:"Back up copies with uncommitted work before pulling." default:"true" name:"backup-first"`
 }
 
@@ -249,21 +249,54 @@ func (c *WSPullCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	spec, _, err := operationalSpec(ctx, c.Name)
+	spec, st, err := operationalSpec(ctx, c.Name)
 	if err != nil {
 		return err
 	}
+	gctx := ctx.GoCtx()
 	targets := spec.Targets()
 	var unsaved map[string]error
 	if c.BackupFirst {
 		unsaved = backupDirtyCopies(ctx, cfg, spec, targets)
 	}
-	results := workspace.ForEach(ctx.GoCtx(), targets, cfg.Concurrency, func(ctx context.Context, t workspace.Located) (string, bool, error) {
-		if err := unsaved[t.Path]; err != nil {
-			return "", false, fmt.Errorf("not pulled, safety backup failed: %w", err)
+
+	// git pull fetches a branch's upstream itself. A branch without one is
+	// brought up to what it started from instead, which is fetched first as
+	// ws fetch fetches it: its repo's clone once, then each clone copy's view
+	// of origin from that.
+	baselines := map[string]workspace.Baseline{}
+	var fromBase []workspace.Located
+	for _, t := range targets {
+		if !gitops.HasGitDir(t.Path) || unsaved[t.Path] != nil {
+			continue
 		}
-		out, err := gitops.Pull(ctx, t.Path, t.SSHKey, !c.Rebase, c.Rebase)
-		return lastLine(out), false, err
+		b := spec.Baseline(gctx, t)
+		baselines[t.Path] = b
+		if b.Upstream == "" && b.Ref != "" {
+			fromBase = append(fromBase, t)
+		}
+	}
+	unfetched := map[string]error{}
+	for _, r := range fetchCopies(gctx, cfg, st, spec, fromBase) {
+		if r.Err != nil {
+			unfetched[r.Path] = r.Err
+		}
+	}
+
+	results := workspace.ForEachByRepo(gctx, targets, cfg.Concurrency, func(ctx context.Context, t workspace.Located) (string, bool, error) {
+		b, present := baselines[t.Path]
+		switch {
+		case unsaved[t.Path] != nil:
+			return "", false, fmt.Errorf("not pulled, safety backup failed: %w", unsaved[t.Path])
+		case !present:
+			return "", false, fmt.Errorf("not pulled: it is missing; 'gitstead ws ensure %s' makes missing copies", spec.Name)
+		case unfetched[t.Path] != nil:
+			return "", false, fmt.Errorf("not pulled: %w", unfetched[t.Path])
+		case b.Upstream != "":
+			out, err := gitops.Pull(ctx, t.Path, t.SSHKey, !c.Rebase, c.Rebase)
+			return lastLine(out), false, err
+		}
+		return workspace.UpdateToBase(ctx, t.Path, b.Ref, c.Rebase)
 	})
 	return reportOps(ctx, spec, "pulled", results)
 }

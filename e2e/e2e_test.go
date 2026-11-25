@@ -920,6 +920,132 @@ func TestE2E_SyncRefreshesClones(t *testing.T) {
 	}
 }
 
+// TestE2E_WorkspacePull: ws pull brings each copy up to what ws status
+// compares it with. An agent's branch without an upstream is fast-forwarded
+// to what it started from, fetched through the repo's clone (a clone copy's
+// own origin is unreachable here), or with --rebase rebased onto it, and one
+// that has diverged is left as it was without --rebase. Published branches
+// are pulled from their upstreams, a repo's worktrees one at a time: two git
+// pulls fetching into one repo at once fail to lock its refs.
+func TestE2E_WorkspacePull(t *testing.T) {
+	for _, isolation := range []string{"worktree", "clone"} {
+		t.Run(isolation, func(t *testing.T) {
+			env := newLocalEnv(t)
+			tmp := t.TempDir()
+			remote := filepath.Join(tmp, "remotes", "app.git")
+			gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+			seed := filepath.Join(tmp, "seed")
+			gitCmd(t, tmp, "clone", "-q", remote, seed)
+			gitCmd(t, seed, "config", "user.email", "e2e@test.local")
+			gitCmd(t, seed, "config", "user.name", "e2e")
+			commit := func(dir, name, to string) string {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				gitCmd(t, dir, "add", ".")
+				gitCmd(t, dir, "commit", "-qm", name)
+				if to != "" {
+					gitCmd(t, dir, "push", "-q", "origin", "HEAD:"+to)
+				}
+				return gitCmd(t, dir, "rev-parse", "HEAD")
+			}
+			commit(seed, "first", "main")
+			root := filepath.Join(tmp, "workspaces")
+			cfg := fmt.Sprintf("base_dir: %s\nworkspace_defaults:\n  root: %s\nrepos:\n  - url: %s\n", env.baseDir, root, remote)
+			if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if out, code := env.run(t, "sync"); code != 0 {
+				t.Fatalf("sync exit %d:\n%s", code, out)
+			}
+			if out, code := env.run(t, "ws", "create", "app", "--repo", "local/remotes/app", "--agents", "4", "--isolation", isolation); code != 0 {
+				t.Fatalf("ws create exit %d:\n%s", code, out)
+			}
+			copyOf := func(agent string) string { return filepath.Join(root, "app", agent) }
+			for _, agent := range []string{"agent-1", "agent-2", "agent-3", "agent-4"} {
+				gitCmd(t, copyOf(agent), "config", "user.email", "e2e@test.local")
+				gitCmd(t, copyOf(agent), "config", "user.name", "e2e")
+			}
+
+			// agent-2 commits work of its own; agents 3 and 4 publish their
+			// branches, which then move upstream; then main moves.
+			commit(copyOf("agent-2"), "agent-2-work", "")
+			published := map[string]string{}
+			for _, agent := range []string{"agent-3", "agent-4"} {
+				branch := "agents/app/" + agent
+				gitCmd(t, copyOf(agent), "push", "-q", "-u", "origin", branch)
+				gitCmd(t, seed, "fetch", "-q", "origin")
+				gitCmd(t, seed, "checkout", "-q", "-b", agent, "origin/"+branch)
+				published[agent] = commit(seed, agent+"-upstream", branch)
+				gitCmd(t, seed, "checkout", "-q", "main")
+			}
+			commit(seed, "second", "main")
+			if isolation == "clone" {
+				gitCmd(t, copyOf("agent-1"), "remote", "set-url", "origin", filepath.Join(tmp, "nowhere.git"))
+			}
+
+			status := func() map[string]map[string]any {
+				t.Helper()
+				var views []map[string]any
+				if stderr, code := env.runJSON(t, &views, "ws", "status", "app"); code != 0 {
+					t.Fatalf("ws status exit %d:\n%s", code, stderr)
+				}
+				byAgent := map[string]map[string]any{}
+				for _, v := range views {
+					byAgent[v["agent"].(string)] = v
+				}
+				return byAgent
+			}
+			if out, code := env.run(t, "ws", "fetch", "app"); code != 0 {
+				t.Fatalf("ws fetch exit %d:\n%s", code, out)
+			}
+			if got := status()["agent-1"]; got["behind"] != float64(1) || got["upstream"] != nil {
+				t.Errorf("ws status should have agent-1 behind main by 1, without an upstream: %v", got)
+			}
+
+			// ws pull fetches what moved since, itself.
+			head := commit(seed, "third", "main")
+			out, code := env.run(t, "ws", "pull", "app")
+			if code != 0 {
+				t.Fatalf("ws pull exit %d:\n%s", code, out)
+			}
+			for _, want := range []string{
+				"agent-1: fast-forwarded to origin/HEAD",
+				"agent-2: it has diverged from origin/HEAD: 1 ahead, 2 behind",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("ws pull output lacks %q:\n%s", want, out)
+				}
+			}
+			if got := gitCmd(t, copyOf("agent-1"), "rev-parse", "HEAD"); got != head {
+				t.Errorf("agent-1 is at %s, want main's %s", got, head)
+			}
+			for agent, want := range published {
+				if got := gitCmd(t, copyOf(agent), "rev-parse", "HEAD"); got != want {
+					t.Errorf("%s is at %s, want its upstream's %s", agent, got, want)
+				}
+			}
+			after := status()
+			for agent, behind := range map[string]float64{"agent-1": 0, "agent-2": 2, "agent-3": 0, "agent-4": 0} {
+				if got := after[agent]; got["behind"] != behind {
+					t.Errorf("after ws pull, %s: %v", agent, got)
+				}
+			}
+
+			out, code = env.run(t, "ws", "pull", "app", "--rebase")
+			if code != 0 || !strings.Contains(out, "agent-2: rebased onto origin/HEAD") {
+				t.Fatalf("ws pull --rebase exit %d:\n%s", code, out)
+			}
+			if got := status()["agent-2"]; got["ahead"] != float64(1) || got["behind"] != float64(0) {
+				t.Errorf("after ws pull --rebase, agent-2: %v", got)
+			}
+			if out, code := env.run(t, "ws", "check", "app"); code != 0 {
+				t.Errorf("ws check exit %d:\n%s", code, out)
+			}
+		})
+	}
+}
+
 // TestE2E_ArchiveAndRestore: remove --archive moves a clone, whole, into the
 // archive and catalogs it; archives restore moves it back and tracks it
 // again, or puts it elsewhere when the repo is tracked again; archives rm

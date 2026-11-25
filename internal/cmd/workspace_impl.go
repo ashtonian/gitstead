@@ -30,7 +30,7 @@ type WorkspaceCmd struct {
 	Check    WSCheckCmd    `cmd:"" help:"Check a workspace is set up and up to date (non-zero exit when not)."`
 	Fetch    WSFetchCmd    `cmd:"" help:"Fetch each repo once and bring every copy up to date from it."`
 	Commit   WSCommitCmd   `cmd:"" help:"Commit changes in every copy."`
-	Pull     WSPullCmd     `cmd:"" help:"Pull every copy (--ff-only by default)."`
+	Pull     WSPullCmd     `cmd:"" help:"Bring every copy up to its upstream, or to the base a branch without one started from (fast-forward only by default)."`
 	Push     WSPushCmd     `cmd:"" help:"Push every copy."`
 	Exec     WSExecCmd     `cmd:"" help:"Run a command in each copy (after --)."`
 	Open     WSOpenCmd     `cmd:"" help:"Open the workspace's agents with a launcher: tmux, iTerm, Muxy or a plugin."`

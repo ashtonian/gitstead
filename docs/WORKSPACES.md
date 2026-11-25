@@ -256,7 +256,8 @@ that act on copies take `--agent` to pick one agent's.
 | `check <name>` | Exit non-zero when a copy is missing, on the wrong branch, mid-rebase or merge, or behind. `--agent`. |
 | `status <name>` / `overview` | Agents' states and copies' status for one workspace / across all of them (`--json`). |
 | `fetch <name>` | Fetch each source once, then refresh the clones from it. |
-| `commit`, `pull`, `push`, `exec` | Run across copies. `pull` backs up dirty copies first. |
+| `pull <name>` | Bring every copy up to what `status` compares it with: its upstream (`git pull`), or for an agent branch without one what it started from (`base_ref`, else origin's default branch), fetched first as `fetch` fetches it. Fast-forwards only, unless `--rebase`; a copy that has diverged, has a change in the way, or whose rebase stops is left as it was, with the reason. Backs up dirty copies first (`--backup-first`, on by default). |
+| `commit`, `push`, `exec` | Run across copies. |
 | `backup <name>` / `recover <name>` | Back up / restore each copy's WIP (`--offsite`; `recover --into`/`--apply`). |
 | `prune <name>` | Remove copies with no unique work: clean, no stash, nothing unpushed, verified by a full inspection. `--dry-run`, `--all`. |
 | `ls` | List workspaces, created and declared. |
