@@ -157,7 +157,33 @@ repos:
   - url: "git@github.com:me/notes.git"
     path: "~/notes"                    # not where path_template puts it: absolute,
                                        # ~-relative, or relative to its base_dir
+  - repo: github.com/acme/CamelCase     # by key: cloned over clone_protocol
+```
 
+Each entry names its repo by exactly one of `url` and `repo`; any other key it
+has (`tags`, `path`, `account`, `ssh_key`) means the same for both.
+
+- **`url`** is cloned from that URL, over its own transport: an `https://` URL
+  over HTTPS whatever `clone_protocol` says. Any URL git takes works: a custom
+  port (`ssh://git@ghes.example.com:2222/team/svc.git`), a path prefix, a local
+  path.
+- **`repo`** is the repo's key, `host/owner/name` (a GitLab owner may be
+  `group/subgroup`), and is cloned over the transport a discovered repo would
+  be: a matching override's `clone_protocol`, else the top-level one, from
+  `git@<host>:<owner>/<name>.git` or `https://<host>/<owner>/<name>.git`, the
+  key's case kept. So one list shared by several machines clones over SSH on
+  one and HTTPS on another, as each machine's section sets it. Those are the URLs providers give and clones
+  record, so changing an entry from `url` to `repo` changes nothing in `plan`.
+  A host whose URLs don't follow them -- SSH on another port, a path prefix
+  before the owner -- needs `url`.
+
+The entries gitstead writes -- `manifest export`, the shared manifest's
+entries for repos you clone or adopt, `manifest save` -- name their repo by
+`url`; `manifest import` keeps an entry as the imported file names it. An
+update to an entry that's already there, in `repos:` or the shared manifest,
+keeps naming the repo as the entry does, so a `repo` entry stays one.
+
+```yaml
 # Skip repos even if a rule matched them.
 exclude:
   - name_pattern: "^deprecated-"                # a regular expression on the name

@@ -580,11 +580,33 @@ itself. A malformed pattern in config fails validation.
 | `doctor` | Offline, read-only preflight: git present, config valid (naming the config file and fragments read, in merge order), base_dir writable, provider tokens resolve, configured SSH keys exist, whether a sync is running, state lock free within 5s (held longer, its holder is reported as stuck), each recorded schedule installed with its binary present and lingering on (systemd), doctor itself passing in each schedule's recorded environment, each schedule another tool installed under gitstead's naming reported at info (`background sync <job> is installed by another tool (<where>); doctor does not check its environment`), never as missing, tracked repos on disk with matching origin. Non-zero exit on failure. |
 | `install-agent` | Install a named background sync (`--name`, default `default`) running `sync --quiet` plus its selection (`--repos`/`--tag`/`--set`) every `--interval` (must divide an hour or a day). Records a stable binary path (refuses `/nix/store`, Cellar and temporary paths), the current `PATH` and a long-lived `SSH_AUTH_SOCK`; runs at nice 10 with idle I/O. launchd: LaunchAgent, or `--daemon` LaunchDaemon with `UserName` via sudo. systemd: `OnCalendar=` + `Persistent=true`; `--linger` enables lingering. cron: refuses to rewrite an unreadable crontab, backs it up first, touches only lines with its marker. Recorded in state under `schedules`; `--list`, `--uninstall`, `--print`. Another tool's schedule: `scheduler.Host.Definitions` finds every schedule defined under gitstead's naming -- launchd agents and daemons labelled `com.ashtonian.gitstead[.<name>]`, systemd user units `gitstead[-<name>].service`/`.timer`, crontab lines with the marker -- and one that state doesn't record by that name, kind and daemon flag is another tool's (`unmanagedSchedules`). Installing or (`--uninstall`) removing a schedule of its name and backend is refused, naming its files, with nothing changed, `--print` included; `--force` replaces it (removing one in another backend) or removes it. A crontab that can't be read fails the check. |
 | `run [--set/--tag/--repos] -- <cmd>` | Run a command in each matching repo (parallel, bounded by concurrency). `--fail-fast`; non-zero exit if any failed. |
-| `manifest export [--out]` / `import <file>` | Portable `{url,tags,path,account,ssh_key}` manifest of the tracked set, to rehydrate a new machine (captures manual adoptions). import is idempotent and clones over the url's transport. An entry naming an account (which must exist) or an SSH key is first kept where config reads it -- the shared `manifest:`, else config's `repos:`, edited in place -- so the clone gets that identity and key, and keeps them; export writes each repo's `repos:` or manifest binding. |
+| `manifest export [--out]` / `import <file>` | Portable `{url,tags,path,account,ssh_key}` manifest of the tracked set, to rehydrate a new machine (captures manual adoptions). import is idempotent and clones over the url's transport, or a `repo` entry's over `CloneProtocolFor`. An entry naming an account (which must exist) or an SSH key is first kept where config reads it -- the shared `manifest:`, else config's `repos:`, edited in place -- so the clone gets that identity and key, and keeps them; export writes each repo's `repos:` or manifest binding. |
 | `manifest save [--dry-run]` | Add each repo tracked by hand that neither `repos:` nor the shared manifest lists to the manifest; with no `manifest:`, print them as `repos:` entries. |
 
+A `repos:` (or manifest) entry names its repo by exactly one of `url` and
+`repo` (`config.ManualRepo.Identity`; validation names the entry otherwise).
+`url` is parsed by `repourl.Parse` and kept as the repo's only URL, under its
+own transport. `repo` is a key, `host/owner/name` with a possibly
+multi-segment owner (`repourl.ParseKey`; no scheme, `@`, `:`, whitespace,
+`.git` suffix, empty or dot segment, or `local` host), whose repo gets both
+`git@<host>:<owner>/<name>.git` and `https://<host>/<owner>/<name>.git`, the
+key's case kept, so `reconcile`'s `cloneURL` picks one by
+`CloneProtocolFor` as for a discovered repo: a matching override's
+`clone_protocol`, else the top-level one. `manifest import` of a `repo` entry clones from the URL that protocol
+gives. An entry of either form for a repo a rule found replaces the found
+one in discovery, keeping the rule as discoverer and adding its tags
+(`addManualRepos`). Every lookup by key -- `RepoEntry`, bindings, the
+manifest's `Has`/`Upsert`/`Remove`, `MatchesRepo` -- goes through
+`Identity`, so both forms are one repo's entry. New entries gitstead writes
+(`manifest export`, `manifest save`, `recordInManifest` after a hand
+addition) name the repo by `url`; `manifest import` keeps the imported
+entry's form. An update to an existing entry keeps the form that entry has
+(`ManualRepo.namedAs`, used by `Manifest.Upsert` and `Document.UpsertRepo`):
+a `repo` entry keeps its key and the update's URL is dropped, and a `url`
+entry takes a `url` update's URL, or keeps its own against a `repo` update.
+
 The shared manifest (`manifest: <path>`) has the export format (`repos:` of
-`url`, `tags`, `path`, and `ssh_key`/`account` as in `repos:`). Config loading
+`url` or `repo`, `tags`, `path`, and `ssh_key`/`account` as in `repos:`). Config loading
 reads it after normalizing and appends its entries to `repos:` -- a missing
 file is empty, a malformed one or an entry with a credential is a load error
 -- so discovery's `_manual` rule finds them on every machine. An entry's
@@ -646,7 +668,8 @@ path_template: "{{.Host}}/{{.Owner}}/{{.Name}}"
 
 # Git transport for clone/fetch: "ssh" (default, uses SSH agent/keys) or "https"
 # (auth via git's own credential helper; gitstead stores no credentials).
-# Overridable per repo set under `overrides:`.
+# Overridable per repo set under `overrides:`. Applies to discovered repos and
+# repos: entries given by `repo:` key; a `url:` entry keeps its URL's.
 clone_protocol: "ssh"
 
 # Max concurrent git operations (clone, fetch, backup).

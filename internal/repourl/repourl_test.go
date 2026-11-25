@@ -210,3 +210,38 @@ func FuzzParse(f *testing.F) {
 		}
 	})
 }
+
+// A repo key names its repo, case kept, with the URLs a provider would give
+// it: the forms clones and state record.
+func TestParseKey(t *testing.T) {
+	tests := []struct {
+		key, owner, name, ssh, https string
+	}{
+		{"github.com/acme/CamelCase", "acme", "CamelCase", "git@github.com:acme/CamelCase.git", "https://github.com/acme/CamelCase.git"},
+		{"gitlab.com/group/sub/proj", "group/sub", "proj", "git@gitlab.com:group/sub/proj.git", "https://gitlab.com/group/sub/proj.git"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			id, err := repourl.ParseKey(tt.key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if id.Key() != tt.key || id.Owner != tt.owner || id.Name != tt.name || id.SSHURL != tt.ssh || id.HTTPSURL() != tt.https || id.URL != "" {
+				t.Errorf("ParseKey(%q) = %+v, https %s", tt.key, id, id.HTTPSURL())
+			}
+			// The URLs parse back to the key.
+			for _, u := range []string{id.SSHURL, id.HTTPSURL()} {
+				if back, err := repourl.Parse(u); err != nil || back.Key() != tt.key {
+					t.Errorf("Parse(%s) = %v, %v", u, back, err)
+				}
+			}
+		})
+	}
+	for _, bad := range []string{"", "github.com/acme", "acme/api", "github.com//api", "github.com/acme/api/", "/github.com/acme/api",
+		"github.com/acme/api.git", "git@github.com:acme/api.git", "https://github.com/acme/api", "github.com/acme/my repo",
+		"github.com/../api", "local/remotes/app"} {
+		if _, err := repourl.ParseKey(bad); err == nil {
+			t.Errorf("ParseKey(%q) accepted", bad)
+		}
+	}
+}

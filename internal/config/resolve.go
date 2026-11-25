@@ -182,7 +182,7 @@ func (c *Config) bindings(repoKey, ruleName string) []binding {
 		}
 	}
 	for _, mr := range c.Repos {
-		if id, err := repourl.Parse(mr.URL); err == nil && id.Key() == repoKey {
+		if id, err := mr.Identity(); err == nil && id.Key() == repoKey {
 			out = append(out, binding{mr.SSHKey, mr.Account})
 		}
 	}

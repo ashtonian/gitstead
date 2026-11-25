@@ -99,8 +99,8 @@ func (c *Config) validate() error {
 	if err := validateRemoteSync(c); err != nil {
 		return err
 	}
-	for _, mr := range c.Repos {
-		if err := checkManualRepo(mr); err != nil {
+	for i, mr := range c.Repos {
+		if err := checkManualRepo(i+1, mr); err != nil {
 			return err
 		}
 	}
@@ -302,7 +302,7 @@ func validateAccounts(cfg *Config) error {
 		}
 	}
 	for _, mr := range cfg.Repos {
-		if err := check("repos entry "+mr.URL, mr.Account); err != nil {
+		if err := check("repos entry "+mr.Ref(), mr.Account); err != nil {
 			return err
 		}
 	}

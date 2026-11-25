@@ -176,6 +176,34 @@ func (d *Document) Upsert(seqKey string, match func(*yaml.Node) bool, value any)
 	return nil
 }
 
+// UpsertRepo adds entry to repos:, or updates the entry for its repo there
+// or in a fragment, which keeps naming the repo as it does: by url or by repo
+// key.
+func (d *Document) UpsertRepo(entry ManualRepo) error {
+	match := MatchesRepo(manualKey(entry))
+	var listed ManualRepo
+	if have := d.entry("repos", match); have != nil && have.Decode(&listed) == nil {
+		entry = entry.namedAs(listed)
+	}
+	return d.Upsert("repos", match, entry)
+}
+
+// entry is the entry of the sequence seqKey that match selects, in a
+// fragment or the config file; nil when there is none.
+func (d *Document) entry(seqKey string, match func(*yaml.Node) bool) *yaml.Node {
+	if _, node := d.fragmentEntry(seqKey, match); node != nil {
+		return node
+	}
+	seq := mappingValue(d.top(), seqKey)
+	if seq == nil || seq.Kind != yaml.SequenceNode {
+		return nil
+	}
+	if i := slices.IndexFunc(seq.Content, match); i >= 0 {
+		return seq.Content[i]
+	}
+	return nil
+}
+
 // Remove drops every entry of the top-level sequence seqKey that match
 // selects. One a fragment holds is refused: removing it here would leave it.
 func (d *Document) Remove(seqKey string, match func(*yaml.Node) bool) error {
@@ -224,9 +252,10 @@ func (d *Document) fragmentEntry(seqKey string, match func(*yaml.Node) bool) (st
 	return "", nil
 }
 
-// entryName names a sequence entry in an error: by its name, URL or account.
+// entryName names a sequence entry in an error: by its name, URL, repo key or
+// account.
 func entryName(seqKey string, entry *yaml.Node) string {
-	for _, field := range []string{"name", "url", "account"} {
+	for _, field := range []string{"name", "url", "repo", "account"} {
 		if v := mappingValue(entry, field); v != nil && v.Kind == yaml.ScalarNode {
 			return fmt.Sprintf("%s entry %q", seqKey, v.Value)
 		}

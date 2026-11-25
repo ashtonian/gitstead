@@ -158,7 +158,7 @@ func sshKeyRefs(cfg *config.Config) []sshKeyRef {
 		add(fmt.Sprintf("rule %q", r.Name), r.SSHKey)
 	}
 	for _, mr := range cfg.Repos {
-		add("repos entry "+mr.URL, mr.SSHKey)
+		add("repos entry "+mr.Ref(), mr.SSHKey)
 	}
 	for _, o := range cfg.Overrides {
 		add(fmt.Sprintf("override %v", o.Repos), o.SSHKey)

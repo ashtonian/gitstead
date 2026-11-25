@@ -49,8 +49,8 @@ func ReadManifest(path string) (Manifest, error) {
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return m, fmt.Errorf("manifest %s: %w", path, err)
 	}
-	for _, r := range m.Repos {
-		if err := checkManualRepo(r); err != nil {
+	for i, r := range m.Repos {
+		if err := checkManualRepo(i+1, r); err != nil {
 			return m, fmt.Errorf("manifest %s: %w", path, err)
 		}
 	}
@@ -95,7 +95,7 @@ func UpdateManifest(path string, change func(*Manifest) error) error {
 func (m *Manifest) Upsert(r ManualRepo) {
 	key := manualKey(r)
 	if i := slices.IndexFunc(m.Repos, func(e ManualRepo) bool { return manualKey(e) == key }); i >= 0 {
-		m.Repos[i] = r
+		m.Repos[i] = r.namedAs(m.Repos[i])
 		return
 	}
 	m.Repos = append(m.Repos, r)
@@ -113,23 +113,58 @@ func (m Manifest) Has(key string) bool {
 	return slices.ContainsFunc(m.Repos, func(e ManualRepo) bool { return manualKey(e) == key })
 }
 
-func manualKey(r ManualRepo) string {
-	if id, err := repourl.Parse(r.URL); err == nil {
-		return id.Key()
+// Identity is the repo the entry names: by its url, which keeps its own
+// transport, or by its repo key, whose identity has no URL of its own.
+func (r ManualRepo) Identity() (*repourl.Identity, error) {
+	if r.Repo != "" {
+		return repourl.ParseKey(r.Repo)
+	}
+	return repourl.Parse(r.URL)
+}
+
+// namedAs is r naming its repo the way have, the entry it updates, does: by
+// url or by repo key. That is the entry's author's choice -- a repo key leaves
+// the transport to each machine's clone_protocol -- so an update keeps it;
+// the new url replaces an old one.
+func (r ManualRepo) namedAs(have ManualRepo) ManualRepo {
+	switch {
+	case have.Repo != "":
+		r.URL, r.Repo = "", have.Repo
+	case r.Repo != "":
+		r.URL, r.Repo = have.URL, ""
+	}
+	return r
+}
+
+// Ref is what the entry names its repo by, for messages: its url or its key.
+func (r ManualRepo) Ref() string {
+	if r.Repo != "" {
+		return r.Repo
 	}
 	return r.URL
 }
 
-// checkManualRepo checks a repos: or manifest entry.
-func checkManualRepo(r ManualRepo) error {
-	if r.URL == "" {
-		return errors.New("an entry has no url")
+func manualKey(r ManualRepo) string {
+	if id, err := r.Identity(); err == nil {
+		return id.Key()
+	}
+	return r.Ref()
+}
+
+// checkManualRepo checks a repos: or manifest entry, the nth: it names its
+// repo by exactly one of url and repo.
+func checkManualRepo(n int, r ManualRepo) error {
+	switch {
+	case r.URL == "" && r.Repo == "":
+		return fmt.Errorf("repos entry %d has neither url nor repo: give one", n)
+	case r.URL != "" && r.Repo != "":
+		return fmt.Errorf("repos entry %s also sets repo %s: give url or repo, not both", r.URL, r.Repo)
 	}
 	if err := repourl.CheckNoCredentials(r.URL); err != nil {
-		return fmt.Errorf("repos entry: %w", err)
+		return fmt.Errorf("repos entry %d: %w", n, err)
 	}
-	if _, err := repourl.Parse(r.URL); err != nil {
-		return fmt.Errorf("repos entry %s: %w", r.URL, err)
+	if _, err := r.Identity(); err != nil {
+		return fmt.Errorf("repos entry %s: %w", r.Ref(), err)
 	}
 	return nil
 }
@@ -176,7 +211,7 @@ func loadManifest(_ context.Context, cfg *Config) error {
 	}
 	for _, r := range m.Repos {
 		if r.Account != "" && cfg.FindAccount(r.Account) == nil {
-			return &stepError{fmt.Errorf("manifest %s: repos entry %s names unknown account %q", path, r.URL, r.Account)}
+			return &stepError{fmt.Errorf("manifest %s: repos entry %s names unknown account %q", path, r.Ref(), r.Account)}
 		}
 	}
 	cfg.Repos = append(cfg.Repos, m.Repos...)

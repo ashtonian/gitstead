@@ -2189,6 +2189,64 @@ func TestE2E_ManifestKeepsAccounts(t *testing.T) {
 	}
 }
 
+// TestE2E_RepoEntryByKey: a repos: entry by key clones from the URL
+// clone_protocol gives it, the one a url: entry spells out, so changing the
+// entry from either form to the other leaves nothing to do. git's insteadOf
+// points github.com's URLs at local remotes; the clone records the URL as
+// gitstead gave it.
+func TestE2E_RepoEntryByKey(t *testing.T) {
+	tmp := t.TempDir()
+	remotes := filepath.Join(tmp, "remotes")
+	remote := filepath.Join(remotes, "acme", "CamelCase.git")
+	gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", remote)
+	seed := filepath.Join(tmp, "seed")
+	gitCmd(t, tmp, "clone", "-q", remote, seed)
+	gitCmd(t, seed, "-c", "user.name=e2e", "-c", "user.email=e2e@test.local", "commit", "-q", "--allow-empty", "-m", "init")
+	gitCmd(t, seed, "push", "-q", "origin", "HEAD:main")
+
+	for protocol, url := range map[string]string{
+		"ssh":   "git@github.com:acme/CamelCase.git",
+		"https": "https://github.com/acme/CamelCase.git",
+	} {
+		t.Run(protocol, func(t *testing.T) {
+			env := newLocalEnv(t)
+			env.extraEnv = []string{
+				"GIT_CONFIG_COUNT=2",
+				"GIT_CONFIG_KEY_0=url." + remotes + "/.insteadOf", "GIT_CONFIG_VALUE_0=git@github.com:",
+				"GIT_CONFIG_KEY_1=url." + remotes + "/.insteadOf", "GIT_CONFIG_VALUE_1=https://github.com/",
+			}
+			configure := func(entry string) {
+				t.Helper()
+				cfg := fmt.Sprintf("base_dir: %s\nclone_protocol: %s\nrepos:\n  - %s\n", env.baseDir, protocol, entry)
+				if err := os.WriteFile(env.configFile, []byte(cfg), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			nothingToDo := func(form string) {
+				t.Helper()
+				var plan struct{ Actions, Drift []json.RawMessage }
+				if stderr, code := env.runJSON(t, &plan, "plan"); code != 0 || len(plan.Actions)+len(plan.Drift) != 0 {
+					t.Errorf("plan by %s: exit %d, %d actions, %d drift\n%s", form, code, len(plan.Actions), len(plan.Drift), stderr)
+				}
+			}
+
+			configure("repo: github.com/acme/CamelCase")
+			if out, code := env.run(t, "sync"); code != 0 {
+				t.Fatalf("sync exit %d:\n%s", code, out)
+			}
+			clone := filepath.Join(env.baseDir, "github.com", "acme", "CamelCase")
+			if got := gitCmd(t, clone, "config", "--local", "remote.origin.url"); got != url {
+				t.Errorf("origin = %q, want %q", got, url)
+			}
+			nothingToDo("key")
+			configure("url: " + url)
+			nothingToDo("url")
+			configure("repo: github.com/acme/CamelCase")
+			nothingToDo("key again")
+		})
+	}
+}
+
 // TestE2E_ConfigPath: only the default config, when none is named, may be
 // missing; one named -- even at the default path -- must exist. config --edit
 // hands the editor the path as one argument, whatever it holds.
