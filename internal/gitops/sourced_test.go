@@ -236,3 +236,19 @@ func TestResolveBase(t *testing.T) {
 		t.Error("an unknown base ref resolved")
 	}
 }
+
+// A base is named as it resolves: a ref the repo has, else origin's branch.
+func TestNameBase(t *testing.T) {
+	ctx := context.Background()
+	_, source := sourceFixture(t)
+	for base, want := range map[string]string{
+		"main":        "main",           // the source's own branch
+		"feature":     "origin/feature", // a branch only origin has
+		"origin/main": "origin/main",
+		"nope":        "nope", // left for the caller to report
+	} {
+		if got := gitops.NameBase(ctx, source, base); got != want {
+			t.Errorf("NameBase(%q) = %q, want %q", base, got, want)
+		}
+	}
+}

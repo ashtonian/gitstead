@@ -2147,9 +2147,46 @@ disk by copy ID, else (worktree) a common git dir equal to the source's, else
 in-progress rebase/merge/cherry-pick, a git lock, or being behind the upstream
 or, for a branch without one, what it started from: `base_ref`, else origin's
 default branch (`origin/HEAD`), else the branch the repo's checkout tracks. A
-base that doesn't resolve is flagged; a repo with none of these has nothing to
-compare with. Uncommitted and untracked work is reported but isn't a failure:
-agents are expected to have WIP.
+`base_ref` is named in the copy as a new branch resolves it there: the ref
+itself, else origin's branch of that name, so `base_ref: main` is the source's
+`main` to a worktree and `origin/main` to a clone, which has no other local
+branches. A base that doesn't resolve is flagged; a repo with none of these,
+and a shared folder's branch without an upstream, have nothing to compare
+with. A worktree reads these refs in its repo's clone; a clone copy reads its
+own view of origin, as the last refresh from the source left it. Uncommitted
+and untracked work is reported but isn't a failure: agents are expected to
+have WIP. `workspace.Spec.Baseline` is this comparison for `ws status`,
+`ws check`, `ws overview` and `ws pull` alike.
+
+### Pull
+
+`ws pull` brings each copy up to what `ws status` compares it with:
+
+1. With `--backup-first` (the default), back up every copy with uncommitted
+   work; a copy whose backup fails is left alone and reported as failed.
+2. For each copy without an upstream, fetch what it is compared with as
+   `ws fetch` does: the repo's clone once, over the network, then each clone
+   copy's view of origin from it, without the network. A copy whose repo
+   gitstead can't find fetches its own remotes.
+3. Update each copy, a repo's worktrees one at a time (they share its refs,
+   and two git commands updating one repository's refs at once fail to lock
+   them), copies with refs of their own concurrently:
+   - a branch with an upstream: `git pull --ff-only`, or with `--rebase`
+     `git pull --rebase`;
+   - a branch without one: `git merge --ff-only` to its base, or with
+     `--rebase` `git rebase` onto it.
+
+A branch without an upstream is skipped, with the reason and its work left
+as it was, when it is detached, git is busy in it (a lock, or a rebase, merge,
+cherry-pick or revert under way), it has diverged from its base (without
+`--rebase`), or git refuses because a change, an untracked file or an ignored
+one is in the way. Uncommitted changes git can carry across stay, as with
+`git pull --ff-only`. A rebase git refuses to start (uncommitted changes
+without `rebase.autoStash`) is skipped; one that stops on a conflict is
+aborted (`git rebase --abort`) and skipped, so no copy is left mid-rebase. A
+copy with nothing to compare with is skipped. A missing copy, a fetch that
+failed and other git errors are failures: exit 1 when every copy failed, else
+3; skipped copies alone leave it 0.
 
 ### Runs and leases
 
@@ -2323,7 +2360,8 @@ made again.
   `--force` discards it instead. A copy that can't be inspected, archived or
   removed stays on disk and in state. **`ws prune`** removes only copies a full
   inspection finds free of unique work. **`ws pull --backup-first`** (default
-  on) snapshots dirty copies first.
+  on) snapshots dirty copies first, and `ws pull` leaves a copy it can't
+  fast-forward or rebase cleanly as it was (see [Pull](#pull)).
 - A tracked repo with workspace copies, or with linked worktrees, is never
   untracked or deleted (`remove`, stale cleanup) until they are gone.
 - Every archive -- of a retired copy, of a repo `remove --delete` or stale

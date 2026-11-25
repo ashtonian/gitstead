@@ -382,7 +382,7 @@ The ones that shape the code most:
 | `internal/reconcile` | Desired vs recorded vs on-disk for tracked repos, and the plan engine: applies changes, several repos at once, then serial ones. |
 | `internal/state` | The state file: schema, migrations, locking, atomic writes, and `GroupCommit`, which saves concurrent changes in one write. |
 | `internal/gitops` | Everything that runs git: clone, fetch, status, snapshots, backups, restore, archives, upkeep (`maintain.go`), copy IDs, worktrees. |
-| `internal/workspace` | Workspaces: resolving config into replicas and copies, planning their changes on the reconcile engine, making, moving and removing copies, health. Depends on the inventory, never the reverse. |
+| `internal/workspace` | Workspaces: resolving config into replicas and copies, planning their changes on the reconcile engine, making, moving and removing copies, health and what a copy is compared with (which `ws pull` brings it up to). Depends on the inventory, never the reverse. |
 | `internal/hook` | Running `post_clone` and `post_create` hooks: environment, timeouts, logs. |
 | `internal/agent` | Running agents: profile commands, the lease that marks an agent running, and `ws run` itself. |
 | `internal/launch` | Fleets' terminals: the launch plan, and the tmux, iTerm, Muxy and plugin launchers. |

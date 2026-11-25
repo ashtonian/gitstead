@@ -180,15 +180,8 @@ func AddWorktree(ctx context.Context, source, dest, branch, base string, opts Cl
 // origin's branch of that name; with base empty, origin's default branch, or
 // HEAD when origin has none.
 func ResolveBase(ctx context.Context, repo, base string) (string, error) {
-	var candidates []string
-	switch base {
-	case "":
-		candidates = []string{"refs/remotes/origin/HEAD", "HEAD"}
-	default:
-		candidates = []string{base, "refs/remotes/origin/" + base}
-	}
-	for _, ref := range candidates {
-		if oid, err := Git(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil && oid != "" {
+	for _, ref := range baseCandidates(base) {
+		if oid := commitOf(ctx, repo, ref); oid != "" {
 			return oid, nil
 		}
 	}
@@ -196,6 +189,45 @@ func ResolveBase(ctx context.Context, repo, base string) (string, error) {
 		return "", fmt.Errorf("%s has no commits to start a branch from", repo)
 	}
 	return "", fmt.Errorf("base ref %q is neither a ref nor a branch of origin in %s", base, repo)
+}
+
+// NameBase names the ref a non-empty base resolves to in repo, as
+// ResolveBase resolves it: base itself, else origin's branch of that name,
+// shortened as git shortens it (origin/<base>). A clone copy has no local
+// branch but its own, so there a base of main is origin/main. A base that
+// resolves to neither is returned as it is, for whoever uses it to report.
+func NameBase(ctx context.Context, repo, base string) string {
+	for _, ref := range baseCandidates(base) {
+		if commitOf(ctx, repo, ref) == "" {
+			continue
+		}
+		if ref != base {
+			if short, err := Git(ctx, repo, "rev-parse", "--abbrev-ref", ref); err == nil && short != "" {
+				return short
+			}
+		}
+		return ref
+	}
+	return base
+}
+
+// baseCandidates are the refs base may name, in the order they are tried:
+// with base empty, origin's default branch, else HEAD.
+func baseCandidates(base string) []string {
+	if base == "" {
+		return []string{"refs/remotes/origin/HEAD", "HEAD"}
+	}
+	return []string{base, "refs/remotes/origin/" + base}
+}
+
+// commitOf returns the commit ref resolves to in repo; "" when it resolves
+// to none.
+func commitOf(ctx context.Context, repo, ref string) string {
+	oid, err := Git(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	if err != nil {
+		return ""
+	}
+	return oid
 }
 
 // DefaultBase names the branch a repo's work is compared with when no base
