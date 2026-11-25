@@ -2395,8 +2395,9 @@ A fleet (`fleets:`) is workspaces opened side by side with one launcher;
    <name> --json [...]`, over a shared ssh connection (ControlMaster) that the
    launcher's later commands reuse.
 4. Opens it with the launcher (`launch.New`): `auto` picks tmux inside tmux
-   (`$TMUX`), Muxy inside Muxy (`$MUXY_SESSION_ID`), iTerm inside iTerm, else
-   tmux on PATH.
+   (`$TMUX`, first, since tmux runs inside the others), Muxy inside Muxy
+   (`$MUXY_SESSION_ID`, or `TERM_PROGRAM=muxy`), iTerm inside iTerm
+   (`TERM_PROGRAM=iTerm.app` or `LC_TERMINAL=iTerm2`), else tmux on PATH.
 5. Records the fleet's last open (launcher, time, Muxy projects) under
    `fleets:` in state.
 

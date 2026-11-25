@@ -77,12 +77,13 @@ func New(name string, cfg config.LaunchersConfig, env Env) (Launcher, error) {
 }
 
 // auto picks the launcher for the terminal gitstead runs in: tmux inside
-// tmux, Muxy inside Muxy, iTerm inside iTerm, else tmux when installed.
+// tmux, Muxy inside Muxy, iTerm inside iTerm, else tmux when installed. tmux
+// comes first, since it runs inside the others' terminals.
 func auto(cfg config.LaunchersConfig, env Env) (Launcher, error) {
 	switch {
 	case env.Getenv("TMUX") != "":
 		return New("tmux", cfg, env)
-	case env.Getenv("MUXY_SESSION_ID") != "":
+	case env.Getenv("MUXY_SESSION_ID") != "" || env.Getenv("TERM_PROGRAM") == "muxy":
 		return New("muxy", cfg, env)
 	case env.Getenv("TERM_PROGRAM") == "iTerm.app" || env.Getenv("LC_TERMINAL") == "iTerm2":
 		return New("iterm", cfg, env)

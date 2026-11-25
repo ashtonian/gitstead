@@ -464,8 +464,13 @@ func TestAuto(t *testing.T) {
 		want string
 	}{
 		{map[string]string{"TMUX": "/tmp/x"}, true, "tmux"},
+		{map[string]string{"TMUX": "/tmp/x", "TERM_PROGRAM": "muxy", "MUXY_SESSION_ID": "1"}, true, "tmux"}, // tmux inside Muxy
+		{map[string]string{"TERM_PROGRAM": "muxy", "MUXY_SESSION_ID": "1"}, true, "muxy"},
 		{map[string]string{"MUXY_SESSION_ID": "1"}, true, "muxy"},
+		{map[string]string{"TERM_PROGRAM": "muxy"}, false, "muxy"},
+		{map[string]string{"MUXY_SESSION_ID": "1", "LC_TERMINAL": "iTerm2"}, true, "muxy"},
 		{map[string]string{"TERM_PROGRAM": "iTerm.app"}, true, "iterm"},
+		{map[string]string{"LC_TERMINAL": "iTerm2"}, false, "iterm"},
 		{map[string]string{}, true, "tmux"},
 		{map[string]string{}, false, ""},
 	} {

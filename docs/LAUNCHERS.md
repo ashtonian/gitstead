@@ -45,7 +45,9 @@ Every launcher gets the same plan; `launchers.title` names each terminal
 (`{{.Fleet}}`, `{{.Workspace}}`, `{{.Agent}}`, `{{.Profile}}`), `check` makes
 it check its copies first and `keep_shell` leaves a shell when the agent
 exits. `launchers.default` (`auto`) picks tmux inside tmux, Muxy inside a Muxy
-terminal, iTerm inside iTerm, else tmux.
+terminal (`MUXY_SESSION_ID` or `TERM_PROGRAM=muxy` set), iTerm inside iTerm,
+else tmux. tmux comes first: inside tmux in a Muxy or iTerm window, `auto`
+opens tmux.
 
 **tmux**: a session per fleet, a window per workspace (or agent), a pane per
 agent. Each pane is marked with its agent, so opening the fleet again adds only

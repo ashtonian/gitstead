@@ -1106,7 +1106,7 @@ func askWorkspaces(det setup.Detected, a *setup.Answers) error {
 		}
 	}
 	agents := strconv.Itoa(w.Agents)
-	launcherOpts := []huh.Option[string]{huh.NewOption("auto: tmux inside tmux, iTerm inside iTerm, else tmux (recommended)", "auto")}
+	launcherOpts := []huh.Option[string]{huh.NewOption("auto: tmux inside tmux, Muxy inside Muxy, iTerm inside iTerm, else tmux (recommended)", "auto")}
 	for _, l := range det.Launchers {
 		launcherOpts = append(launcherOpts, huh.NewOption(l, l))
 	}
