@@ -67,7 +67,10 @@ Guarantees:
 | `backup.archive_retention` | `4320h` (180 days) | How long an archive is kept; `sync` and `archives prune` delete older ones, except a whole-history archive a kept archive needs (see [Retention](ARCHIVES.md#retention)). `0` keeps archives forever. |
 
 Each can be set per repo in `overrides[].backup`, except `archive_dir` and
-`archive_retention`.
+`archive_retention`, and every one per machine in `machines.<name>.backup`
+(see [Per-machine sections](CONFIGURATION.md#per-machine-sections)), so a
+shared config can put each machine's patches and archives on its own disk.
+An override's key still wins for its repos over the machine's.
 
 ```bash
 gitstead backup --list --repos "*/my-repo"

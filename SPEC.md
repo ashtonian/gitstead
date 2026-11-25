@@ -1091,8 +1091,9 @@ log:
 # ============================================================================
 
 # machine: ""                     # GITSTEAD_MACHINE / --machine; default this machine's name
-machines: {}                      # by machine name: base_dir, workspace_defaults,
-                                  # overrides, repos, discovery, workspaces, fleets
+machines: {}                      # by machine name: base_dir, clone_protocol,
+                                  # workspace_defaults, backup, overrides, repos,
+                                  # discovery, workspaces, fleets
 ```
 
 ### Per-machine sections
@@ -1116,15 +1117,18 @@ The merge, per key of a section:
 
 | Key | Merge |
 |---|---|
-| `base_dir` | Replaces when set. |
+| `base_dir`, `clone_protocol` | Replaces when set; `clone_protocol` is validated `oneof=ssh https`, and `CloneProtocolFor` falls back to it after overrides and the rule's provider. |
 | `workspace_defaults` | Pointer fields: each set one replaces; `env` merges by name. |
+| `backup` | `MachineBackup`, a pointer field per `BackupCfg` key (`archive_dir` and `archive_retention` included, which overrides can't set), each validated as `BackupCfg`'s is when set: each set one replaces, then `normalize` expands `~`. `ResolveForRepo` applies overrides' `backup` over it. |
 | `overrides`, `repos`, `discovery` | Appended; `ResolveForRepo` applies overrides in order, so the section's win. |
 | `workspaces` | By name: `Workspace.over` replaces each non-zero key -- `repos`/`set`/`path` as one -- and merges `env`; a new name is appended. |
 | `fleets` | By name: `Fleet.over` replaces each non-empty key; a new name is appended. |
 
-A reflection test fills every field of `Workspace`, `Fleet` and
-`MachineWorkspaceDefaults` and checks the merge carries each, so a key added
-to one of those types without a merge rule fails. `machine` here is not the
+A reflection test fills every field of `Workspace`, `Fleet`,
+`MachineWorkspaceDefaults` and `MachineBackup` and checks the merge carries
+each, so a key added to one of those types without a merge rule fails; for
+`MachineBackup` it also requires a field for every `BackupCfg` key, with the
+same `koanf` key and `BackupCfg`'s rule made `omitempty`. `machine` here is not the
 name offsite refs use: state's `machine`, chosen once on first offsite push.
 
 ### Config fragments

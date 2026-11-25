@@ -754,9 +754,15 @@ launchers:
 # <name> config` shows another machine's.
 #
 # A section sets:
-#   base_dir             replaces the top-level one.
+#   base_dir, clone_protocol
+#                        replace the top-level ones. clone_protocol is the
+#                        transport of discovered repos and repo-key entries
+#                        that no override's clone_protocol covers.
 #   workspace_defaults   each key it sets replaces the top-level one; env adds
 #                        its names to the top level's.
+#   backup               each key it sets replaces the top-level one; any
+#                        backup key, archive_dir and patch_dir included.
+#                        An override's backup keys still win for its repos.
 #   overrides, repos, discovery
 #                        added after the top-level lists, so an override here
 #                        wins over a top-level one for the same repos.
@@ -781,5 +787,9 @@ machines: {}
   #     - name: app
   #       agents: 6
   # laptop:
+  #   clone_protocol: https           # no SSH key on the forge from here
   #   workspace_defaults:
   #     agents: 1
+  #   backup:
+  #     archive_dir: ~/archive/gitstead
+  #     patch_dir: ~/archive/gitstead-patches

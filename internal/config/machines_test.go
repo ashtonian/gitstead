@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 const machinesYAML = `
@@ -146,6 +147,59 @@ func TestLoad_MachineWithoutSection(t *testing.T) {
 	}
 }
 
+// A machine's clone_protocol replaces the top level's for every repo it
+// would reach, a repo key entry's included, and each backup key it sets
+// replaces the top level's -- an override's for a repo still wins. Another
+// machine keeps the top level's.
+func TestLoad_MachineCloneProtocolAndBackup(t *testing.T) {
+	path := writeMachinesConfig(t, `
+clone_protocol: ssh
+backup:
+  archive_dir: /archive
+  keep_all: 12h
+overrides:
+  - repos: ["github.com/acme/*"]
+    backup: {strategy: stash-ref}
+repos:
+  - repo: github.com/me/notes
+machines:
+  laptop:
+    clone_protocol: https
+    backup:
+      archive_dir: ~/archive
+      patch_dir: /Volumes/Bulk/patches
+      strategy: patch
+      archive_retention: 720h
+`)
+	t.Setenv("GITSTEAD_MACHINE", "laptop")
+	cfg, err := Load(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CloneProtocol != "https" || cfg.CloneProtocolFor("github.com/me/notes", "_manual") != "https" {
+		t.Errorf("clone_protocol = %q, for the repo entry %q; want the laptop's https", cfg.CloneProtocol, cfg.CloneProtocolFor("github.com/me/notes", "_manual"))
+	}
+	b := cfg.Backup
+	if b.ArchiveDir != ExpandHome("~/archive") || b.PatchDir != "/Volumes/Bulk/patches" || b.Strategy != "patch" ||
+		b.ArchiveRetention != 720*time.Hour || b.KeepAll != 12*time.Hour || !b.Enabled {
+		t.Errorf("backup = %+v, want the laptop's keys over the top level's", b)
+	}
+	if got := cfg.ResolveForRepo("github.com/acme/api").Backup; got.Strategy != "stash-ref" || got.PatchDir != "/Volumes/Bulk/patches" {
+		t.Errorf("an acme repo's backup = %+v, want its override's strategy over the laptop's", got)
+	}
+	if top := cfg.TopLevel(); top.CloneProtocol != "ssh" || top.Backup.ArchiveDir != "/archive" || top.Backup.Strategy != "both" {
+		t.Errorf("TopLevel = clone_protocol %q, backup %+v", top.CloneProtocol, top.Backup)
+	}
+
+	t.Setenv("GITSTEAD_MACHINE", "desktop")
+	if cfg, err = Load(t.Context(), path); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CloneProtocol != "ssh" || cfg.Backup.ArchiveDir != "/archive" || cfg.Backup.Strategy != "both" {
+		t.Errorf("desktop: clone_protocol %q, backup %+v; want the top level's", cfg.CloneProtocol, cfg.Backup)
+	}
+}
+
 func TestLoad_MachineSectionErrors(t *testing.T) {
 	tests := []struct {
 		name, yaml, want string
@@ -174,6 +228,26 @@ func TestLoad_MachineSectionErrors(t *testing.T) {
 			name: "a value a tag refuses",
 			yaml: "machines:\n  desktop:\n    workspace_defaults:\n      isolation: copy\n",
 			want: "isolation",
+		},
+		{
+			name: "a transport there is none of",
+			yaml: "machines:\n  laptop:\n    clone_protocol: ftp\n",
+			want: "machines[laptop].clone_protocol must be one of [ssh https]",
+		},
+		{
+			name: "a backup strategy there is none of",
+			yaml: "machines:\n  desktop:\n    backup:\n      strategy: copy\n",
+			want: "machines[desktop].backup.strategy must be one of",
+		},
+		{
+			name: "a negative archive retention",
+			yaml: "machines:\n  desktop:\n    backup:\n      archive_retention: -1h\n",
+			want: "machines[desktop].backup.archive_retention must be >= 0",
+		},
+		{
+			name: "a key backup doesn't take",
+			yaml: "machines:\n  desktop:\n    backup:\n      archive: /x\n",
+			want: "archive",
 		},
 	}
 	for _, tt := range tests {
@@ -230,6 +304,32 @@ func TestMachineMergesEveryKey(t *testing.T) {
 		f := nonZero(reflect.TypeFor[Fleet]()).Interface().(Fleet)
 		if got := f.over(Fleet{Name: f.Name}); !reflect.DeepEqual(got, f) {
 			t.Errorf("over = %+v, want every key of %+v", got, f)
+		}
+	})
+	t.Run("backup", func(t *testing.T) {
+		b := nonZero(reflect.TypeFor[MachineBackup]())
+		mb := b.Interface().(MachineBackup)
+		got := reflect.ValueOf(mb.over(BackupCfg{}))
+		for i := range got.NumField() {
+			name := got.Type().Field(i).Name
+			set := b.FieldByName(name)
+			if !set.IsValid() || set.Kind() != reflect.Pointer {
+				t.Errorf("a machine's backup can't set %s", name)
+				continue
+			}
+			if want := set.Elem().Interface(); !reflect.DeepEqual(got.Field(i).Interface(), want) {
+				t.Errorf("backup.%s = %v, want %v", name, got.Field(i), want)
+			}
+			// Checked as the top-level key is, when set.
+			field, _ := b.Type().FieldByName(name)
+			top := got.Type().Field(i)
+			wantRule := strings.TrimPrefix(strings.TrimPrefix(top.Tag.Get("validate"), "required"), ",")
+			if wantRule != "" {
+				wantRule = "omitempty," + wantRule
+			}
+			if field.Tag.Get("validate") != wantRule || field.Tag.Get("koanf") != top.Tag.Get("koanf") {
+				t.Errorf("backup.%s: koanf %q, validate %q; want %q, %q", name, field.Tag.Get("koanf"), field.Tag.Get("validate"), top.Tag.Get("koanf"), wantRule)
+			}
 		}
 	})
 	t.Run("workspace_defaults", func(t *testing.T) {

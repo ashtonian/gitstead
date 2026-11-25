@@ -16,14 +16,17 @@ import (
 // that machine: where its clones and workspaces go, how many agents it runs,
 // and repos only it tracks. One config file then serves every machine.
 //
-// base_dir and each workspace_defaults key it sets replace the top-level
-// value. overrides, repos and discovery are added after the top-level
-// lists, so an override here wins over a top-level one for the same repo.
-// A workspace or fleet with a top-level one's name changes the keys it sets
-// of that one; with a new name it is declared on this machine only.
+// base_dir, clone_protocol and each workspace_defaults and backup key it
+// sets replace the top-level value. overrides, repos and discovery are added
+// after the top-level lists, so an override here wins over a top-level one
+// for the same repo. A workspace or fleet with a top-level one's name
+// changes the keys it sets of that one; with a new name it is declared on
+// this machine only.
 type Machine struct {
 	BaseDir           string                    `koanf:"base_dir"           yaml:"base_dir,omitempty"`
+	CloneProtocol     string                    `koanf:"clone_protocol"     yaml:"clone_protocol,omitempty" validate:"omitempty,oneof=ssh https"`
 	WorkspaceDefaults *MachineWorkspaceDefaults `koanf:"workspace_defaults" yaml:"workspace_defaults,omitempty"`
+	Backup            *MachineBackup            `koanf:"backup"             yaml:"backup,omitempty"`
 	Overrides         []Override                `koanf:"overrides"          yaml:"overrides,omitempty"  validate:"dive"`
 	Repos             []ManualRepo              `koanf:"repos"              yaml:"repos,omitempty"      validate:"dive"`
 	Discovery         []DiscoveryRule           `koanf:"discovery"          yaml:"discovery,omitempty"  validate:"dive"`
@@ -43,6 +46,23 @@ type MachineWorkspaceDefaults struct {
 	Agent     *string           `koanf:"agent"      yaml:"agent,omitempty"`
 	CacheRoot *string           `koanf:"cache_root" yaml:"cache_root,omitempty"`
 	Env       map[string]string `koanf:"env"        yaml:"env,omitempty"`
+}
+
+// MachineBackup sets backup keys for one machine, any of BackupCfg's. A nil
+// pointer leaves the top-level value. Each key is validated as BackupCfg's
+// is, when set.
+type MachineBackup struct {
+	Enabled             *bool          `koanf:"enabled"                yaml:"enabled,omitempty"`
+	Strategy            *string        `koanf:"strategy"               yaml:"strategy,omitempty"               validate:"omitempty,oneof=stash-ref patch both"`
+	IncludeUntracked    *bool          `koanf:"include_untracked"      yaml:"include_untracked,omitempty"`
+	PatchDir            *string        `koanf:"patch_dir"              yaml:"patch_dir,omitempty"`
+	KeepAll             *time.Duration `koanf:"keep_all"               yaml:"keep_all,omitempty"               validate:"omitempty,min=0"`
+	KeepDaily           *time.Duration `koanf:"keep_daily"             yaml:"keep_daily,omitempty"             validate:"omitempty,min=0"`
+	MaxPerCopy          *int           `koanf:"max_per_copy"           yaml:"max_per_copy,omitempty"           validate:"omitempty,min=0"`
+	MaxUntrackedFileMB  *int           `koanf:"max_untracked_file_mb"  yaml:"max_untracked_file_mb,omitempty"  validate:"omitempty,min=0"`
+	MaxUntrackedTotalMB *int           `koanf:"max_untracked_total_mb" yaml:"max_untracked_total_mb,omitempty" validate:"omitempty,min=0"`
+	ArchiveDir          *string        `koanf:"archive_dir"            yaml:"archive_dir,omitempty"`
+	ArchiveRetention    *time.Duration `koanf:"archive_retention"      yaml:"archive_retention,omitempty"      validate:"omitempty,min=0"`
 }
 
 // machineLookupTimeout bounds asking macOS for this machine's name.
@@ -124,7 +144,11 @@ func (c *Config) forMachine(ctx context.Context, name string) (*Config, error) {
 	if m.BaseDir != "" {
 		out.BaseDir = m.BaseDir
 	}
+	if m.CloneProtocol != "" {
+		out.CloneProtocol = m.CloneProtocol
+	}
 	out.WorkspaceDefaults = m.WorkspaceDefaults.over(c.WorkspaceDefaults)
+	out.Backup = m.Backup.over(c.Backup)
 	out.Workspaces = slices.Clone(c.Workspaces)
 	for _, w := range m.Workspaces {
 		if i := slices.IndexFunc(out.Workspaces, func(t Workspace) bool { return t.Name == w.Name }); i >= 0 {
@@ -169,6 +193,32 @@ func (d *MachineWorkspaceDefaults) over(base WorkspaceDefaults) WorkspaceDefault
 	}
 	base.Env = mergeEnv(base.Env, d.Env)
 	return base
+}
+
+// over returns base with the keys b sets replaced.
+func (b *MachineBackup) over(base BackupCfg) BackupCfg {
+	if b == nil {
+		return base
+	}
+	setIf(&base.Enabled, b.Enabled)
+	setIf(&base.Strategy, b.Strategy)
+	setIf(&base.IncludeUntracked, b.IncludeUntracked)
+	setIf(&base.PatchDir, b.PatchDir)
+	setIf(&base.KeepAll, b.KeepAll)
+	setIf(&base.KeepDaily, b.KeepDaily)
+	setIf(&base.MaxPerCopy, b.MaxPerCopy)
+	setIf(&base.MaxUntrackedFileMB, b.MaxUntrackedFileMB)
+	setIf(&base.MaxUntrackedTotalMB, b.MaxUntrackedTotalMB)
+	setIf(&base.ArchiveDir, b.ArchiveDir)
+	setIf(&base.ArchiveRetention, b.ArchiveRetention)
+	return base
+}
+
+// setIf sets *to to *set when set is set.
+func setIf[T any](to, set *T) {
+	if set != nil {
+		*to = *set
+	}
 }
 
 // over returns base with every key w sets replaced; w's env adds to

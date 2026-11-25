@@ -215,6 +215,17 @@ func TestLoad_FragmentConflicts(t *testing.T) {
 			key: "machines.desktop.base_dir", first: "a.yaml",
 		},
 		{
+			name: "a machine section's transport",
+			main: "machines:\n  laptop:\n    clone_protocol: https\n", a: "machines:\n  laptop:\n    clone_protocol: ssh\n",
+			key: "machines.laptop.clone_protocol", first: "config.yaml",
+		},
+		{
+			name: "a machine section's backup key, embedded from the per-repo keys",
+			a:    "machines:\n  laptop:\n    backup:\n      archive_dir: /a\n      patch_dir: /a\n",
+			b:    "machines:\n  laptop:\n    backup:\n      Patch_Dir: /b\n",
+			key:  "machines.laptop.backup.patch_dir", first: "a.yaml",
+		},
+		{
 			name: "a machine section's named entry",
 			main: "machines:\n  desktop:\n    workspaces:\n      - {name: app, agents: 2}\n",
 			b:    "machines:\n  desktop:\n    workspaces:\n      - {name: app, agents: 6}\n",

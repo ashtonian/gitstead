@@ -304,7 +304,9 @@ machines:
     workspaces:
       - { name: app, agents: 6 }
   laptop:
+    clone_protocol: https              # its SSH key isn't on the forge
     workspace_defaults: { agents: 1 }
+    backup: { archive_dir: ~/archive/gitstead, patch_dir: ~/archive/patches }
 ```
 
 A machine's name is `machine:` -- set it with `GITSTEAD_MACHINE` or
@@ -317,7 +319,9 @@ ignoring case, and are letters, digits, `-` and `_`.
 | Key in a section | How it applies |
 | --- | --- |
 | `base_dir` | Replaces the top-level one. |
+| `clone_protocol` | Replaces the top-level one: the transport of discovered repos and [`repo` entries](#manual-repos-excludes-overrides-tags) no override's `clone_protocol` covers. A `url` entry keeps its URL's. |
 | `workspace_defaults` | Each key it sets replaces the top-level one; `env` adds its names to the top level's, replacing those it shares. |
+| `backup` | Each key it sets replaces the top-level one: any [backup key](BACKUPS.md), `archive_dir` and `patch_dir` included. An override's `backup` keys still win for the repos it covers. |
 | `overrides`, `repos`, `discovery` | Added after the top-level entries. Overrides apply in order, so a section's override wins over a top-level one for the same repos. |
 | `workspaces` | An entry with a top-level workspace's name changes the keys it sets of that one -- `repos`, `set` and `path` replace each other together; `env` adds names -- and keeps the rest. A new name is a workspace on this machine only. |
 | `fleets` | As workspaces: by name, the keys it sets; a new name is this machine's own. |
@@ -339,7 +343,7 @@ machine's without going there.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `machine` | this machine's name | The section to lay over the rest; `GITSTEAD_MACHINE`, `--machine`. |
-| `machines` | `{}` | Each machine's own settings, by name: `base_dir`, `workspace_defaults`, `overrides`, `repos`, `discovery`, `workspaces`, `fleets`. |
+| `machines` | `{}` | Each machine's own settings, by name: `base_dir`, `clone_protocol`, `workspace_defaults`, `backup`, `overrides`, `repos`, `discovery`, `workspaces`, `fleets`. |
 
 ## Config fragments
 
@@ -461,7 +465,7 @@ file is silently replaced by another.
 | Entries | `repos`, `overrides`, `exclude` | Every file's, in file order: `config.yaml`'s first, then each fragment's. Overrides apply in order, so a later file's override wins for the repos it shares with an earlier one, as a later override does within a file. |
 | Named entries | `accounts`, `providers`, `discovery`, `sets`, `agents`, `workspaces`, `fleets` | Every file's, in file order; a name defined in two files is an error. |
 | Maps | `workspace_defaults.env`, `launchers.plugins` | Name by name; a name in two files is an error. |
-| Machine sections | `machines` | By machine name, ignoring case and spelled as the first file spells it. One machine's sections from several files merge by these same rules: `machines.desktop.base_dir` in two files is an error, `overrides` and `repos` are added to, and `discovery`, `workspaces` and `fleets` merge by name. The merged section is then laid over the rest as [Per-machine sections](#per-machine-sections) says. |
+| Machine sections | `machines` | By machine name, ignoring case and spelled as the first file spells it. One machine's sections from several files merge by these same rules: `machines.desktop.base_dir` or `machines.desktop.clone_protocol` in two files is an error, as is one `backup` key, `overrides` and `repos` are added to, and `discovery`, `workspaces` and `fleets` merge by name. The merged section is then laid over the rest as [Per-machine sections](#per-machine-sections) says. |
 | The machine | `machine` | Only in `config.yaml`. A fragment, which every machine reads, can't choose the machine: use `GITSTEAD_MACHINE` or `--machine`. |
 
 Environment variables and flags still override the merged files, as they
