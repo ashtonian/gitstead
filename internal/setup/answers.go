@@ -230,7 +230,8 @@ func (w Workspaces) validate() error {
 
 // Defaults proposes answers: the existing config's choices where there is
 // one, otherwise what was detected, with the recommended features on. The
-// background sync is on unless an existing config runs without one; shell
+// background sync is on unless an existing config runs without one or
+// another tool installed one; shell
 // integration is on unless your shell has it already; git includes are on
 // for several accounts, one of them at least with an identity or key of its
 // own to give; cloning is on when there are accounts to clone from.
@@ -255,6 +256,9 @@ func Defaults(det Detected, existing *config.Config, home string) Answers {
 	}
 	if det.Schedule != nil {
 		a.ScheduleInterval = scheduler.FormatInterval(det.Schedule.Interval)
+	}
+	if det.OtherSchedule != "" {
+		a.Schedule = false
 	}
 	if len(a.Accounts) == 0 {
 		a.Accounts = detectedAccounts(det)

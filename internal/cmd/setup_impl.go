@@ -62,6 +62,13 @@ func (c *SetupCmd) Run(ctx *Context) error {
 	if s := st.Schedules[scheduler.DefaultName]; s != nil {
 		det.Schedule = &setup.InstalledSchedule{Interval: s.Interval}
 	}
+	others, err := unmanagedHere(ctx, st, scheduler.DefaultName)
+	if err != nil {
+		return fmt.Errorf("looking for a background sync another tool installed: %w", err)
+	}
+	if len(others) > 0 {
+		det.OtherSchedule = fmt.Sprintf("%s (%s)", others[0].Job(), definitionsWhere(others))
+	}
 
 	var answers setup.Answers
 	switch {
@@ -87,7 +94,7 @@ func (c *SetupCmd) Run(ctx *Context) error {
 	}
 
 	answers.Adopt = slices.DeleteFunc(answers.Adopt, func(p string) bool { return tracked[p] })
-	if c.noSchedule {
+	if c.noSchedule || det.OtherSchedule != "" {
 		answers.Schedule, det.Schedule = false, nil // left alone
 	}
 	if c.noClone {
@@ -131,7 +138,10 @@ func (c *SetupCmd) Run(ctx *Context) error {
 		// steps after the config was written, by name.
 		Schedule json.RawMessage            `json:"schedule,omitempty"`
 		Steps    map[string]json.RawMessage `json:"steps,omitempty"`
-	}{Config: configPath, Text: string(after), Checks: []doctorCheck{}}
+		// OtherSchedule is the background sync another tool installed,
+		// which setup left alone.
+		OtherSchedule string `json:"other_schedule,omitempty"`
+	}{Config: configPath, Text: string(after), Checks: []doctorCheck{}, OtherSchedule: det.OtherSchedule}
 	for _, ch := range checks {
 		result.Checks = append(result.Checks, doctorCheck{Level: string(ch.Status), Message: ch.Message})
 	}
@@ -258,6 +268,8 @@ func printSetupDone(configPath string, a setup.Answers, det setup.Detected, done
 		fmt.Printf("  repos              cloned under %s\n", a.BaseDir)
 	}
 	switch {
+	case det.OtherSchedule != "":
+		fmt.Printf("  background sync    another tool's, left alone: %s\n", det.OtherSchedule)
 	case a.Schedule && ok("schedule"):
 		fmt.Printf("  background sync    every %s; `gitstead install-agent --list` shows it\n", scheduler.FormatInterval(a.Interval()))
 	case !a.Schedule:
@@ -348,6 +360,8 @@ func printSetupReview(path string, before, after []byte, a setup.Answers, det se
 		then = append(then, "clone what your accounts track (gitstead discover --apply)")
 	}
 	switch {
+	case det.OtherSchedule != "":
+		then = append(then, "leave the background sync alone: another tool installed it, "+det.OtherSchedule)
 	case a.Schedule:
 		then = append(then, "install the background sync: `gitstead sync` every "+scheduler.FormatInterval(a.Interval()))
 	case det.Schedule != nil:
@@ -406,7 +420,7 @@ func askSetup(ctx *Context, det setup.Detected, a setup.Answers, tracked map[str
 	if err := askAccounts(ctx.GoCtx(), det, &a, online, found); err != nil {
 		return a, err
 	}
-	if err := askFeatures(&a); err != nil {
+	if err := askFeatures(&a, det); err != nil {
 		return a, err
 	}
 	if err := askWorkspaces(det, &a); err != nil {
@@ -1019,13 +1033,22 @@ func validNameGlobs(s string) error {
 	return nil
 }
 
-func askFeatures(a *setup.Answers) error {
-	return huh.NewForm(huh.NewGroup(
-		huh.NewNote().Title("Features").Description("Recommended answers are preselected; everything else stays off until you turn it on."),
+func askFeatures(a *setup.Answers, det setup.Detected) error {
+	note := "Recommended answers are preselected; everything else stays off until you turn it on."
+	var schedule []huh.Field
+	if det.OtherSchedule != "" {
+		note += " The background sync is another tool's, which setup leaves alone: " + det.OtherSchedule + "."
+	} else {
+		schedule = append(schedule, huh.NewConfirm().Title("Run sync in the background?").
+			Description("Installs a launchd agent, systemd timer or cron entry that runs `gitstead sync`; you choose how often next. Recommended.").Value(&a.Schedule))
+	}
+	fields := []huh.Field{
+		huh.NewNote().Title("Features").Description(note),
 		huh.NewConfirm().Title("Back up uncommitted work during sync?").
 			Description("Snapshots that never touch your working tree or the index lock. Recommended.").Value(&a.Backups),
-		huh.NewConfirm().Title("Run sync in the background?").
-			Description("Installs a launchd agent, systemd timer or cron entry that runs `gitstead sync`; you choose how often next. Recommended.").Value(&a.Schedule),
+	}
+	fields = append(fields, schedule...)
+	fields = append(fields,
 		huh.NewConfirm().Title("Push backup refs to each repo's remote?").
 			Description("Offsite copies of your backups under refs/gitstead/*; visible to anyone who can read the remote.").Value(&a.RemoteSync),
 		huh.NewConfirm().Title("Fast-forward clones that are behind during sync?").
@@ -1040,7 +1063,8 @@ func askFeatures(a *setup.Answers) error {
 			huh.NewOption("after 30 days, stop tracking it and move its clone into the archive", "archive"),
 			huh.NewOption("after 30 days, archive its unique work and delete it", "remove_and_delete"),
 			huh.NewOption("ignore it", "ignore")).Value(&a.Cleanup),
-	)).Run()
+	)
+	return huh.NewForm(huh.NewGroup(fields...)).Run()
 }
 
 // askWorkspaces asks whether to run coding agents in workspaces and, if so,

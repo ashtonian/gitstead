@@ -36,6 +36,7 @@ type InstallAgentCmd struct {
 	List      bool          `help:"List installed schedules."`
 	Uninstall bool          `help:"Remove the named schedule instead of installing it."`
 	Print     bool          `help:"Print the planned actions and unit files without applying them."`
+	Force     bool          `help:"Replace, or with --uninstall remove, a schedule of this name another tool installed (a dotfiles repo, home-manager); without it install-agent leaves one alone."`
 }
 
 func (c *InstallAgentCmd) Run(ctx *Context) error {
@@ -97,6 +98,27 @@ func (c *InstallAgentCmd) install(ctx *Context, cfg *config.Config, st *state.St
 	doc.Kind = string(s.Kind)
 	if err := s.Validate(); err != nil {
 		return doc, err
+	}
+
+	// Another tool's schedule of this name is left alone, or with --force
+	// replaced: removed first unless this install writes over it.
+	others, err := unmanagedSchedules(host, st, s.Name)
+	if err != nil {
+		return doc, fmt.Errorf("looking for another tool's schedule %q: %w", s.Name, err)
+	}
+	if len(others) > 0 && !c.Force {
+		return doc, &unmanagedError{defs: others, force: "replaces"}
+	}
+	for _, other := range others {
+		if other.Kind == s.Kind && other.Daemon == s.Daemon {
+			continue
+		}
+		actions, err := host.Uninstall(scheduler.Schedule{Name: other.Name, Kind: other.Kind, Daemon: other.Daemon}, c.Print)
+		printActions("remove the "+string(other.Kind)+" schedule another tool installed", actions)
+		doc.Actions = append(doc.Actions, actions...)
+		if err != nil {
+			return doc, fmt.Errorf("removing another tool's %s schedule %q: %w", other.Kind, other.Name, err)
+		}
 	}
 
 	// Moving a schedule to another backend removes it from the old one.
@@ -219,6 +241,16 @@ func (c *InstallAgentCmd) uninstall(cfg *config.Config, st *state.State, host sc
 	} else if s.Kind == "" {
 		s.Kind = scheduler.DefaultKind()
 	}
+	if !c.Force {
+		others, err := unmanagedSchedules(host, st, s.Name)
+		if err != nil {
+			return scheduleJSON{Name: s.Name, Kind: string(s.Kind), Actions: []string{}}, fmt.Errorf("looking for another tool's schedule %q: %w", s.Name, err)
+		}
+		others = slices.DeleteFunc(others, func(d scheduler.Definition) bool { return d.Kind != s.Kind || d.Daemon != s.Daemon })
+		if len(others) > 0 {
+			return scheduleJSON{Name: s.Name, Kind: string(s.Kind), Actions: []string{}}, &unmanagedError{defs: others, force: "removes"}
+		}
+	}
 	actions, err := host.Uninstall(s, c.Print)
 	doc := scheduleJSON{Name: s.Name, Kind: string(s.Kind), Planned: c.Print, Actions: append([]string{}, actions...)}
 	if c.Print {
@@ -233,6 +265,52 @@ func (c *InstallAgentCmd) uninstall(cfg *config.Config, st *state.State, host sc
 		delete(st.Schedules, c.Name)
 		return nil
 	})
+}
+
+// unmanagedSchedules are the schedules defined on this machine under
+// gitstead's naming that state has no record of gitstead installing: another
+// tool's, such as a dotfiles repo's or home-manager's. A name keeps only that
+// schedule's; "" keeps all.
+func unmanagedSchedules(host scheduler.Host, st *state.State, name string) ([]scheduler.Definition, error) {
+	defs, err := host.Definitions()
+	defs = slices.DeleteFunc(defs, func(d scheduler.Definition) bool {
+		rec := st.Schedules[d.Name]
+		ours := rec != nil && scheduler.Kind(rec.Kind) == d.Kind && rec.Daemon == d.Daemon
+		return ours || name != "" && d.Name != name
+	})
+	return defs, err
+}
+
+// unmanagedHere is unmanagedSchedules on this machine.
+func unmanagedHere(ctx *Context, st *state.State, name string) ([]scheduler.Definition, error) {
+	host, err := newHost(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return unmanagedSchedules(host, st, name)
+}
+
+// definitionsWhere is where the definitions are, for a message.
+func definitionsWhere(defs []scheduler.Definition) string {
+	var where []string
+	for _, d := range defs {
+		for _, w := range d.Where {
+			where = append(where, tildify(w))
+		}
+	}
+	return strings.Join(where, ", ")
+}
+
+// unmanagedError is a schedule install-agent leaves alone: another tool
+// installed one of the name, and manages it.
+type unmanagedError struct {
+	defs  []scheduler.Definition // one schedule's
+	force string                 // what --force does to it
+}
+
+func (e *unmanagedError) Error() string {
+	return fmt.Sprintf("background sync %s is installed by another tool (%s), which manages it: gitstead has no record of installing it, so it leaves it alone; --force %s it",
+		e.defs[0].Job(), definitionsWhere(e.defs), e.force)
 }
 
 func listSchedules(st *state.State) error {

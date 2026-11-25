@@ -43,6 +43,10 @@ let
   # gitstead-<name>, as install-agent names them.
   unitName = name: if name == "default" then "gitstead" else "gitstead-${name}";
 
+  # The launchd label, which names the agent's plist: install-agent's, so
+  # gitstead knows the agent as a schedule another tool installed.
+  launchdLabel = name: if name == "default" then "com.ashtonian.gitstead" else "com.ashtonian.gitstead.${name}";
+
   globalArgs =
     lib.optionals (cfg.configFile != null) [ "--config" cfg.configFile ]
     ++ lib.optionals (cfg.stateFile != null) [ "--state" cfg.stateFile ];
@@ -252,6 +256,7 @@ in
       launchd.agents = lib.mapAttrs' (name: s: lib.nameValuePair (unitName name) {
         enable = true;
         config = {
+          Label = launchdLabel name;
           ProgramArguments = argv s;
           EnvironmentVariables = environment s;
           StartInterval = (parseInterval name s.interval).seconds;

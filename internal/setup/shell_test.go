@@ -119,7 +119,7 @@ func TestShellRC_InstallMakesTheFile(t *testing.T) {
 // What setup does beyond the config starts at what the machine has: the
 // shell integration unless your shell has it, git includes for several
 // accounts of their own, cloning when there are accounts, and the background
-// sync as installed.
+// sync as installed, none of gitstead's beside another tool's.
 func TestDefaults_BeyondTheConfig(t *testing.T) {
 	rc := &ShellRC{Shell: "zsh", Path: "/home/me/.zshrc"}
 	two := []GHAccount{{Host: "github.com", Login: "me"}, {Host: "github.com", Login: "work"}}
@@ -140,6 +140,7 @@ func TestDefaults_BeyondTheConfig(t *testing.T) {
 		{name: "included already", det: Detected{GitIncludes: true, GH: two[:1]}, includes: true, clone: true, schedule: true, interval: "15m"},
 		{name: "re-run, no schedule", det: Detected{}, existing: existing, interval: "15m"},
 		{name: "re-run, schedule installed", det: Detected{Schedule: &InstalledSchedule{Interval: time.Hour}}, existing: existing, schedule: true, interval: "1h"},
+		{name: "another tool's schedule", det: Detected{ShellRC: rc, GH: two[:1], OtherSchedule: "com.ashtonian.gitstead (~/Library/LaunchAgents/com.ashtonian.gitstead.plist)"}, shell: true, clone: true, interval: "15m"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

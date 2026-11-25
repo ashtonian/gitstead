@@ -14,13 +14,24 @@ schedule, and says what to do about each problem (`--json` for a script).
 Then:
 
 - **The background sync isn't running.** `gitstead install-agent --list`
-  shows what is installed. On macOS, `launchctl print gui/$(id -u)/com.ashtonian.gitstead`
+  shows what gitstead installed, and `gitstead doctor` also names one another
+  tool -- a dotfiles repo, home-manager -- installed under gitstead's name
+  (`background sync ... is installed by another tool`), which gitstead
+  neither checks nor changes: fix that one where it is managed. On macOS, `launchctl print gui/$(id -u)/com.ashtonian.gitstead`
   shows the agent's state and last exit; its output is in
   `~/.local/share/gitstead/gitstead.log`. On Linux, `systemctl --user status
   gitstead.timer` and `journalctl --user -u gitstead`; if it stops at logout,
   reinstall with `--linger`. A binary that moved or was upgraded out of a Nix
   store or Homebrew Cellar path: `gitstead install-agent` again from the
   `gitstead` on your PATH.
+- **`install-agent` or `setup` says another tool installed the background
+  sync.** A launchd agent, systemd units or crontab line under gitstead's name
+  is there, and the state file has no record of gitstead installing it
+  ([A schedule another tool manages](SCHEDULING.md#a-schedule-another-tool-manages)).
+  If a config manager owns it, leave it: change its interval or command
+  there. If it is a leftover -- from a state file that was deleted or moved,
+  say -- `gitstead install-agent --force` replaces it, and from then on it is
+  gitstead's.
 - **It works in your terminal but not in the background sync.** The schedule
   has no shell environment: a provider using `token_env` gets nothing (`gitstead
   setup` warns). Use `token_command` (`gh auth token --hostname H --user U`

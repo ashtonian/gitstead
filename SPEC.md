@@ -150,7 +150,11 @@ file between markers it replaces on a re-run (`shell`; `setup.ShellRC`: `$SHELL`
 picks zsh -> `${ZDOTDIR:-~}/.zshrc`, bash -> `~/.bashrc` or `~/.bash_profile` on
 macOS, fish -> `config.fish`; a symlinked file is edited at its target), `discover
 --apply` (`clone`), and last `install-agent --interval <schedule_interval>`, or
-`install-agent --uninstall` when the schedule is off and one is installed. A gh
+`install-agent --uninstall` when the schedule is off and one is installed.
+When another tool installed the default schedule (`unmanagedSchedules`; see
+`install-agent`), setup leaves it alone: it doesn't ask, its answers'
+`schedule` is false, it neither installs nor removes one, and its review,
+summary and `--json` (`other_schedule`) say so. A gh
 login whose token gh has from an environment variable (`tokenSource`) gets
 `token_env`, not `gh auth token --user`, which reads only stored logins; when gh
 lists both for one login, the stored one wins.
@@ -570,11 +574,11 @@ itself. A malformed pattern in config fails validation.
 
 | Command | Description |
 |---|---|
-| `bootstrap` | One-command machine setup: init (if missing) → doctor → discover --apply → sync → install-agent. `--profile` (tag scope; also names the schedule and limits it to the tag), `--no-agent`, `--dry-run`. |
+| `bootstrap` | One-command machine setup: init (if missing) → doctor → discover --apply → sync → install-agent. `--profile` (tag scope; also names the schedule and limits it to the tag), `--no-agent`, `--dry-run`. A schedule of that name another tool installed is left alone: the step is skipped, saying so, and bootstrap still succeeds. |
 | `plan [--json]` | Discover and show every change config asks for -- repos and workspaces -- with drift and blocked changes. Changes nothing. |
 | `apply [--yes]` | Discover and make every change, including moves and removals; asks before those unless `--yes` (refuses without a terminal). Saves state after each change; non-zero exit if any change failed or was blocked. |
-| `doctor` | Offline, read-only preflight: git present, config valid (naming the config file and fragments read, in merge order), base_dir writable, provider tokens resolve, configured SSH keys exist, whether a sync is running, state lock free within 5s (held longer, its holder is reported as stuck), each recorded schedule installed with its binary present and lingering on (systemd), doctor itself passing in each schedule's recorded environment, tracked repos on disk with matching origin. Non-zero exit on failure. |
-| `install-agent` | Install a named background sync (`--name`, default `default`) running `sync --quiet` plus its selection (`--repos`/`--tag`/`--set`) every `--interval` (must divide an hour or a day). Records a stable binary path (refuses `/nix/store`, Cellar and temporary paths), the current `PATH` and a long-lived `SSH_AUTH_SOCK`; runs at nice 10 with idle I/O. launchd: LaunchAgent, or `--daemon` LaunchDaemon with `UserName` via sudo. systemd: `OnCalendar=` + `Persistent=true`; `--linger` enables lingering. cron: refuses to rewrite an unreadable crontab, backs it up first, touches only lines with its marker. Recorded in state under `schedules`; `--list`, `--uninstall`, `--print`. |
+| `doctor` | Offline, read-only preflight: git present, config valid (naming the config file and fragments read, in merge order), base_dir writable, provider tokens resolve, configured SSH keys exist, whether a sync is running, state lock free within 5s (held longer, its holder is reported as stuck), each recorded schedule installed with its binary present and lingering on (systemd), doctor itself passing in each schedule's recorded environment, each schedule another tool installed under gitstead's naming reported at info (`background sync <job> is installed by another tool (<where>); doctor does not check its environment`), never as missing, tracked repos on disk with matching origin. Non-zero exit on failure. |
+| `install-agent` | Install a named background sync (`--name`, default `default`) running `sync --quiet` plus its selection (`--repos`/`--tag`/`--set`) every `--interval` (must divide an hour or a day). Records a stable binary path (refuses `/nix/store`, Cellar and temporary paths), the current `PATH` and a long-lived `SSH_AUTH_SOCK`; runs at nice 10 with idle I/O. launchd: LaunchAgent, or `--daemon` LaunchDaemon with `UserName` via sudo. systemd: `OnCalendar=` + `Persistent=true`; `--linger` enables lingering. cron: refuses to rewrite an unreadable crontab, backs it up first, touches only lines with its marker. Recorded in state under `schedules`; `--list`, `--uninstall`, `--print`. Another tool's schedule: `scheduler.Host.Definitions` finds every schedule defined under gitstead's naming -- launchd agents and daemons labelled `com.ashtonian.gitstead[.<name>]`, systemd user units `gitstead[-<name>].service`/`.timer`, crontab lines with the marker -- and one that state doesn't record by that name, kind and daemon flag is another tool's (`unmanagedSchedules`). Installing or (`--uninstall`) removing a schedule of its name and backend is refused, naming its files, with nothing changed, `--print` included; `--force` replaces it (removing one in another backend) or removes it. A crontab that can't be read fails the check. |
 | `run [--set/--tag/--repos] -- <cmd>` | Run a command in each matching repo (parallel, bounded by concurrency). `--fail-fast`; non-zero exit if any failed. |
 | `manifest export [--out]` / `import <file>` | Portable `{url,tags,path,account,ssh_key}` manifest of the tracked set, to rehydrate a new machine (captures manual adoptions). import is idempotent and clones over the url's transport. An entry naming an account (which must exist) or an SSH key is first kept where config reads it -- the shared `manifest:`, else config's `repos:`, edited in place -- so the clone gets that identity and key, and keeps them; export writes each repo's `repos:` or manifest binding. |
 | `manifest save [--dry-run]` | Add each repo tracked by hand that neither `repos:` nor the shared manifest lists to the manifest; with no `manifest:`, print them as `repos:` entries. |
@@ -1318,8 +1322,9 @@ tombstones:
   - {workspace: app, agent: agent-3, repo: github.com/ashtonian/gitstead, path: /Users/me/workspaces/app/agent-3,
      branch: agents/app/agent-3, pr: "", retired: 2026-10-12T17:00:00Z, archive: app-agent-3-gitstead-20261012T170000.000000000Z}
 
-# Background syncs `install-agent` installed, so doctor can check them and
-# --uninstall can remove them by name.
+# Background syncs `install-agent` installed, so doctor can check them,
+# --uninstall can remove them by name, and both tell them from one another
+# tool installed under the same name.
 schedules:
   work:
     name: work

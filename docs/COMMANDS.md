@@ -19,7 +19,7 @@
 | `gitstead restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` to clone+apply into a scratch dir, or `--apply` onto the tree (dirty-guarded). |
 | `gitstead top` | A live view of every workspace copy (agent state, terminal activity, branch, dirty, ahead/behind, last backup, PR) and every repo needing attention. See [Live view](SHELL.md#live-view-gitstead-top). |
 | `gitstead status` | Table of managed repos. `--live` inspects working trees now (dirty + ahead/behind, no network); `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
-| `gitstead doctor` | Diagnose tooling, auth (tokens/SSH keys), config (naming the files read), and repo-on-disk health. Read-only; `plan`/`apply` fix what config can. |
+| `gitstead doctor` | Diagnose tooling, auth (tokens/SSH keys), config (naming the files read), background syncs (naming one another tool installed), and repo-on-disk health. Read-only; `plan`/`apply` fix what config can. |
 | `gitstead clone <url>` | Clone and track one repo by hand, at its templated path or `--path`. `--tag`. A repo added by hand keeps the path and URL it was given. |
 | `gitstead clone --org\|--user\|--group\|--mine\|--query …` | Find a set of repos -- narrowed by `--name` (words or globs), `--name-pattern`, `--language`, `--topic`, `--visibility`, `--forks`, `--archived` -- list it, and on a terminal ask: clone them all, pick from the list, or none. Offers to save the selection as a discovery rule, so every sync clones what newly matches (`--save <name>`, `--no-save`); `--dry-run` only lists. See [Finding your repos](DISCOVERY.md#finding-your-repos). |
 | `gitstead adopt <path>` | Track an existing clone where it is. `--scan` for batch, `--dry-run`, `--tag`. |
@@ -37,7 +37,7 @@
 | `gitstead archives ls\|show\|restore\|rm\|prune` | The catalog of what was saved before copies and repos were taken away -- bundles of unique work, and whole clones -- and how to restore each; `restore` moves an archived clone back or rebuilds a clone from a bundle, `rm` deletes archives for good, `prune` deletes those past `backup.archive_retention` now (`--dry-run`). See [Retention](ARCHIVES.md#retention). |
 | `gitstead cd\|path\|open <query>` | Jump to, print, or open in your editor (`--web`: the repo's page) a repo, workspace or agent's folder from part of its name. See [Jump and open](SHELL.md#jump-and-open). |
 | `gitstead shell-init bash\|zsh\|fish` | Print the shell integration: the function that makes `gitstead cd` change directory, and tab completion. `setup` adds it to your shell. |
-| `gitstead install-agent` | Install, list (`--list`) or remove (`--uninstall`) background syncs (launchd/systemd/cron); `--name` and `--repos`/`--tag`/`--set` for several. |
+| `gitstead install-agent` | Install, list (`--list`) or remove (`--uninstall`) background syncs (launchd/systemd/cron); `--name` and `--repos`/`--tag`/`--set` for several. Leaves one another tool installed under the name alone unless `--force` ([A schedule another tool manages](SCHEDULING.md#a-schedule-another-tool-manages)). |
 | `gitstead install-completions` | Print tab completion alone, for your login shell. See [Shell completions](SHELL.md#shell-completions). |
 | `gitstead version` | Print version, commit, build date. |
 

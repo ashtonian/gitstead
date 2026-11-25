@@ -1,10 +1,13 @@
 package scheduler
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -22,6 +25,107 @@ type Host struct {
 	// BackupDir receives a copy of the crontab before gitstead changes it.
 	BackupDir string
 	Now       func() time.Time
+	// DaemonDir holds LaunchDaemons: /Library/LaunchDaemons unless set.
+	DaemonDir string
+}
+
+// Files are where s's definition lives on this host; cron keeps it in the
+// crontab instead.
+func (h Host) Files(s Schedule) []string {
+	switch {
+	case s.Kind == Launchd && s.Daemon:
+		return []string{filepath.Join(h.daemonDir(), s.Label()+".plist")}
+	case s.Kind == Launchd:
+		return []string{filepath.Join(h.agentDir(), s.Label()+".plist")}
+	case s.Kind == Systemd:
+		return []string{filepath.Join(h.unitDir(), s.unit()+".service"), filepath.Join(h.unitDir(), s.unit()+".timer")}
+	}
+	return nil
+}
+
+func (h Host) agentDir() string { return filepath.Join(h.Home, "Library", "LaunchAgents") }
+func (h Host) unitDir() string  { return filepath.Join(h.Home, ".config", "systemd", "user") }
+
+func (h Host) daemonDir() string {
+	if h.DaemonDir != "" {
+		return h.DaemonDir
+	}
+	return "/Library/LaunchDaemons"
+}
+
+// CrontabWhere is a Definition's Where for one in the crontab.
+const CrontabWhere = "crontab"
+
+// Definition is a schedule defined on this host under gitstead's naming --
+// the launchd label, systemd unit or crontab marker install-agent gives it --
+// whoever wrote it.
+type Definition struct {
+	Name   string
+	Kind   Kind
+	Daemon bool
+	// Where defines it: its files, or CrontabWhere.
+	Where []string
+}
+
+// Job is what the scheduler calls it, as Schedule.Job.
+func (d Definition) Job() string { return Schedule{Name: d.Name, Kind: d.Kind}.Job() }
+
+// Definitions are the schedules defined on this host under gitstead's
+// naming, by name and then kind, whether gitstead or another tool -- a
+// dotfiles repo, home-manager -- wrote them: launchd agents and daemons,
+// systemd user units and crontab lines. A crontab that can't be read is an
+// error, with the definitions found elsewhere; no crontab command is none.
+func (h Host) Definitions() ([]Definition, error) {
+	var defs []Definition
+	for _, dir := range []struct {
+		path   string
+		daemon bool
+	}{{h.agentDir(), false}, {h.daemonDir(), true}} {
+		for _, path := range glob(dir.path, labelPrefix+"*.plist") {
+			if name, ok := nameOfID(labelPrefix, ".", strings.TrimSuffix(filepath.Base(path), ".plist")); ok {
+				defs = append(defs, Definition{Name: name, Kind: Launchd, Daemon: dir.daemon, Where: []string{path}})
+			}
+		}
+	}
+	units := map[string][]string{}
+	for _, path := range glob(h.unitDir(), unitPrefix+"*") {
+		base := filepath.Base(path)
+		unit := strings.TrimSuffix(strings.TrimSuffix(base, ".service"), ".timer")
+		if unit == base {
+			continue
+		}
+		if name, ok := nameOfID(unitPrefix, "-", unit); ok {
+			units[name] = append(units[name], path)
+		}
+	}
+	for name, files := range units {
+		defs = append(defs, Definition{Name: name, Kind: Systemd, Where: files})
+	}
+	tab, err := h.crontab()
+	if errors.Is(err, exec.ErrNotFound) {
+		tab, err = nil, nil
+	}
+	inTab := map[string]bool{}
+	for _, line := range tab {
+		i := strings.LastIndex(line, "# "+labelPrefix)
+		if i < 0 {
+			continue
+		}
+		if name, ok := nameOfID(labelPrefix, ".", strings.TrimSpace(line[i+2:])); ok && !inTab[name] {
+			inTab[name] = true
+			defs = append(defs, Definition{Name: name, Kind: Cron, Where: []string{CrontabWhere}})
+		}
+	}
+	slices.SortFunc(defs, func(a, b Definition) int {
+		return cmp.Or(strings.Compare(a.Name, b.Name), strings.Compare(string(a.Kind), string(b.Kind)), strings.Compare(a.Where[0], b.Where[0]))
+	})
+	return defs, err
+}
+
+// glob is dir's entries matching pattern, sorted; none when dir is missing.
+func glob(dir, pattern string) []string {
+	paths, _ := filepath.Glob(filepath.Join(dir, pattern)) // only a malformed pattern fails
+	return paths
 }
 
 // Install installs s, replacing a schedule of the same name and kind. With
@@ -46,7 +150,7 @@ func (h Host) Install(s Schedule, dryRun bool) ([]string, error) {
 func (h Host) Uninstall(s Schedule, dryRun bool) ([]string, error) {
 	switch {
 	case s.Kind == Launchd && s.Daemon:
-		path := s.Files(h.Home)[0]
+		path := h.Files(s)[0]
 		actions := []string{
 			"sudo launchctl bootout system/" + s.Label(),
 			"sudo rm -f " + path,
@@ -60,7 +164,7 @@ func (h Host) Uninstall(s Schedule, dryRun bool) ([]string, error) {
 		}
 		return actions, nil
 	case s.Kind == Launchd:
-		path := s.Files(h.Home)[0]
+		path := h.Files(s)[0]
 		actions := []string{"launchctl bootout " + h.gui() + "/" + s.Label(), "remove " + path}
 		if dryRun {
 			return actions, nil
@@ -68,7 +172,7 @@ func (h Host) Uninstall(s Schedule, dryRun bool) ([]string, error) {
 		_, _ = h.Run("launchctl", "bootout", h.gui()+"/"+s.Label())
 		return actions, removeIfPresent(path)
 	case s.Kind == Systemd:
-		files := s.Files(h.Home)
+		files := h.Files(s)
 		actions := []string{
 			"systemctl --user disable --now " + s.unit() + ".timer",
 			"remove " + strings.Join(files, " and "),
@@ -105,7 +209,7 @@ func (h Host) Installed(s Schedule) (bool, error) {
 		}
 		return len(withoutMarker(tab, s.marker())) != len(tab), nil
 	}
-	for _, f := range s.Files(h.Home) {
+	for _, f := range h.Files(s) {
 		if _, err := os.Stat(f); err != nil {
 			return false, nil
 		}
@@ -116,7 +220,7 @@ func (h Host) Installed(s Schedule) (bool, error) {
 func (h Host) gui() string { return fmt.Sprintf("gui/%d", h.UID) }
 
 func (h Host) installAgent(s Schedule, dryRun bool) ([]string, error) {
-	path := s.Files(h.Home)[0]
+	path := h.Files(s)[0]
 	actions := []string{
 		fmt.Sprintf("write %s:\n%s", path, indent(s.Plist())),
 		fmt.Sprintf("launchctl bootout %s/%s (if loaded)", h.gui(), s.Label()),
@@ -138,7 +242,7 @@ func (h Host) installAgent(s Schedule, dryRun bool) ([]string, error) {
 // installDaemon installs a LaunchDaemon, which only root can: the plist is
 // written to a private file first and installed with sudo.
 func (h Host) installDaemon(s Schedule, dryRun bool) ([]string, error) {
-	path := s.Files(h.Home)[0]
+	path := h.Files(s)[0]
 	actions := []string{
 		fmt.Sprintf("sudo install -m 0644 <plist> %s:\n%s", path, indent(s.Plist())),
 		fmt.Sprintf("sudo launchctl bootout system/%s (if loaded)", s.Label()),
@@ -170,7 +274,7 @@ func (h Host) installDaemon(s Schedule, dryRun bool) ([]string, error) {
 }
 
 func (h Host) installSystemd(s Schedule, dryRun bool) ([]string, error) {
-	files := s.Files(h.Home)
+	files := h.Files(s)
 	service, timer := files[0], files[1]
 	actions := []string{
 		fmt.Sprintf("write %s:\n%s", service, indent(s.Service())),

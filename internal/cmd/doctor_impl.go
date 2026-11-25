@@ -157,7 +157,11 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 	}
 
 	if !c.Scheduled {
-		checkSchedules(ctx, st, d)
+		if host, err := newHost(ctx); err != nil {
+			d.warn(fmt.Sprintf("schedules: %v", err))
+		} else {
+			checkSchedules(ctx, st, host, d)
+		}
 	}
 
 	// --- Tracked repos: present on disk, origin still maps to the key ---
@@ -324,15 +328,22 @@ func orInherited(v string) string {
 
 // checkSchedules checks each installed schedule is in place and that its
 // environment -- PATH and agent captured at install, nothing else -- can do
-// what a sync needs, by running doctor there.
-func checkSchedules(ctx *Context, st *state.State, d *doctorReport) {
-	if len(st.Schedules) == 0 {
-		d.info("no background schedule installed (`gitstead install-agent`)")
-		return
-	}
-	host, err := newHost(ctx)
+// what a sync needs, by running doctor there. A schedule another tool
+// installed under gitstead's naming is reported, not checked: what it runs,
+// and in what environment, is that tool's.
+func checkSchedules(ctx *Context, st *state.State, host scheduler.Host, d *doctorReport) {
+	others, err := unmanagedSchedules(host, st, "")
 	if err != nil {
-		d.warn(fmt.Sprintf("schedules: %v", err))
+		d.warn(fmt.Sprintf("looking for schedules other tools installed: %v", err))
+	}
+	for _, other := range others {
+		d.info(fmt.Sprintf("background sync %s is installed by another tool (%s); doctor does not check its environment",
+			other.Job(), definitionsWhere([]scheduler.Definition{other})))
+	}
+	if len(st.Schedules) == 0 {
+		if len(others) == 0 {
+			d.info("no background schedule installed (`gitstead install-agent`)")
+		}
 		return
 	}
 	for _, name := range slices.Sorted(maps.Keys(st.Schedules)) {

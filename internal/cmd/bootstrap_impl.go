@@ -2,18 +2,21 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
 	"golang.org/x/term"
 
 	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/scheduler"
 )
 
 // Run sets up a fresh machine end to end by orchestrating the existing commands
 // on the shared context: setup (only if there is no config file or fragment; it asks on a
 // terminal and takes the recommended answers otherwise) -> doctor (report,
-// continue) -> discover --apply -> sync -> install-agent (unless --no-agent).
+// continue) -> discover --apply -> sync -> install-agent (unless --no-agent,
+// or another tool installed the schedule).
 // Each step takes/releases the state lock independently, so sequential reuse is
 // safe. --profile scopes discovery rules and sync to a tag.
 func (c *BootstrapCmd) Run(ctx *Context) error {
@@ -30,7 +33,19 @@ func (c *BootstrapCmd) Run(ctx *Context) error {
 		}
 		steps = append(steps, "doctor", "discover --apply"+tagSuffix(c.Profile), "sync"+tagSuffix(c.Profile))
 		if !c.NoAgent {
-			steps = append(steps, fmt.Sprintf("install-agent --interval %s%s", c.Interval, c.scheduleFlags()))
+			st, err := ctx.LoadState()
+			if err != nil {
+				return err
+			}
+			others, err := unmanagedHere(ctx, st, c.scheduleName())
+			switch {
+			case err != nil:
+				return fmt.Errorf("looking for a background sync another tool installed: %w", err)
+			case len(others) > 0:
+				steps = append(steps, fmt.Sprintf("leave the background sync %s alone: another tool installed it (%s)", others[0].Job(), definitionsWhere(others)))
+			default:
+				steps = append(steps, fmt.Sprintf("install-agent --interval %s%s", c.Interval, c.scheduleFlags()))
+			}
 		}
 		for _, s := range steps {
 			fmt.Println("would: " + s)
@@ -76,8 +91,13 @@ func (c *BootstrapCmd) Run(ctx *Context) error {
 	if !c.NoAgent {
 		// A profile gets a schedule of its own that syncs just its repos, so
 		// bootstrapping a second profile doesn't replace the first.
-		agent := &InstallAgentCmd{Name: c.Profile, Tag: c.Profile, Interval: c.Interval}
-		if err := step("install-agent", agent.Run); err != nil {
+		// One another tool installed is that tool's to manage: left alone.
+		agent := &InstallAgentCmd{Name: c.scheduleName(), Tag: c.Profile, Interval: c.Interval}
+		var theirs *unmanagedError
+		switch err := step("install-agent", agent.Run); {
+		case errors.As(err, &theirs):
+			fmt.Printf("  left alone: %v\n", err)
+		case err != nil:
 			fmt.Fprintf(os.Stderr, "install-agent failed (run it later): %v\n", err)
 			unfinished = &exitError{exitPartial, fmt.Errorf("bootstrapped, but installing the background sync failed: %w; run gitstead install-agent%s", err, c.scheduleFlags())}
 		}
@@ -100,6 +120,15 @@ func tagSuffix(tag string) string {
 		return ""
 	}
 	return " --tag " + tag
+}
+
+// scheduleName is the schedule bootstrap installs: the profile's, else the
+// default.
+func (c *BootstrapCmd) scheduleName() string {
+	if c.Profile == "" {
+		return scheduler.DefaultName
+	}
+	return c.Profile
 }
 
 func (c *BootstrapCmd) scheduleFlags() string {
