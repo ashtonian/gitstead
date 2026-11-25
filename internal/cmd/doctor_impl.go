@@ -89,7 +89,11 @@ func (c *DoctorCmd) Run(ctx *Context) error {
 		d.ok("git found: " + path)
 	}
 
-	d.ok("config valid: " + ctx.ConfigPath())
+	if files := cfg.Files(); len(files) > 0 {
+		d.ok("config valid: " + strings.Join(files, ", "))
+	} else {
+		d.ok("config valid: no file at " + ctx.ConfigPath() + ", the defaults apply")
+	}
 	checkMachine(cfg, d)
 
 	// --- base_dir ---

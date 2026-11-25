@@ -149,6 +149,7 @@ The flake exposes the module as `homeManagerModules.default`:
     schedules.default.interval = "15m";
     schedules.work = { interval = "5m"; tag = "work"; };
     settings = { base_dir = "~/projects"; layout = "owner/name"; };   # optional
+    fragments.work = { accounts = [ { name = "work"; hosts = [ "github.com" ]; owners = [ "acme" ]; } ]; };  # optional
   };
 }
 ```
@@ -158,6 +159,7 @@ The flake exposes the module as `homeManagerModules.default`:
 | `enable` | `false` | Install gitstead and its schedules. |
 | `package` | required | The gitstead package. |
 | `settings` | `{}` | Written to `~/.config/gitstead/config.yaml` when set; the file is then read-only, so `setup` and `ws create --save` can't edit it. |
+| `fragments.<name>` | none | Written to `~/.config/gitstead/config.d/<name>.yaml` and merged with `config.yaml` ([Config fragments](CONFIGURATION.md#config-fragments)). Names are letters, digits, `.`, `-` and `_`, starting with a letter or digit. Read only beside the default config file, not one `configFile` names elsewhere. |
 | `configFile`, `stateFile` | gitstead's defaults | Passed to the schedules as `--config`, `--state`. |
 | `path` | `[ git openssh ]` | The schedules' `PATH`, with gitstead itself. |
 | `sshAuthSock` | none | The schedules' `SSH_AUTH_SOCK` (systemd specifiers work). |

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -110,7 +109,7 @@ func (c *SetupCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	candidate, err := loadCandidate(ctx.GoCtx(), after)
+	candidate, err := doc.Check(ctx.GoCtx())
 	if err != nil {
 		return fmt.Errorf("the answers make an invalid config: %w", err)
 	}
@@ -285,32 +284,22 @@ func printSetupDone(configPath string, a setup.Answers, det setup.Detected, done
 	fmt.Println("  gitstead doctor            if anything looks wrong")
 }
 
-// existingConfig loads the config at path, or nil if there is none yet. It
-// is the top level, without this machine's machines: section: setup writes
-// its answers to the top level.
+// existingConfig loads the config at path, with its fragments, or nil if
+// there is none yet. It is the top level, without this machine's machines:
+// section: setup writes its answers to the top level.
 func existingConfig(ctx context.Context, path string) (*config.Config, error) {
-	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+	files, err := config.FilesFor(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
 		return nil, nil
 	}
-	cfg, err := config.Load(ctx, path)
+	cfg, err := config.Load(ctx, path, config.WithOptionalFile())
 	if err != nil {
 		return nil, fmt.Errorf("%s is invalid; fix it or move it aside before running setup: %w", path, err)
 	}
 	return cfg.TopLevel(), nil
-}
-
-// loadCandidate loads a rendered config without writing it in place.
-func loadCandidate(ctx context.Context, data []byte) (*config.Config, error) {
-	dir, err := os.MkdirTemp("", "gitstead-setup-")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(dir)
-	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return nil, err
-	}
-	return config.Load(ctx, path)
 }
 
 func readAnswers(path string) (setup.Answers, error) {

@@ -59,7 +59,8 @@ jobs:
       - uses: ashtonian/go-ci-actions@08c90cf92313762d7c2a1d85f665403ee3f53c0f # v1.8.0
         with:
           go-version-file: go.mod
-      # internal/config's tests load examples/*.yaml and config.example.yaml.
+      # internal/config's tests load examples/*.yaml, examples/fragments and
+      # config.example.yaml.
       # The e2e module builds the binary (the root package) and drives it.
       - id: scope
         uses: ashtonian/go-ci-actions/scope@08c90cf92313762d7c2a1d85f665403ee3f53c0f # v1.8.0
@@ -77,6 +78,7 @@ jobs:
           go-owners: |
             {
               "examples/*.yaml": ["./internal/config"],
+              "examples/fragments/**": ["./internal/config"],
               "config.example.yaml": ["./internal/config"]
             }
           go-ignore: |

@@ -363,8 +363,8 @@ func withRule(cfg *config.Config, provider config.Provider, inConfig bool, rule 
 }
 
 // saveRule writes rule, and its provider when config lacks it, into the
-// config file, editing it in place as setup does, after checking the result
-// loads.
+// config file, editing it in place as setup does; Save checks the result
+// loads, with the file's fragments, before writing it.
 func saveRule(ctx *Context, provider config.Provider, inConfig bool, rule config.DiscoveryRule) error {
 	doc, err := config.OpenDocument(ctx.ConfigPath())
 	if err != nil {
@@ -377,13 +377,6 @@ func saveRule(ctx *Context, provider config.Provider, inConfig bool, rule config
 	}
 	if err := doc.Upsert("discovery", config.Named(rule.Name), rule); err != nil {
 		return err
-	}
-	data, err := doc.Bytes()
-	if err != nil {
-		return err
-	}
-	if _, err := loadCandidate(ctx.GoCtx(), data); err != nil {
-		return fmt.Errorf("saving discovery rule %q would make an invalid config: %w", rule.Name, err)
 	}
 	if err := doc.Save(ctx.GoCtx()); err != nil {
 		return fmt.Errorf("saving discovery rule %q in %s (clone without saving with --no-save): %w", rule.Name, ctx.ConfigPath(), err)

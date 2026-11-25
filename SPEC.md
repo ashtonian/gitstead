@@ -58,7 +58,7 @@
 **Decision: Kong (CLI) + Koanf (config, through `github.com/ashtonian/pkg/config`)**.
 
 - **Kong** (`github.com/alecthomas/kong`) -- struct-based CLI definition, cleaner than cobra for this scale. Subcommands as struct fields, flags as struct tags.
-- **Koanf** (`github.com/knadh/koanf/v2`) -- config loading with layered precedence: defaults -> config file -> env vars -> CLI flags. Supports `koanf:"field"`, `default:"value"`, `validate:"required"` struct tags.
+- **Koanf** (`github.com/knadh/koanf/v2`) -- config loading with layered precedence: defaults -> config file and its fragments, merged by gitstead's own rules ([Config fragments](#config-fragments)) -> env vars -> CLI flags. Supports `koanf:"field"`, `default:"value"`, `validate:"required"` struct tags.
 - **slog** (stdlib `log/slog`) -- structured JSON/text logging, no third-party dependency.
 - **go-playground/validator** -- struct validation for config.
 
@@ -93,7 +93,7 @@ gitstead [global flags] <command> [command flags] [args]
 
 | Flag | Default | Description |
 |---|---|---|
-| `--config` | `~/.config/gitstead/config.yaml` if it exists, else the defaults | Config file path; one given here or by `GITSTEAD_CONFIG` must exist |
+| `--config` | `~/.config/gitstead/config.yaml` if it exists, else the defaults | Config file path; one given here or by `GITSTEAD_CONFIG` must exist. The `config.d/*.yaml` fragments beside it are read with it ([Config fragments](#config-fragments)) |
 | `--state` | `~/.local/share/gitstead/state.yaml` | State file path |
 | `--verbose` / `-v` | false | Verbose output |
 | `--quiet` / `-q` | false | Suppress non-error output |
@@ -128,7 +128,9 @@ the unticked going in the rule's `skip` -- or chooses again; nothing is
 written yet. The clone question then names the total, and isn't asked when
 nothing matches.
 
-Answers render into the config with `config.Document`: a YAML tree edit that
+Answers render into the config with `config.Document`: a YAML tree edit of
+the main file alone (a change to what a fragment sets is refused, naming it;
+[Config fragments](#config-fragments)) that
 keeps comments and order, sets `base_dir`, `layout` (dropping `path_template`)
 and the feature keys, and upserts by name each account, its provider (same
 name, `account:` set) and its rules. A track is one rule: one setup names
@@ -369,7 +371,7 @@ there and `GITHUB_TOKEN` is unset. The repos it finds that aren't tracked are
 planned (`reconcile.Repos`, `PlanRepos`) and cloned or adopted; nothing else
 in the plan runs. On a terminal it asks whether to keep the rule; kept
 (`--save <name>`), it is upserted into the config file in place (`config.Document`,
-checked to load first), with the provider when config lacked it, and the
+checked to load with its fragments first), with the provider when config lacked it, and the
 repos are recorded as that rule's. Otherwise (`--no-save`, or no terminal)
 they are recorded as added by hand (`manually_added`, the rule's tags as
 their own) and put in the shared manifest when there is one. The rule is
@@ -510,11 +512,16 @@ Print resolved configuration.
 | `--for-repo <key>` | The settings one repo resolves to |
 | `--redact` | Blank inline provider tokens |
 
-The full config is printed as it applies on this machine: its `machines:`
-section laid over the rest, `machines:` itself left out, and a comment line
-first naming the machine, whether a section applied, and every section's
-name. `--json` adds `machine_applied` when there are sections. With
-`--machine <name>`, another machine's.
+The full config is printed as it applies on this machine: the config file
+and its fragments merged, its `machines:` section laid over the rest,
+`machines:` itself left out. Comment lines come first: the files read, in
+merge order (`# Files read, in merge order: ~/.config/gitstead/config.yaml,
+~/.config/gitstead/config.d/work.yaml`; with none, `# No config file at
+<path>: the defaults and environment apply.`), then, when there are sections,
+the machine, whether a section applied, and every section's name. `--json`
+adds `files` (the paths read, in order, `[]` for none) and `machine_applied`
+when there are sections; `--validate --json` prints `path`, `files` and
+`valid`. With `--machine <name>`, another machine's.
 
 #### `gitstead cd|path|open <query>`
 
@@ -566,7 +573,7 @@ itself. A malformed pattern in config fails validation.
 | `bootstrap` | One-command machine setup: init (if missing) → doctor → discover --apply → sync → install-agent. `--profile` (tag scope; also names the schedule and limits it to the tag), `--no-agent`, `--dry-run`. |
 | `plan [--json]` | Discover and show every change config asks for -- repos and workspaces -- with drift and blocked changes. Changes nothing. |
 | `apply [--yes]` | Discover and make every change, including moves and removals; asks before those unless `--yes` (refuses without a terminal). Saves state after each change; non-zero exit if any change failed or was blocked. |
-| `doctor` | Offline, read-only preflight: git present, config valid, base_dir writable, provider tokens resolve, configured SSH keys exist, whether a sync is running, state lock free within 5s (held longer, its holder is reported as stuck), each recorded schedule installed with its binary present and lingering on (systemd), doctor itself passing in each schedule's recorded environment, tracked repos on disk with matching origin. Non-zero exit on failure. |
+| `doctor` | Offline, read-only preflight: git present, config valid (naming the config file and fragments read, in merge order), base_dir writable, provider tokens resolve, configured SSH keys exist, whether a sync is running, state lock free within 5s (held longer, its holder is reported as stuck), each recorded schedule installed with its binary present and lingering on (systemd), doctor itself passing in each schedule's recorded environment, tracked repos on disk with matching origin. Non-zero exit on failure. |
 | `install-agent` | Install a named background sync (`--name`, default `default`) running `sync --quiet` plus its selection (`--repos`/`--tag`/`--set`) every `--interval` (must divide an hour or a day). Records a stable binary path (refuses `/nix/store`, Cellar and temporary paths), the current `PATH` and a long-lived `SSH_AUTH_SOCK`; runs at nice 10 with idle I/O. launchd: LaunchAgent, or `--daemon` LaunchDaemon with `UserName` via sudo. systemd: `OnCalendar=` + `Persistent=true`; `--linger` enables lingering. cron: refuses to rewrite an unreadable crontab, backs it up first, touches only lines with its marker. Recorded in state under `schedules`; `--list`, `--uninstall`, `--print`. |
 | `run [--set/--tag/--repos] -- <cmd>` | Run a command in each matching repo (parallel, bounded by concurrency). `--fail-fast`; non-zero exit if any failed. |
 | `manifest export [--out]` / `import <file>` | Portable `{url,tags,path,account,ssh_key}` manifest of the tracked set, to rehydrate a new machine (captures manual adoptions). import is idempotent and clones over the url's transport. An entry naming an account (which must exist) or an SSH key is first kept where config reads it -- the shared `manifest:`, else config's `repos:`, edited in place -- so the clone gets that identity and key, and keeps them; export writes each repo's `repos:` or manifest binding. |
@@ -602,9 +609,9 @@ entries.
 
 ## Configuration
 
-**File**: `$XDG_CONFIG_HOME/gitstead/config.yaml`, else `~/.config/gitstead/config.yaml` (overridable with `--config` or `GITSTEAD_CONFIG`). State, the operation log, backups, archives and mirrors default to `$XDG_DATA_HOME/gitstead`, else `~/.local/share/gitstead`; workspace caches to `$XDG_CACHE_HOME/gitstead`, else `~/.cache/gitstead`.
+**File**: `$XDG_CONFIG_HOME/gitstead/config.yaml`, else `~/.config/gitstead/config.yaml` (overridable with `--config` or `GITSTEAD_CONFIG`), with the fragments in the `config.d` beside it merged in ([Config fragments](#config-fragments)). State, the operation log, backups, archives and mirrors default to `$XDG_DATA_HOME/gitstead`, else `~/.local/share/gitstead`; workspace caches to `$XDG_CACHE_HOME/gitstead`, else `~/.cache/gitstead`.
 
-**Loading precedence** (koanf, highest wins): CLI flags -> env vars (`GITSTEAD_*`) -> config file -> defaults.
+**Loading precedence** (koanf, highest wins): CLI flags -> env vars (`GITSTEAD_*`) -> config file and fragments, merged -> defaults.
 
 ```yaml
 # ============================================================================
@@ -1092,6 +1099,79 @@ A reflection test fills every field of `Workspace`, `Fleet` and
 `MachineWorkspaceDefaults` and checks the merge carries each, so a key added
 to one of those types without a merge rule fails. `machine` here is not the
 name offsite refs use: state's `machine`, chosen once on first offsite push.
+
+### Config fragments
+
+`config.Load(ctx, path)` reads the config file at `path` and the fragments in
+`FragmentDir(path)` -- `config.d` beside it, whichever path is in effect --
+and merges them into the one tree the loader reads:
+
+1. **Discovery** (`fragmentPaths`): `os.ReadDir(config.d)` -- sorted by name in
+   byte order -- keeping names ending in `.yaml` or `.yml` that don't start
+   with `.`. No `config.d` means no fragments; a `config.d` that can't be
+   listed, isn't a directory or is a broken link is an error. Each fragment is
+   `os.Stat`ed (following links) and must be a regular file. The main file is
+   optional only under `WithOptionalFile` (the default path); missing
+   otherwise it is `ErrNotFound`, fragments or not. `FilesFor(path)` lists the
+   files that exist, for `bootstrap` (setup only when there are none) and
+   `setup` (which loads the existing config when any exists).
+2. **Per file** (`readSources`, `parseSource`): each file is read once and
+   parsed with koanf's YAML parser into a tree. A fragment with a top-level
+   `machine` key (any case) is refused, pointing at `GITSTEAD_MACHINE` and
+   `--machine`. The tree is then loaded alone through
+   `github.com/ashtonian/pkg/config` as a base provider with validation
+   skipped, so the loader's strict decode reports unknown keys (with
+   suggestions) and values of the wrong type against that file. Errors are
+   `config <file> does not parse: ...` and `config <file> is invalid: ...`.
+3. **Merge** (`mergeSources`): the trees, main first, merge into an empty one
+   by `merger`, walking `Config`'s types. `kindOf` is the one statement of the
+   rules:
+
+   | Type | Kind | Merge |
+   |---|---|---|
+   | struct (not a `TextUnmarshaler`), through pointers | `mergeFields` | Key by key; keys matched to fields ignoring case and rewritten to the field's spelling. |
+   | `[]struct` whose struct has a `name` key | `mergeByName` | Appended in file order; an entry's `name` defined in two different files is a `ConflictError`. Two of one name in one file stay validation's to judge, as before. |
+   | other `[]struct` | `mergeAppend` | Appended in file order. |
+   | any other slice | `mergeOnce` | One setting's value. |
+   | `map[string]Machine` | `mergeMachines` | By machine name: an exact match, else a case-insensitive match with a section an earlier file gave (keeping its spelling); each merged as `Machine`, by these rules. One file's sections stay as written. |
+   | other maps | `mergeEntries` | Key by key; a key two files set is a `ConflictError`. |
+   | anything else | `mergeOnce` | The first file to set the key keeps it; a second is a `ConflictError`, whatever its value. |
+
+   A null section, list or map adds nothing. A value whose shape doesn't fit
+   its kind -- a shorthand the decoder expands, such as one mapping for a list
+   or `k=v` text for a map -- merges as `mergeOnce`. Keys are visited in
+   sorted order, so the conflict reported is the same every run. A single
+   file merges into a tree equal to its own (`TestMergeSources_OneFileIsItself`).
+   `ConflictError{Key, Files}` names what both set -- `sync.update`,
+   `workspace_defaults.env.EDITOR`, `machines.desktop.base_dir`, `accounts
+   entry "work"` -- and the two files, and says each setting may be set in
+   only one file. `TestMergeKinds` lists every list and map key of `Config`
+   and `Machine` with its kind, so a new one's rule is chosen on purpose.
+4. **Load**: one `pkgconfig.Load[Config]` with the merged tree as a base
+   provider, then `GITSTEAD_*` variables and flags above it, the tag
+   validator, and the post-load steps: record the files (`Config.Files()`),
+   `loadManifest`, `normalize`, `applyMachines` -- so every machine checks
+   every section of the merged document. Errors here name every file read:
+   `config <main>, <fragment>, ... is invalid: ...`.
+
+**Writes** (`config.Document`): `OpenDocument(path)` reads the main file for
+editing and each fragment's YAML tree beside it. Writes change the main file
+only, and a fragment's content guards them:
+
+| Call | Refused (`*FragmentError{What, Fragment, Config}`) when | No-op when |
+|---|---|---|
+| `Set(key, v)` | a fragment has a value at the dotted key | that value decodes equal to `v` |
+| `Delete(key)` | a fragment has a value at the dotted key | -- |
+| `Upsert(seq, match, v)` | a fragment's top-level `seq` holds an entry `match` selects | that entry decodes equal to `v` |
+| `Remove(seq, match)` | a fragment's top-level `seq` holds an entry `match` selects | -- |
+
+`Check(ctx)` loads the edited document with the fragments on disk
+(`Load` with the main file's bytes given), and `Save` runs it before
+writing, so neither a refused merge (a `ConflictError` the guards can't see,
+such as a machine section spelled another way) nor an invalid config is ever
+written. `setup` loads its candidate config with `Check` for its review and
+checks; it, `clone --save`, `SaveWorkspace` (`ws create --save`) and
+`manifest import`'s binding write with `Save`.
 
 ---
 

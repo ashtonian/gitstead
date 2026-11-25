@@ -175,12 +175,12 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 		return ctx.finish(map[string]string{"path": ctx.ConfigPath()}, nil)
 	}
 	if c.Validate {
-		_, err := ctx.LoadConfig()
+		cfg, err := ctx.LoadConfig()
 		if err != nil {
 			return err
 		}
 		fmt.Println("Config is valid.")
-		return ctx.finish(map[string]any{"path": ctx.ConfigPath(), "valid": true}, nil)
+		return ctx.finish(map[string]any{"path": ctx.ConfigPath(), "files": cfg.Files(), "valid": true}, nil)
 	}
 	if c.Edit && ctx.JSON {
 		return errNoJSON("config --edit")
@@ -273,16 +273,27 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	files := cfg.Files()
 	if ctx.JSON {
 		// The config file's own keys, not Go's field names.
 		var doc map[string]any
 		if err := yaml.Unmarshal(out, &doc); err != nil {
 			return err
 		}
+		doc["files"] = files
 		if len(sections) > 0 {
 			doc["machine_applied"] = applied
 		}
 		return ctx.Emit(doc)
+	}
+	if len(files) == 0 {
+		fmt.Printf("# No config file at %s: the defaults and environment apply.\n", tildify(ctx.ConfigPath()))
+	} else {
+		shown := make([]string, len(files))
+		for i, f := range files {
+			shown[i] = tildify(f)
+		}
+		fmt.Printf("# Files read, in merge order: %s\n", strings.Join(shown, ", "))
 	}
 	switch {
 	case applied:

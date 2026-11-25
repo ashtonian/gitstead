@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"path/filepath"
 	"strings"
 
 	pkgconfig "github.com/ashtonian/pkg/config"
 	"github.com/go-playground/validator/v10"
+	"github.com/knadh/koanf/providers/confmap"
 	"github.com/knadh/koanf/v2"
 )
 
@@ -27,6 +27,10 @@ type Option func(*loadOptions)
 type loadOptions struct {
 	optionalFile bool
 	flags        koanf.Provider
+	// mainData stands in for the config file's contents when mainGiven: a
+	// document checked before it is written.
+	mainData  []byte
+	mainGiven bool
 }
 
 // WithOptionalFile treats a missing config file as "use defaults and env".
@@ -40,6 +44,12 @@ func WithOptionalFile() Option {
 // file and the environment, and validated with them.
 func WithFlags(p koanf.Provider) Option {
 	return func(o *loadOptions) { o.flags = p }
+}
+
+// withMainData loads data as the config file's contents, with the file's
+// fragments as they are on disk.
+func withMainData(data []byte) Option {
+	return func(o *loadOptions) { o.mainData, o.mainGiven = data, true }
 }
 
 // Defaults returns the config the struct-tag defaults make, normalized as
@@ -56,18 +66,22 @@ func Defaults() *Config {
 	return cfg
 }
 
-// Load reads the config file at path over the struct-tag defaults, with
-// GITSTEAD_* environment variables and then flags (WithFlags) over it, and
-// validates the result, with this machine's machines: section laid over it
-// (applyMachines). An empty path reads no file. A path that does not
-// exist is ErrNotFound unless WithOptionalFile is given; a file that exists
-// must read and parse.
+// Load reads the config file at path and the fragments in the config.d
+// beside it, merged as one file (mergeSources), over the struct-tag
+// defaults, with GITSTEAD_* environment variables and then flags (WithFlags)
+// over them, and validates the result, with this machine's machines: section
+// laid over it (applyMachines). An empty path reads no file. A path that does
+// not exist is ErrNotFound unless WithOptionalFile is given; a file that
+// exists must read and parse, as must every fragment.
 //
 // github.com/ashtonian/pkg/config does the loading: it fails on a key no
 // setting takes, maps each variable to its key by Config's own keys, and
-// validates with the struct tags and then Config.Validate. gitstead's
-// post-load steps -- the shared manifest's repos, then normalize -- run
-// before validation, so the rules judge the config commands will use.
+// validates with the struct tags and then Config.Validate. Each file is
+// first decoded on its own, so a key no setting takes is reported in the file
+// it is in; validation waits for the merge, since one file may name an
+// account another defines. gitstead's post-load steps -- the shared
+// manifest's repos, then normalize -- run before validation, so the rules
+// judge the config commands will use.
 func Load(ctx context.Context, path string, opts ...Option) (*Config, error) {
 	o := &loadOptions{}
 	for _, opt := range opts {
@@ -75,28 +89,61 @@ func Load(ctx context.Context, path string, opts ...Option) (*Config, error) {
 	}
 	path = ExpandHome(path)
 
+	var srcs []source
+	if path != "" {
+		var err error
+		if srcs, err = readSources(ctx, path, o); err != nil {
+			return nil, err
+		}
+	}
+	merged, err := mergeSources(srcs)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]string, len(srcs))
+	for i, src := range srcs {
+		files[i] = src.path
+	}
+
 	kopts := []pkgconfig.Option{
 		pkgconfig.WithEnvPrefix(EnvPrefix),
 		pkgconfig.WithValidator(tagValidator()),
+		pkgconfig.WithBaseProvider(confmap.Provider(merged, ""), nil),
+		pkgconfig.WithPostLoad(func(_ context.Context, cfg *Config) error {
+			cfg.files = files
+			return nil
+		}),
 		pkgconfig.WithPostLoad(loadManifest),
 		pkgconfig.WithPostLoad(normalize),
 		pkgconfig.WithPostLoad(applyMachines),
-	}
-	switch {
-	case path == "":
-	case o.optionalFile:
-		kopts = append(kopts, pkgconfig.WithFile(path))
-	default:
-		kopts = append(kopts, pkgconfig.WithRequiredFile(path))
 	}
 	if o.flags != nil {
 		kopts = append(kopts, pkgconfig.WithOverrideProvider(o.flags, nil))
 	}
 	cfg, err := pkgconfig.Load[Config](ctx, kopts...)
 	if err != nil {
-		return nil, loadError(path, err)
+		return nil, loadError(describeFiles(path, files), err)
 	}
 	return cfg, nil
+}
+
+// Files are the config files this config was read from, in the order they
+// merged: the config file, when it exists, then its fragments. None is an
+// empty list, never nil, so JSON shows [].
+func (c *Config) Files() []string {
+	return append([]string{}, c.files...)
+}
+
+// describeFiles names the config files read for path in an error: every one
+// of them, or the path that would have been read.
+func describeFiles(path string, files []string) string {
+	switch {
+	case len(files) > 0:
+		return "config " + strings.Join(files, ", ")
+	case path != "":
+		return "config " + path
+	}
+	return "config"
 }
 
 // invalidError is a rule the config breaks, carried through the loader's
@@ -114,32 +161,16 @@ type stepError struct{ err error }
 func (e *stepError) Error() string { return e.err.Error() }
 func (e *stepError) Unwrap() error { return e.err }
 
-// loadError is err, a failure loading the config file at path, in gitstead's
-// words.
-func loadError(path string, err error) error {
-	where := "config"
-	if path != "" {
-		where = "config " + path
-	}
+// loadError is err, a failure loading the config read from where, in
+// gitstead's words.
+func loadError(where string, err error) error {
 	var (
-		readErr  *fs.PathError
-		parseErr *pkgconfig.ParseError
-		unknown  *pkgconfig.UnknownKeysError
-		fields   validator.ValidationErrors
-		invalid  *invalidError
-		step     *stepError
+		unknown *pkgconfig.UnknownKeysError
+		fields  validator.ValidationErrors
+		invalid *invalidError
+		step    *stepError
 	)
 	switch {
-	case errors.Is(err, pkgconfig.ErrFileRead) && errors.As(err, &readErr):
-		if errors.Is(readErr, fs.ErrNotExist) {
-			return fmt.Errorf("%w: %s", ErrNotFound, path)
-		}
-		return fmt.Errorf("reading %s: %w", where, readErr)
-	case errors.As(err, &parseErr):
-		// The loader leaves the parser's message out, in case it quotes a
-		// secret. It is shown here: the file is the user's own, and the
-		// message says what is wrong where.
-		return fmt.Errorf("%s does not parse: %w", where, parseErr.Err)
 	case errors.As(err, &unknown):
 		return invalidConfig(where, describeUnknown(unknown))
 	case errors.As(err, &fields):

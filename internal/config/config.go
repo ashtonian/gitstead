@@ -62,6 +62,8 @@ type Config struct {
 	// topLevel is the config as it was before.
 	machineApplied bool
 	topLevel       *Config
+	// files are the config files read, in the order they merged.
+	files []string
 }
 
 // Account is one identity on one or more hosts: the SSH key and commit

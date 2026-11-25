@@ -6,19 +6,22 @@ import (
 	"os"
 
 	"golang.org/x/term"
+
+	"github.com/ashtonian/gitstead/internal/config"
 )
 
 // Run sets up a fresh machine end to end by orchestrating the existing commands
-// on the shared context: setup (only if the config is missing; it asks on a
+// on the shared context: setup (only if there is no config file or fragment; it asks on a
 // terminal and takes the recommended answers otherwise) -> doctor (report,
 // continue) -> discover --apply -> sync -> install-agent (unless --no-agent).
 // Each step takes/releases the state lock independently, so sequential reuse is
 // safe. --profile scopes discovery rules and sync to a tag.
 func (c *BootstrapCmd) Run(ctx *Context) error {
-	needSetup := false
-	if _, err := os.Stat(ctx.ConfigPath()); os.IsNotExist(err) {
-		needSetup = true
+	files, err := config.FilesFor(ctx.ConfigPath())
+	if err != nil {
+		return err
 	}
+	needSetup := len(files) == 0
 
 	if c.DryRun {
 		var steps []string

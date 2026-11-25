@@ -1,5 +1,17 @@
 # gitstead configuration
 # Copy to ~/.config/gitstead/config.yaml
+#
+# Fragments: every *.yaml and *.yml file in config.d beside this file (not
+# hidden ones) is read after it, in byte order of its name, and merged with
+# it -- one per context, such as personal work and each client, each kept in
+# that context's own dotfiles and linked in. Any key below may go in one. A
+# setting, a section's key, or a named entry (accounts, providers, discovery,
+# sets, agents, workspaces, fleets; env and plugin names) is set in one file
+# only, two being an error; repos, overrides and exclude are added to in file
+# order; machines: sections merge by machine name, by the same rules. machine:
+# can't be set in a fragment. gitstead writes only this file, never a
+# fragment, and `gitstead config` names every file it read. See
+# docs/CONFIGURATION.md, Config fragments, and examples/fragments.
 
 # Where to clone repos. Supports ~ expansion.
 base_dir: "~/repos"

@@ -19,7 +19,7 @@
 | `gitstead restore <repo> [id]` | Recover a backup: print steps (default), `--into <dir>` to clone+apply into a scratch dir, or `--apply` onto the tree (dirty-guarded). |
 | `gitstead top` | A live view of every workspace copy (agent state, terminal activity, branch, dirty, ahead/behind, last backup, PR) and every repo needing attention. See [Live view](SHELL.md#live-view-gitstead-top). |
 | `gitstead status` | Table of managed repos. `--live` inspects working trees now (dirty + ahead/behind, no network); `--json`, `--dirty`, `--stale`, `--errors`, `--tag`, `--repos`. |
-| `gitstead doctor` | Diagnose tooling, auth (tokens/SSH keys), config, and repo-on-disk health. Read-only; `plan`/`apply` fix what config can. |
+| `gitstead doctor` | Diagnose tooling, auth (tokens/SSH keys), config (naming the files read), and repo-on-disk health. Read-only; `plan`/`apply` fix what config can. |
 | `gitstead clone <url>` | Clone and track one repo by hand, at its templated path or `--path`. `--tag`. A repo added by hand keeps the path and URL it was given. |
 | `gitstead clone --org\|--user\|--group\|--mine\|--query …` | Find a set of repos -- narrowed by `--name` (words or globs), `--name-pattern`, `--language`, `--topic`, `--visibility`, `--forks`, `--archived` -- list it, and on a terminal ask: clone them all, pick from the list, or none. Offers to save the selection as a discovery rule, so every sync clones what newly matches (`--save <name>`, `--no-save`); `--dry-run` only lists. See [Finding your repos](DISCOVERY.md#finding-your-repos). |
 | `gitstead adopt <path>` | Track an existing clone where it is. `--scan` for batch, `--dry-run`, `--tag`. |
@@ -27,7 +27,7 @@
 | `gitstead run -- <cmd>` | Run a command in each matching repo (parallel). `--repos`/`--tag`/`--set`, `--fail-fast`. |
 | `gitstead manifest export\|import\|save` | Portable `{url,tags,path}` manifest: export and import to rehydrate a new machine, `save` to put the repos tracked by hand here into the shared manifest. See [Several machines](CONFIGURATION.md#several-machines). |
 | `gitstead remote-sync` | Back up and take WIP and unpushed commits offsite now, under `remote_sync`. `--repos`, `--tag`, `--set`, `--dry-run`; `--list` shows what every machine left offsite and how to restore it. |
-| `gitstead config` | Print resolved config: this machine's `machines:` section laid over the rest, headed by which section applied. `--validate`, `--edit`, `--path`, `--for-repo <key>`, `--redact`; `--machine <name>` previews another machine's. |
+| `gitstead config` | Print resolved config: the config file and its [fragments](CONFIGURATION.md#config-fragments) merged, this machine's `machines:` section laid over the rest, headed by the files read, in merge order, and which section applied (`--json`: `files`). `--validate`, `--edit` (the config file, never a fragment), `--path`, `--for-repo <key>`, `--redact`; `--machine <name>` previews another machine's. |
 | `gitstead report` / `log` | Summarize / list recent activity (clones, backups, syncs…) from the operation log. `--since`, `-n`. |
 | `gitstead workspace` (`ws`, `wg`) | Manage workspaces: repos × agents, each agent in a copy of its own. See [Workspaces](WORKSPACES.md#workspaces). |
 | `gitstead fleet` | Open several workspaces' agents side by side with tmux, iTerm, Muxy or a plugin; `open`, `plan`, `ls`, `status`, `stop`. See [Fleets](LAUNCHERS.md#fleets-and-launchers). |
@@ -112,7 +112,7 @@ never change a gitstead run inside a workspace. Notable ones:
 
 | Variable | Effect |
 |---|---|
-| `GITSTEAD_CONFIG` | Config file path (same as `--config`), which must exist; unset, `~/.config/gitstead/config.yaml` is read if it exists. |
+| `GITSTEAD_CONFIG` | Config file path (same as `--config`), which must exist; unset, `~/.config/gitstead/config.yaml` is read if it exists. Either way the fragments in the `config.d` beside it are read too ([Config fragments](CONFIGURATION.md#config-fragments)). |
 | `GITSTEAD_STATE` | State file path (same as `--state`); unset, `$XDG_DATA_HOME/gitstead/state.yaml` (`~/.local/share/gitstead/state.yaml`). |
 | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` | Where the default config, data and cache directories are (see [Configuration](CONFIGURATION.md#configuration)). |
 | `GITSTEAD_BASE_DIR` | Override `base_dir`. |

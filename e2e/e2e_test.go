@@ -2587,6 +2587,82 @@ machines:
 	gitCmd(t, copyPath, "fsck", "--no-progress")
 }
 
+// TestE2E_ConfigFragments: two fragments in config.d beside the config file,
+// each holding one machine's section and repos, merge with it. config and
+// plan on each machine show its own settings and the files read, in order;
+// a setting two files set fails the load, naming both.
+func TestE2E_ConfigFragments(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+	remotes := filepath.Join(tmp, "remotes")
+	for _, name := range []string{"app", "tool"} {
+		gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", filepath.Join(remotes, name+".git"))
+	}
+	baseA, baseB := filepath.Join(tmp, "box-a"), filepath.Join(tmp, "box-b")
+	fragments := filepath.Join(filepath.Dir(env.configFile), "config.d")
+	files := map[string]string{
+		env.configFile: fmt.Sprintf("base_dir: %s\nrepos:\n  - url: %s\n", env.baseDir, filepath.Join(remotes, "app.git")),
+		filepath.Join(fragments, "box-a.yaml"): fmt.Sprintf(`machines:
+  box-a:
+    base_dir: %s
+    repos:
+      - url: %s
+`, baseA, filepath.Join(remotes, "tool.git")),
+		filepath.Join(fragments, "box-b.yaml"): fmt.Sprintf(`sync:
+  retries: 4
+machines:
+  box-b:
+    base_dir: %s
+`, baseB),
+	}
+	for path, content := range files {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wantFiles := []string{env.configFile, filepath.Join(fragments, "box-a.yaml"), filepath.Join(fragments, "box-b.yaml")}
+
+	out, code := env.run(t, "--machine", "box-a", "config")
+	if code != 0 || !strings.Contains(out, "# Files read, in merge order: "+strings.Join(wantFiles, ", ")+"\n") ||
+		!strings.Contains(out, `# Machine "box-a": its machines: section is applied below (sections: box-a, box-b).`) ||
+		!strings.Contains(out, "base_dir: "+baseA+"\n") || !strings.Contains(out, "retries: 4") {
+		t.Fatalf("config on box-a, exit %d:\n%s", code, out)
+	}
+	if out, _ := env.run(t, "--machine", "box-b", "config"); !strings.Contains(out, "base_dir: "+baseB+"\n") {
+		t.Errorf("config on box-b:\n%s", out)
+	}
+	var doc struct {
+		Files []string `json:"files"`
+	}
+	if stderr, code := env.runJSON(t, &doc, "--machine", "box-a", "config"); code != 0 || !slices.Equal(doc.Files, wantFiles) {
+		t.Errorf("config --json files = %v, want %v (exit %d)\n%s", doc.Files, wantFiles, code, stderr)
+	}
+	if out, _ := env.run(t, "--machine", "box-b", "doctor"); !strings.Contains(out, "config valid: "+strings.Join(wantFiles, ", ")) {
+		t.Errorf("doctor doesn't list the files read:\n%s", out)
+	}
+
+	out, code = env.run(t, "--machine", "box-a", "plan")
+	if code != 0 || !strings.Contains(out, "-> "+filepath.Join(baseA, "local", "remotes", "app")) || !strings.Contains(out, "-> "+filepath.Join(baseA, "local", "remotes", "tool")) {
+		t.Errorf("plan on box-a, exit %d:\n%s", code, out)
+	}
+	out, code = env.run(t, "--machine", "box-b", "plan")
+	if code != 0 || !strings.Contains(out, "-> "+filepath.Join(baseB, "local", "remotes", "app")) || strings.Contains(out, "remotes/tool") {
+		t.Errorf("plan on box-b, exit %d: want app under its base_dir and no tool:\n%s", code, out)
+	}
+
+	clash := filepath.Join(fragments, "clash.yaml")
+	if err := os.WriteFile(clash, []byte("sync:\n  retries: 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, code = env.run(t, "config", "--validate")
+	if code == 0 || !strings.Contains(out, "sync.retries is set in both "+wantFiles[2]+" and "+clash+": each setting may be set in only one file") {
+		t.Errorf("a setting two fragments set, exit %d:\n%s", code, out)
+	}
+}
+
 // TestE2E_ArchivePrune: archives prune --dry-run lists what retention has
 // passed and deletes nothing; archives prune deletes it and drops it from
 // the catalog.

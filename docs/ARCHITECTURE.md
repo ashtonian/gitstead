@@ -86,6 +86,7 @@ from). The [code map](#code-map) lists every package.
 ```
 $XDG_CONFIG_HOME/gitstead/              (~/.config/gitstead)
   config.yaml                          what you want; setup edits it in place, keeping comments
+  config.d/*.yaml                      fragments merged with it, one per context; never written
   accounts/<name>-<digest>.gitconfig   accounts gitconfig: each account's identity, key, signing
   accounts.gitconfig                   includeIf sections, included from your global git config
 
@@ -377,7 +378,7 @@ The ones that shape the code most:
 | Package | Owns |
 | --- | --- |
 | `main.go`, `internal/cmd` | The CLI: flags, wiring, output. Commands load config and state, call the packages below, print. |
-| `internal/config` | Loading (on [`github.com/ashtonian/pkg/config`](https://github.com/ashtonian/pkg/tree/main/config)), defaults, validation, per-repo overrides, per-machine sections (`machines.go`), SSH key and protocol resolution. |
+| `internal/config` | Loading (on [`github.com/ashtonian/pkg/config`](https://github.com/ashtonian/pkg/tree/main/config)), config fragments in `config.d` (`fragments.go`: finding and checking each file; `merge.go`: the merge rules), defaults, validation, per-repo overrides, per-machine sections (`machines.go`), SSH key and protocol resolution, and editing the config file in place (`edit.go`), refusing what a fragment sets. |
 | `internal/discovery` | Provider clients (GitHub, GitLab, Gitea/Forgejo), rule filtering, stale detection. |
 | `internal/reconcile` | Desired vs recorded vs on-disk for tracked repos, and the plan engine: applies changes, several repos at once, then serial ones. |
 | `internal/state` | The state file: schema, migrations, locking, atomic writes, and `GroupCommit`, which saves concurrent changes in one write. |
@@ -396,7 +397,7 @@ The ones that shape the code most:
 | `internal/oplog`, `internal/notify` | The operation log and desktop notifications. |
 | `internal/testenv` | Isolating each package's tests from the machine: home, XDG directories, git config, temporary directories. |
 | `e2e/` | End-to-end tests, a module of their own: the built binary against local remotes and a Forgejo container. |
-| `examples/` | Complete configs for common setups, each loaded by the tests, and [what each one produces](../examples/README.md). |
+| `examples/` | Complete configs for common setups, and a config directory with fragments (`examples/fragments`), each loaded by the tests, and [what each one produces](../examples/README.md). |
 | `docs/` | [User guides](README.md); [ARCHITECTURE.md](ARCHITECTURE.md), how the parts fit and why; [RELEASING.md](RELEASING.md), cutting a release. |
 | `nix/home-manager.nix`, `flake.nix` | The home-manager module: package, config and schedules as systemd timers or launchd agents. |
 

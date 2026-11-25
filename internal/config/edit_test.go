@@ -31,7 +31,7 @@ accounts:
 	}
 	must(t, doc.Set("base_dir", "~/projects"))
 	must(t, doc.Set("layout", "owner/name"))
-	doc.Delete("path_template")
+	must(t, doc.Delete("path_template"))
 	must(t, doc.Set("backup.enabled", false))
 	must(t, doc.Upsert("accounts", config.Named("work"), config.Account{Name: "work", Hosts: []string{"github.com"}, SSHKey: "~/.ssh/id_work"}))
 	must(t, doc.Upsert("accounts", config.Named("new"), config.Account{Name: "new", Hosts: []string{"example.com"}}))

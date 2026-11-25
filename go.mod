@@ -14,6 +14,7 @@ require (
 	github.com/ashtonian/pkg/config/kongprovider v0.1.0
 	github.com/go-playground/validator/v10 v10.30.5
 	github.com/google/go-github/v88 v88.0.0
+	github.com/knadh/koanf/parsers/yaml v1.1.1
 	github.com/knadh/koanf/providers/confmap v1.0.1
 	github.com/knadh/koanf/v2 v2.3.8
 	github.com/posener/complete v1.2.3
@@ -42,7 +43,6 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
-	github.com/knadh/koanf/parsers/yaml v1.1.1 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-runewidth v0.0.30 // indirect

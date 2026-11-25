@@ -1,0 +1,22 @@
+# Personal work, from a private overlay of its own, linked in as
+# ~/.config/gitstead/config.d/personal.yaml.
+accounts:
+  - name: personal
+    hosts: [github.com]
+    owners: [your-login]
+    ssh_key: ~/.ssh/id_personal
+    git: { name: Your Name, email: you@example.com }
+
+repos:
+  - url: git@github.com:your-login/app.git
+  - url: git@github.com:your-login/dotfiles.git
+
+workspaces:
+  - name: app
+    repos: [github.com/your-login/app]
+
+machines:
+  desktop:
+    workspaces:
+      - name: app            # more agents on the desktop
+        agents: 4
