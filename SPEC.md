@@ -1086,6 +1086,7 @@ log:
 
   # Log file path. Empty = stderr only. Useful for cron.
   # Logs always go to stderr; this adds a file output in addition.
+  # Past 8 MiB it is moved to <file>.1 when gitstead next opens it.
   file: ""                        # e.g., "~/.local/share/gitstead/gitstead.log"
 
 # ============================================================================

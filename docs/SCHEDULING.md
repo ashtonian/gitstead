@@ -67,7 +67,7 @@ file keeps `log.level`.
 | --- | --- | --- |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
 | `log.format` | `json` | `json` or `text`. |
-| `log.file` | `""` | Also append logs here (made `0600`, its directory `0700`); empty for stderr only. A file that can't be opened leaves logging on stderr and says so. |
+| `log.file` | `""` | Also append logs here (made `0600`, its directory `0700`); empty for stderr only. A file that can't be opened leaves logging on stderr and says so. Past 8 MiB it is moved to `<file>.1`, replacing the one there, when gitstead next opens it. |
 | `log.events` | `true` | Write the operation log. |
 | `notify.enabled` | `false` | Desktop notifications (`osascript` on macOS, `notify-send` on Linux); nothing elsewhere. |
 | `notify.on_error` | `true` | When a sync has failures. |
@@ -104,7 +104,7 @@ manages](#a-schedule-another-tool-manages)).
 | `--bin` | the `gitstead` on PATH | Binary the schedule runs. |
 | `--daemon` | off | macOS: a LaunchDaemon that runs as you while nobody is logged in. Installed with `sudo`. |
 | `--linger` | off | Linux: `loginctl enable-linger`, so the timer runs while you are logged out. |
-| `--log` | `~/.local/share/gitstead/gitstead.log` | Output of launchd and cron runs; systemd runs log to the journal (`journalctl --user -u gitstead`). |
+| `--log` | `~/.local/share/gitstead/gitstead.log` | Output of launchd and cron runs; systemd runs log to the journal (`journalctl --user -u gitstead`). Past 8 MiB each sync moves it to `<file>.1`, replacing the one there ([The background sync's log](#the-background-syncs-log)). |
 | `--force` | off | Replace a schedule of this name another tool installed, or with `--uninstall` remove it. |
 
 What install does, so a background run behaves like one from your shell:
@@ -133,6 +133,25 @@ What install does, so a background run behaves like one from your shell:
   as empty), and backed up to `backups/crontab-<time>.bak` beside the state
   file before each change. Only lines ending in the schedule's own marker
   (`# com.ashtonian.gitstead[.<name>]`) are touched.
+
+## The background sync's log
+
+launchd and cron append a background sync's output to its log file and never
+trim it, so each sync bounds it: once the file passes 8 MiB, the sync moves it
+to `<file>.1`, replacing the older generation there, before it runs. A log
+takes about 16 MiB at most: years of a quiet 15-minute sync, or about two weeks
+of one failing on every run. The run in progress goes on writing to `<file>.1`,
+which its scheduler opened before the move, and the next run starts a new
+`<file>`; after a rotation, read both for the latest runs. Rotations take turns
+under `<file>.lock`.
+
+The sync bounds the file its schedule names in `GITSTEAD_SCHEDULE_LOG`, which
+`install-agent` and the home-manager module set to `--log` and `logFile`;
+`~/.local/share/gitstead/gitstead.log`; and every schedule's `--log` the state
+file records. A schedule another tool installed is bounded too when it writes
+the default file or sets `GITSTEAD_SCHEDULE_LOG` to its own. systemd runs log
+to the journal, which journald bounds. `log.file` is bounded the same way, when
+gitstead opens it.
 
 ## A schedule another tool manages
 
@@ -172,6 +191,8 @@ and scheduler -- is another tool's, and gitstead leaves it alone:
   gitstead.timer`) and its own log.
 - **`discover`**'s preview counts it among the background syncs that apply
   changes on their next run.
+- **`sync`** bounds its log when it writes the default file or names its own
+  in `GITSTEAD_SCHEDULE_LOG` ([The background sync's log](#the-background-syncs-log)).
 
 Give the job one of these names so gitstead sees it; under another name
 gitstead knows nothing of it, and `install-agent` would add a second sync
@@ -211,7 +232,7 @@ The flake exposes the module as `homeManagerModules.default`:
 | `configFile`, `stateFile` | gitstead's defaults | Passed to the schedules as `--config`, `--state`. |
 | `path` | `[ git openssh ]` | The schedules' `PATH`, with gitstead itself. |
 | `sshAuthSock` | none | The schedules' `SSH_AUTH_SOCK` (systemd specifiers work). |
-| `logFile` | `~/.local/share/gitstead/gitstead.log` | launchd agents' output; systemd logs to the journal. |
+| `logFile` | `~/.local/share/gitstead/gitstead.log` | launchd agents' output, which each sync moves to `<logFile>.1` past 8 MiB; systemd logs to the journal. |
 | `schedules.<name>` | none | A background sync: `interval` (`15m`; dividing an hour or a day), `repos`, `tag`, `set`, `extraArgs`, `environment`. |
 
 Each schedule is a systemd user service and timer (`gitstead` for `default`,

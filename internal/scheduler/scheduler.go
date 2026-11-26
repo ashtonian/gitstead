@@ -171,6 +171,24 @@ func calendar(d time.Duration) (cal, error) {
 }
 
 // Plist renders the launchd job.
+// LogEnv names, in a scheduled sync's environment, the file the scheduler
+// appends its output to, so the sync can bound a file launchd and cron never
+// trim. Another tool's schedule sets it the same way.
+const LogEnv = "GITSTEAD_SCHEDULE_LOG"
+
+// environment is what the schedule's runs get: Env, and LogEnv when the
+// output goes to a file.
+func (s Schedule) environment() map[string]string {
+	env := maps.Clone(s.Env)
+	if s.LogPath != "" {
+		if env == nil {
+			env = map[string]string{}
+		}
+		env[LogEnv] = s.LogPath
+	}
+	return env
+}
+
 func (s Schedule) Plist() string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
@@ -182,7 +200,7 @@ func (s Schedule) Plist() string {
 		fmt.Fprintf(&b, "    <string>%s</string>\n", xmlEscape(a))
 	}
 	b.WriteString("  </array>\n")
-	env := maps.Clone(s.Env)
+	env := s.environment()
 	if s.Daemon {
 		fmt.Fprintf(&b, "  <key>UserName</key><string>%s</string>\n", xmlEscape(s.User))
 		if env == nil {
@@ -262,8 +280,9 @@ func (s Schedule) CronLine() string {
 		when = fmt.Sprintf("0 */%d * * *", c.hours)
 	}
 	var words []string
-	for _, k := range slices.Sorted(maps.Keys(s.Env)) {
-		words = append(words, k+"="+shellutil.Quote(s.Env[k]))
+	env := s.environment()
+	for _, k := range slices.Sorted(maps.Keys(env)) {
+		words = append(words, k+"="+shellutil.Quote(env[k]))
 	}
 	words = append(words, "nice", "-n", fmt.Sprint(niceness))
 	for _, a := range s.Argv() {

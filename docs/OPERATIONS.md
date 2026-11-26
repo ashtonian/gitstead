@@ -19,7 +19,9 @@ Then:
   (`background sync ... is installed by another tool`), which gitstead
   neither checks nor changes: fix that one where it is managed. On macOS, `launchctl print gui/$(id -u)/com.ashtonian.gitstead`
   shows the agent's state and last exit; its output is in
-  `~/.local/share/gitstead/gitstead.log`. On Linux, `systemctl --user status
+  `~/.local/share/gitstead/gitstead.log`, and once that passes 8 MiB the runs
+  before it in `gitstead.log.1`
+  ([The background sync's log](SCHEDULING.md#the-background-syncs-log)). On Linux, `systemctl --user status
   gitstead.timer` and `journalctl --user -u gitstead`; if it stops at logout,
   reinstall with `--linger`. A binary that moved or was upgraded out of a Nix
   store or Homebrew Cellar path: `gitstead install-agent` again from the

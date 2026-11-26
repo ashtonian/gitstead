@@ -53,6 +53,7 @@ func TestPlist(t *testing.T) {
 		"<string>/usr/local/bin/gitstead</string>",
 		"<string>sync</string>\n    <string>--quiet</string>\n    <string>--tag</string>\n    <string>work</string>",
 		"<key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin</string>",
+		"<key>GITSTEAD_SCHEDULE_LOG</key><string>/log/gitstead.log</string>",
 		"<key>StartInterval</key><integer>900</integer>",
 		"<key>ProcessType</key><string>Background</string>",
 		"<key>LowPriorityIO</key><true/>",
@@ -96,7 +97,7 @@ func TestSystemd(t *testing.T) {
 
 func TestCronLine(t *testing.T) {
 	l := sched(kind(scheduler.Cron)).CronLine()
-	want := "*/15 * * * * PATH='/opt/homebrew/bin:/usr/bin:/bin' nice -n 10 '/usr/local/bin/gitstead' '--config' '/cfg/config.yaml'" +
+	want := "*/15 * * * * GITSTEAD_SCHEDULE_LOG='/log/gitstead.log' PATH='/opt/homebrew/bin:/usr/bin:/bin' nice -n 10 '/usr/local/bin/gitstead' '--config' '/cfg/config.yaml'" +
 		" '--state' '/state/state.yaml' 'sync' '--quiet' >> '/log/gitstead.log' 2>&1  # com.ashtonian.gitstead"
 	if l != want {
 		t.Errorf("cron line\n%s\nwant\n%s", l, want)

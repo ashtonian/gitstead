@@ -103,7 +103,8 @@ $XDG_DATA_HOME/gitstead/                (~/.local/share/gitstead)
                                        .json descriptions, whole archived clones, and
                                        unpushed/<copy-id>.bundle (remote_sync.unpushed: bundle)
   mirrors/<host>/<owner>/<name>.git    full mirrors of upstreams (mirror on)
-  gitstead.log                          the scheduled sync's output (launchd, cron)
+  gitstead.log (+ .1, .lock)            the scheduled sync's output (launchd, cron); each
+                                       sync moves it to .1 past 8 MiB
 
 $XDG_CACHE_HOME/gitstead/               (~/.cache/gitstead)
   workspaces/<workspace>/              agents' shared caches (agent environment)
@@ -300,6 +301,7 @@ its holder dies.
 | Agent lease | `runs/<ws>/<agent>.lease` | while the agent runs | its copies aren't removed while it works |
 | Manifest | `locks/manifest-<digest>.lock` | one manifest write | the shared manifest, written by several machines' runs |
 | Operation log | `events.jsonl.lock` | one append or trim | no line lost to a concurrent trim |
+| Plain-text log | `<log>.lock` (`gitstead.log`, `log.file`) | one rotation | a rotation that sized the log before another rotated it can't move the new, small log over the older generation |
 | git's own | `index.lock`, ref locks | never taken by gitstead | checked before deleting (CheckIdle); backups don't need them |
 
 Ordering: the repo lock is always taken before the state lock, never while
@@ -394,7 +396,7 @@ The ones that shape the code most:
 | `internal/repourl` | Parsing remote URLs into host/owner/name keys. |
 | `internal/pathtemplate`, `internal/pathutil`, `internal/shellutil`, `internal/ctxutil`, `internal/procutil` | Path templates; deletion guards, renames that never replace, moves across filesystems and durable writes; shell quoting; optional deadlines; commands that never prompt and die with their context. |
 | `internal/scheduler` | launchd, systemd and cron installation. |
-| `internal/oplog`, `internal/notify` | The operation log and desktop notifications. |
+| `internal/oplog`, `internal/logfile`, `internal/notify` | The operation log; rotating the plain-text logs, `log.file` and the scheduled sync's output, past their bound; desktop notifications. |
 | `internal/testenv` | Isolating each package's tests from the machine: home, XDG directories, git config, temporary directories. |
 | `e2e/` | End-to-end tests, a module of their own: the built binary against local remotes and a Forgejo container. |
 | `examples/` | Complete configs for common setups, and a config directory with fragments (`examples/fragments`), each loaded by the tests, and [what each one produces](../examples/README.md). |

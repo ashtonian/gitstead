@@ -408,7 +408,7 @@ func printNotes(notes []string) {
 // the data directory.
 func (c *InstallAgentCmd) logPath() string {
 	if c.Log == "" {
-		return filepath.Join(config.DataDir(), "gitstead.log")
+		return config.DefaultScheduleLogPath()
 	}
 	return config.ExpandHome(c.Log)
 }

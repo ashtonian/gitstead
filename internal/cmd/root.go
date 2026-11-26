@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	"github.com/ashtonian/gitstead/internal/config"
+	"github.com/ashtonian/gitstead/internal/logfile"
 	"github.com/ashtonian/gitstead/internal/repourl"
 	"github.com/ashtonian/gitstead/internal/state"
 	"github.com/knadh/koanf/v2"
@@ -255,10 +256,15 @@ func (c *Context) Logger() *slog.Logger {
 	return c.logger
 }
 
-// openLogFile opens path for appending, making its directory.
+// openLogFile opens path for appending, making its directory, after moving
+// it aside once it has grown past its bound. A log that can't be rotated is
+// still opened: its growth is reported, not a reason to stop logging.
 func openLogFile(path string) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
+	}
+	if _, err := logfile.Rotate(path, logfile.MaxBytes); err != nil {
+		fmt.Fprintf(os.Stderr, "gitstead: %v\n", err)
 	}
 	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 }
