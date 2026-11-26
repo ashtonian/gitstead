@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
 	"slices"
@@ -11,8 +12,10 @@ import (
 	"github.com/ashtonian/gitstead/internal/config"
 	"github.com/ashtonian/gitstead/internal/discovery"
 	"github.com/ashtonian/gitstead/internal/gitops"
+	"github.com/ashtonian/gitstead/internal/logfile"
 	"github.com/ashtonian/gitstead/internal/notify"
 	"github.com/ashtonian/gitstead/internal/reconcile"
+	"github.com/ashtonian/gitstead/internal/scheduler"
 	"github.com/ashtonian/gitstead/internal/state"
 )
 
@@ -49,6 +52,7 @@ func (c *SyncCmd) Run(ctx *Context) error {
 	}
 
 	log := ctx.Logger()
+	rotateScheduleLogs(st, os.Getenv(scheduler.LogEnv), log)
 	var failures []syncError
 	tried := 0
 	var doc syncJSON
@@ -263,6 +267,35 @@ type syncJSON struct {
 type syncError struct {
 	repo string
 	err  error
+}
+
+// rotateScheduleLogs moves a background sync's output aside once it has
+// grown past its bound. launchd and cron append to that file and never trim
+// it, so the sync they run bounds it: the one its schedule names in
+// scheduler.LogEnv (this run's, if it is one), the default file, which a
+// schedule another tool installed without naming its file usually writes,
+// and each recorded schedule's, installed before schedules named theirs.
+func rotateScheduleLogs(st *state.State, current string, log *slog.Logger) {
+	var paths []string
+	add := func(p string) {
+		if p != "" && !slices.Contains(paths, p) {
+			paths = append(paths, p)
+		}
+	}
+	add(current)
+	add(config.DefaultScheduleLogPath())
+	for _, name := range slices.Sorted(maps.Keys(st.Schedules)) {
+		add(st.Schedules[name].LogPath)
+	}
+	for _, p := range paths {
+		rotated, err := logfile.Rotate(p, logfile.MaxBytes)
+		switch {
+		case err != nil:
+			log.Warn("rotating the background sync's log", "path", p, "error", err)
+		case rotated:
+			log.Info("rotated the background sync's log", "path", p, "older", logfile.Rotated(p))
+		}
+	}
 }
 
 // jobs lists the copies this run backs up, fetches and, under

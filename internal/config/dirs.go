@@ -31,3 +31,8 @@ func DefaultConfigPath() string { return filepath.Join(ConfigDir(), "config.yaml
 
 // DefaultStatePath is where gitstead keeps its state when no path is given.
 func DefaultStatePath() string { return filepath.Join(DataDir(), "state.yaml") }
+
+// DefaultScheduleLogPath is where a background sync's output goes when its
+// schedule names no other file: install-agent's default, and the file a
+// schedule another tool writes usually uses.
+func DefaultScheduleLogPath() string { return filepath.Join(DataDir(), "gitstead.log") }

@@ -195,7 +195,10 @@ in
       type = types.str;
       default = "${config.home.homeDirectory}/.local/share/gitstead/gitstead.log";
       defaultText = lib.literalExpression ''"''${config.home.homeDirectory}/.local/share/gitstead/gitstead.log"'';
-      description = "Where launchd agents write sync output; systemd logs to the journal.";
+      description = ''
+        Where launchd agents write sync output; systemd logs to the journal.
+        Each sync moves it to <logFile>.1 once it passes 8 MiB.
+      '';
     };
 
     schedules = mkOption {
@@ -258,7 +261,8 @@ in
         config = {
           Label = launchdLabel name;
           ProgramArguments = argv s;
-          EnvironmentVariables = environment s;
+          # Names the output file, so each sync bounds it (scheduler.LogEnv).
+          EnvironmentVariables = environment s // { GITSTEAD_SCHEDULE_LOG = cfg.logFile; };
           StartInterval = (parseInterval name s.interval).seconds;
           RunAtLoad = true;
           ProcessType = "Background";
