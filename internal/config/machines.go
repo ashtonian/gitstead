@@ -22,7 +22,13 @@ import (
 // for the same repo. A workspace or fleet with a top-level one's name
 // changes the keys it sets of that one; with a new name it is declared on
 // this machine only.
+//
+// Aliases are other names the section goes by: a section any file keys by
+// one is this machine's, merged with the rest of its sections. A file that
+// shouldn't know the machine's name -- a fragment from another context's
+// dotfiles -- then keys its section by a generic name such as laptop.
 type Machine struct {
+	Aliases           []string                  `koanf:"aliases"            yaml:"aliases,omitempty"`
 	BaseDir           string                    `koanf:"base_dir"           yaml:"base_dir,omitempty"`
 	CloneProtocol     string                    `koanf:"clone_protocol"     yaml:"clone_protocol,omitempty" validate:"omitempty,oneof=ssh https"`
 	WorkspaceDefaults *MachineWorkspaceDefaults `koanf:"workspace_defaults" yaml:"workspace_defaults,omitempty"`
@@ -93,8 +99,10 @@ func (c *Config) MachineNames() []string {
 // applyMachines lays this machine's section over cfg, after checking that
 // every section names a machine as a section must and leaves a valid config
 // on its own machine, so a mistake in one machine's section shows on every
-// machine that loads the file. It runs after normalize and normalizes what
-// it adds.
+// machine that loads the file. This machine's section is the one its name
+// keys, or else the one with its name among its aliases, so --machine
+// laptop previews the machine whose alias is laptop. It runs after
+// normalize and normalizes what it adds.
 func applyMachines(ctx context.Context, cfg *Config) error {
 	if len(cfg.Machines) == 0 {
 		return nil
@@ -104,8 +112,8 @@ func applyMachines(ctx context.Context, cfg *Config) error {
 	}
 	current := ""
 	for _, name := range cfg.MachineNames() {
-		if !validName(name) || strings.Contains(name, ".") {
-			return &invalidError{fmt.Errorf("machines: %q can't name a machine: use letters, digits, '-' and '_', starting with a letter or digit", name)}
+		if !validMachineName(name) {
+			return &invalidError{fmt.Errorf("machines: %w", machineNameError(name))}
 		}
 		merged, err := cfg.forMachine(ctx, name)
 		if err != nil {
@@ -119,6 +127,9 @@ func applyMachines(ctx context.Context, cfg *Config) error {
 		}
 	}
 	if current == "" {
+		current = cfg.sectionAliased(cfg.Machine)
+	}
+	if current == "" {
 		return nil
 	}
 	merged, err := cfg.forMachine(ctx, current)
@@ -129,6 +140,27 @@ func applyMachines(ctx context.Context, cfg *Config) error {
 	merged.Machine, merged.machineApplied, merged.topLevel = current, true, &top
 	*cfg = *merged
 	return nil
+}
+
+// sectionAliased is the section one of whose aliases is alias, ignoring
+// case, or "" when none is.
+func (c *Config) sectionAliased(alias string) string {
+	for _, name := range c.MachineNames() {
+		if slices.ContainsFunc(c.Machines[name].Aliases, func(a string) bool { return strings.EqualFold(a, alias) }) {
+			return name
+		}
+	}
+	return ""
+}
+
+// validMachineName reports whether name may name a machine, as a section's
+// key or an alias: a valid name without a '.', which joins config keys.
+func validMachineName(name string) bool {
+	return validName(name) && !strings.Contains(name, ".")
+}
+
+func machineNameError(name string) error {
+	return fmt.Errorf("%q can't name a machine: use letters, digits, '-' and '_', starting with a letter or digit", name)
 }
 
 // forMachine returns cfg with machine name's section laid over it,

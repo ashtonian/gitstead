@@ -296,6 +296,8 @@ func (c *ConfigCmd) Run(ctx *Context) error {
 		fmt.Printf("# Files read, in merge order: %s\n", strings.Join(shown, ", "))
 	}
 	switch {
+	case applied && len(cfg.Machines[machine].Aliases) > 0:
+		fmt.Printf("# Machine %q, also %s: its machines: section is applied below (sections: %s).\n", machine, strings.Join(cfg.Machines[machine].Aliases, ", "), strings.Join(sections, ", "))
 	case applied:
 		fmt.Printf("# Machine %q: its machines: section is applied below (sections: %s).\n", machine, strings.Join(sections, ", "))
 	case len(sections) > 0:

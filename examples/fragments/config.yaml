@@ -1,5 +1,7 @@
 # The base every context shares, kept in public dotfiles: where clones and
-# workspaces go, and how sync treats them. It names no account or repo.
+# workspaces go, and how sync treats them. It names no account or repo, and
+# no machine: its sections are keyed by the aliases config.d/personal.yaml
+# gives your machines.
 # Each file in config.d beside it adds one context's own (see config.d/), and
 # gitstead merges them all into one config: a setting or named entry in one
 # file only, lists added to in file order.

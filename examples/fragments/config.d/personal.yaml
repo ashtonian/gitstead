@@ -15,8 +15,14 @@ workspaces:
   - name: app
     repos: [github.com/your-login/app]
 
+# The one file that names your machines (each one's macOS local host name,
+# or GITSTEAD_MACHINE), and gives each the alias the other files key their
+# sections by, so they never hold the names.
 machines:
-  desktop:
+  My-Mac-Studio:
+    aliases: [desktop]
     workspaces:
       - name: app            # more agents on the desktop
         agents: 4
+  My-MacBook-Air:
+    aliases: [laptop]

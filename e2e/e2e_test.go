@@ -2721,6 +2721,65 @@ machines:
 	}
 }
 
+// TestE2E_MachineAliases: one fragment names a machine and gives it an
+// alias; another keys its section by the alias alone. On that machine, by its
+// name or its alias, both sections apply: config names the machine and its
+// alias, and plan clones the aliased section's repo under the named
+// section's base_dir.
+func TestE2E_MachineAliases(t *testing.T) {
+	env := newLocalEnv(t)
+	tmp := t.TempDir()
+	remotes := filepath.Join(tmp, "remotes")
+	for _, name := range []string{"app", "tool"} {
+		gitCmd(t, tmp, "init", "-q", "--bare", "-b", "main", filepath.Join(remotes, name+".git"))
+	}
+	base := filepath.Join(tmp, "box-a")
+	fragments := filepath.Join(filepath.Dir(env.configFile), "config.d")
+	files := map[string]string{
+		env.configFile: fmt.Sprintf("base_dir: %s\nrepos:\n  - url: %s\n", env.baseDir, filepath.Join(remotes, "app.git")),
+		filepath.Join(fragments, "home.yaml"): fmt.Sprintf(`machines:
+  box-a:
+    aliases: [desktop]
+    base_dir: %s
+`, base),
+		filepath.Join(fragments, "client.yaml"): fmt.Sprintf(`machines:
+  desktop:
+    repos:
+      - url: %s
+`, filepath.Join(remotes, "tool.git")),
+	}
+	for path, content := range files {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, machine := range []string{"box-a", "desktop"} {
+		out, code := env.run(t, "--machine", machine, "config")
+		if code != 0 || !strings.Contains(out, `# Machine "box-a", also desktop: its machines: section is applied below (sections: box-a).`) ||
+			!strings.Contains(out, "base_dir: "+base+"\n") {
+			t.Fatalf("config on %s, exit %d:\n%s", machine, code, out)
+		}
+		out, code = env.run(t, "--machine", machine, "plan")
+		if code != 0 || !strings.Contains(out, "-> "+filepath.Join(base, "local", "remotes", "app")) || !strings.Contains(out, "-> "+filepath.Join(base, "local", "remotes", "tool")) {
+			t.Errorf("plan on %s, exit %d: want app and the aliased section's tool under %s:\n%s", machine, code, base, out)
+		}
+	}
+
+	// The alias's section may not set what the machine's own sets.
+	if err := os.WriteFile(filepath.Join(fragments, "client.yaml"), []byte("machines:\n  desktop:\n    base_dir: /elsewhere\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, code := env.run(t, "config", "--validate")
+	want := "machines.box-a.base_dir is set in both " + filepath.Join(fragments, "client.yaml") + " (as machines.desktop) and " + filepath.Join(fragments, "home.yaml") + ": each setting may be set in only one file"
+	if code == 0 || !strings.Contains(out, want) {
+		t.Errorf("a setting the machine's section and its alias's both set, exit %d, want %q:\n%s", code, want, out)
+	}
+}
+
 // TestE2E_ArchivePrune: archives prune --dry-run lists what retention has
 // passed and deletes nothing; archives prune deletes it and drops it from
 // the catalog.

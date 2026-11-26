@@ -522,7 +522,9 @@ and its fragments merged, its `machines:` section laid over the rest,
 merge order (`# Files read, in merge order: ~/.config/gitstead/config.yaml,
 ~/.config/gitstead/config.d/work.yaml`; with none, `# No config file at
 <path>: the defaults and environment apply.`), then, when there are sections,
-the machine, whether a section applied, and every section's name. `--json`
+the machine, its aliases when the applied section has any (`# Machine
+"My-Mac-Studio", also desktop: its machines: section is applied below (sections:
+...)`), whether a section applied, and every section's name. `--json`
 adds `files` (the paths read, in order, `[]` for none) and `machine_applied`
 when there are sections; `--validate --json` prints `path`, `files` and
 `valid`. With `--machine <name>`, another machine's.
@@ -1091,9 +1093,9 @@ log:
 # ============================================================================
 
 # machine: ""                     # GITSTEAD_MACHINE / --machine; default this machine's name
-machines: {}                      # by machine name: base_dir, clone_protocol,
-                                  # workspace_defaults, backup, overrides, repos,
-                                  # discovery, workspaces, fleets
+machines: {}                      # by machine name or alias: aliases, base_dir,
+                                  # clone_protocol, workspace_defaults, backup,
+                                  # overrides, repos, discovery, workspaces, fleets
 ```
 
 ### Per-machine sections
@@ -1110,13 +1112,18 @@ it does nothing. Otherwise:
    -- so one machine's mistake fails the load on every machine. Unknown keys
    in a section are rejected by the loader as anywhere else.
 3. The section whose name equals the machine's ignoring case (an exact match
-   preferred) replaces the config with its merge, and `MachineSection()`
-   reports it; with none, the top level stands.
+   preferred), else the one with the machine's name among its `aliases`
+   (ignoring case), replaces the config with its merge, and
+   `MachineSection()` reports it, by the section's own name; with none, the
+   top level stands. Sections keyed by an alias were folded into their
+   machine's by the merge (Config fragments, step 3), so `MachineNames()` and
+   `Machines` hold the machines' own names only, each with its `aliases`.
 
 The merge, per key of a section:
 
 | Key | Merge |
 |---|---|
+| `aliases` | Not laid over the config: the merge and step 3 read it. |
 | `base_dir`, `clone_protocol` | Replaces when set; `clone_protocol` is validated `oneof=ssh https`, and `CloneProtocolFor` falls back to it after overrides and the rule's provider. |
 | `workspace_defaults` | Pointer fields: each set one replaces; `env` merges by name. |
 | `backup` | `MachineBackup`, a pointer field per `BackupCfg` key (`archive_dir` and `archive_retention` included, which overrides can't set), each validated as `BackupCfg`'s is when set: each set one replaces, then `normalize` expands `~`. `ResolveForRepo` applies overrides' `backup` over it. |
@@ -1154,9 +1161,19 @@ and merges them into the one tree the loader reads:
    skipped, so the loader's strict decode reports unknown keys (with
    suggestions) and values of the wrong type against that file. Errors are
    `config <file> does not parse: ...` and `config <file> is invalid: ...`.
-3. **Merge** (`mergeSources`): the trees, main first, merge into an empty one
-   by `merger`, walking `Config`'s types. `kindOf` is the one statement of the
-   rules:
+   The decode's machine `aliases`, by declaring section, ride along in the
+   file's `source`, decoded as the loader decodes them (a list, or a
+   comma-separated string).
+3. **Merge** (`mergeSources`): first `machineAliases` reads every file's
+   machine aliases into one map, alias (lowercased) to the machine's name as
+   the declaring file spells it, so a section keyed by an alias merges into
+   its machine's whichever file comes first. It refuses, as `config <file> is
+   invalid: machines.<name>.aliases: ...` naming the declaring file, an alias
+   that isn't a valid section name (`validMachineName`), one equal to its own
+   section's name, one another machine already claims (naming that file), and
+   a declaring section whose name is itself another machine's alias. Then the
+   trees, main first, merge into an empty one by `merger`, walking `Config`'s
+   types. `kindOf` is the one statement of the rules:
 
    | Type | Kind | Merge |
    |---|---|---|
@@ -1164,7 +1181,7 @@ and merges them into the one tree the loader reads:
    | `[]struct` whose struct has a `name` key | `mergeByName` | Appended in file order; an entry's `name` defined in two different files is a `ConflictError`. Two of one name in one file stay validation's to judge, as before. |
    | other `[]struct` | `mergeAppend` | Appended in file order. |
    | any other slice | `mergeOnce` | One setting's value. |
-   | `map[string]Machine` | `mergeMachines` | By machine name: an exact match, else a case-insensitive match with a section an earlier file gave (keeping its spelling); each merged as `Machine`, by these rules. One file's sections stay as written. |
+   | `map[string]Machine` | `mergeMachines` | By machine name: an exact match, else a case-insensitive match with a section an earlier file gave (keeping its spelling); each merged as `Machine`, by these rules. One file's sections stay as written, except that a section keyed by an alias joins its machine's -- by an exact match, else a case-insensitive one from any file, this one included -- with the alias recorded as where its keys came from. |
    | other maps | `mergeEntries` | Key by key; a key two files set is a `ConflictError`. |
    | anything else | `mergeOnce` | The first file to set the key keeps it; a second is a `ConflictError`, whatever its value. |
 
@@ -1172,11 +1189,19 @@ and merges them into the one tree the loader reads:
    its kind -- a shorthand the decoder expands, such as one mapping for a list
    or `k=v` text for a map -- merges as `mergeOnce`. Keys are visited in
    sorted order, so the conflict reported is the same every run. A single
-   file merges into a tree equal to its own (`TestMergeSources_OneFileIsItself`).
-   `ConflictError{Key, Files}` names what both set -- `sync.update`,
-   `workspace_defaults.env.EDITOR`, `machines.desktop.base_dir`, `accounts
-   entry "work"` -- and the two files, and says each setting may be set in
-   only one file. `TestMergeKinds` lists every list and map key of `Config`
+   file merges into a tree equal to its own (`TestMergeSources_OneFileIsItself`)
+   unless it keys a section by an alias. The merger records each key's
+   `origin`: the file, and the alias whose section set it, if one did.
+   `ConflictError{Key, Files, Aliases}` names what both set -- `sync.update`,
+   `workspace_defaults.env.EDITOR`, `machines.desktop.base_dir` (under the
+   machine's name, whichever section set it), `accounts entry "work"` -- and
+   the two files, each followed by `(as machines.<alias>)` when it set the key
+   in an alias's section, and says each setting may be set in only one file.
+   One file setting a key in a machine's section and its alias's, or a named
+   entry there, is the same error with the file twice: `... is set twice in
+   <file>, in the machine's section and as machines.<alias>, its alias: each
+   setting may be set once`. Two entries of one name in one section, alias or
+   none, stay validation's. `TestMergeKinds` lists every list and map key of `Config`
    and `Machine` with its kind, so a new one's rule is chosen on purpose.
 4. **Load**: one `pkgconfig.Load[Config]` with the merged tree as a base
    provider, then `GITSTEAD_*` variables and flags above it, the tag

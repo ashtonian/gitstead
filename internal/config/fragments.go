@@ -100,11 +100,11 @@ func readSources(ctx context.Context, path string, o *loadOptions) ([]source, er
 	}
 	switch {
 	case err == nil:
-		tree, err := parseSource(ctx, path, data, false)
+		src, err := parseSource(ctx, path, data, false)
 		if err != nil {
 			return nil, err
 		}
-		srcs = append(srcs, source{path: path, tree: tree})
+		srcs = append(srcs, src)
 	case errors.Is(err, fs.ErrNotExist) && o.optionalFile:
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
@@ -120,37 +120,46 @@ func readSources(ctx context.Context, path string, o *loadOptions) ([]source, er
 		if err != nil {
 			return nil, err
 		}
-		tree, err := parseSource(ctx, p, data, true)
+		src, err := parseSource(ctx, p, data, true)
 		if err != nil {
 			return nil, err
 		}
-		srcs = append(srcs, source{path: p, tree: tree})
+		srcs = append(srcs, src)
 	}
 	return srcs, nil
 }
 
 // parseSource parses one file's settings and checks them on their own.
-func parseSource(ctx context.Context, path string, data []byte, fragment bool) (map[string]any, error) {
+func parseSource(ctx context.Context, path string, data []byte, fragment bool) (source, error) {
 	where := "config " + path
 	tree, err := yaml.Parser().Unmarshal(data)
 	if err != nil {
-		return nil, fmt.Errorf("%s does not parse: %w", where, err)
+		return source{}, fmt.Errorf("%s does not parse: %w", where, err)
 	}
 	if fragment {
 		for key := range tree {
 			if strings.EqualFold(key, "machine") {
-				return nil, invalidConfig(where, errors.New(`"machine" can't be set in a fragment, which every machine reads: choose the machine with GITSTEAD_MACHINE or --machine`))
+				return source{}, invalidConfig(where, errors.New(`"machine" can't be set in a fragment, which every machine reads: choose the machine with GITSTEAD_MACHINE or --machine`))
 			}
 		}
 	}
 	// The loader's own strict decode, of this file alone, so an unknown key
 	// or a value of the wrong type is reported in the file it is in.
-	_, err = pkgconfig.Load[Config](ctx,
+	decoded, err := pkgconfig.Load[Config](ctx,
 		pkgconfig.WithBaseProvider(confmap.Provider(tree, ""), nil),
 		pkgconfig.WithSkipValidation(),
 	)
 	if err != nil {
-		return nil, loadError(where, err)
+		return source{}, loadError(where, err)
 	}
-	return tree, nil
+	src := source{path: path, tree: tree}
+	for name, m := range decoded.Machines {
+		if len(m.Aliases) > 0 {
+			if src.aliases == nil {
+				src.aliases = map[string][]string{}
+			}
+			src.aliases[name] = m.Aliases
+		}
+	}
+	return src, nil
 }

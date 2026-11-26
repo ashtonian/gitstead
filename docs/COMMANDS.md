@@ -27,7 +27,7 @@
 | `gitstead run -- <cmd>` | Run a command in each matching repo (parallel). `--repos`/`--tag`/`--set`, `--fail-fast`. |
 | `gitstead manifest export\|import\|save` | Portable `{url,tags,path}` manifest (an entry may name its repo by `repo` key instead of `url`): export and import to rehydrate a new machine, `save` to put the repos tracked by hand here into the shared manifest. See [Several machines](CONFIGURATION.md#several-machines). |
 | `gitstead remote-sync` | Back up and take WIP and unpushed commits offsite now, under `remote_sync`. `--repos`, `--tag`, `--set`, `--dry-run`; `--list` shows what every machine left offsite and how to restore it. |
-| `gitstead config` | Print resolved config: the config file and its [fragments](CONFIGURATION.md#config-fragments) merged, this machine's `machines:` section laid over the rest, headed by the files read, in merge order, and which section applied (`--json`: `files`). `--validate`, `--edit` (the config file, never a fragment), `--path`, `--for-repo <key>`, `--redact`; `--machine <name>` previews another machine's. |
+| `gitstead config` | Print resolved config: the config file and its [fragments](CONFIGURATION.md#config-fragments) merged, this machine's `machines:` section laid over the rest, headed by the files read, in merge order, and which section applied, with its aliases (`--json`: `files`). `--validate`, `--edit` (the config file, never a fragment), `--path`, `--for-repo <key>`, `--redact`; `--machine <name>` previews another machine's. |
 | `gitstead report` / `log` | Summarize / list recent activity (clones, backups, syncs…) from the operation log. `--since`, `-n`. |
 | `gitstead workspace` (`ws`, `wg`) | Manage workspaces: repos × agents, each agent in a copy of its own. See [Workspaces](WORKSPACES.md#workspaces). |
 | `gitstead fleet` | Open several workspaces' agents side by side with tmux, iTerm, Muxy or a plugin; `open`, `plan`, `ls`, `status`, `stop`. See [Fleets](LAUNCHERS.md#fleets-and-launchers). |
@@ -116,5 +116,5 @@ never change a gitstead run inside a workspace. Notable ones:
 | `GITSTEAD_STATE` | State file path (same as `--state`); unset, `$XDG_DATA_HOME/gitstead/state.yaml` (`~/.local/share/gitstead/state.yaml`). |
 | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` | Where the default config, data and cache directories are (see [Configuration](CONFIGURATION.md#configuration)). |
 | `GITSTEAD_BASE_DIR` | Override `base_dir`. |
-| `GITSTEAD_MACHINE` | This machine's name for `machines:` (same as `--machine`); unset, the macOS local host name or the host name. |
+| `GITSTEAD_MACHINE` | This machine's name for `machines:` (same as `--machine`), a section's or one of its `aliases`; unset, the macOS local host name or the host name. |
 | `GITHUB_TOKEN` / `GITLAB_TOKEN` / `GITEA_TOKEN` / `FORGEJO_TOKEN` | Default provider tokens. |
