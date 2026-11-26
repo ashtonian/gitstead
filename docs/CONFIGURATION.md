@@ -316,8 +316,41 @@ the local host name (System Settings > General > Sharing, which DHCP doesn't
 change), elsewhere the host name up to its first dot. Section names match it
 ignoring case, and are letters, digits, `-` and `_`.
 
+A section's `aliases` are other names for its machine. A section keyed by
+one, in any file, is that machine's: it merges with the machine's own
+section by the rules below, as though keyed by the machine's name, and
+`machine:`, `GITSTEAD_MACHINE` and `--machine` may name the machine by one
+(`--machine laptop`). So a file that shouldn't know a machine's name -- a client's
+dotfiles, or a public base -- keys its section by an alias the file that
+does know it gives the machine ([Config fragments](#config-fragments) has a
+set):
+
+```yaml
+# your own file: the machine's name, and what the others call it
+machines:
+  My-MacBook-Air:
+    aliases: [laptop]
+
+# another file, which knows it only as laptop
+machines:
+  laptop:
+    workspace_defaults: { agents: 1 }
+```
+
+- An alias is a name a section could have, of one machine, never two, and
+  not its own section's name. A section keyed by an alias can't have aliases
+  of its own: list them all with the machine's.
+- One file sets a machine's aliases, as one file sets any setting.
+- A key the machine's section and its alias's both set is set twice -- an
+  error, in one file or two -- and a named entry both define likewise.
+- Pick aliases no machine is named: a machine whose own name is another's
+  alias takes that one's sections.
+- `gitstead config` names the machine and its aliases in its header; the
+  sections it and `gitstead doctor` list are the machines' own names.
+
 | Key in a section | How it applies |
 | --- | --- |
+| `aliases` | Other names for this machine, which any file's sections may be keyed by; one file sets them. |
 | `base_dir` | Replaces the top-level one. |
 | `clone_protocol` | Replaces the top-level one: the transport of discovered repos and [`repo` entries](#manual-repos-excludes-overrides-tags) no override's `clone_protocol` covers. A `url` entry keeps its URL's. |
 | `workspace_defaults` | Each key it sets replaces the top-level one; `env` adds its names to the top level's, replacing those it shares. |
@@ -343,7 +376,7 @@ machine's without going there.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `machine` | this machine's name | The section to lay over the rest; `GITSTEAD_MACHINE`, `--machine`. |
-| `machines` | `{}` | Each machine's own settings, by name: `base_dir`, `clone_protocol`, `workspace_defaults`, `backup`, `overrides`, `repos`, `discovery`, `workspaces`, `fleets`. |
+| `machines` | `{}` | Each machine's own settings, by name or [alias](#per-machine-sections): `aliases`, `base_dir`, `clone_protocol`, `workspace_defaults`, `backup`, `overrides`, `repos`, `discovery`, `workspaces`, `fleets`. |
 
 ## Config fragments
 
@@ -365,11 +398,12 @@ each context's private overlay links its own fragment:
 
 Every file is a config file in its own right -- any key, `machines:`
 sections included -- so each context says where its repos and workspaces go
-on each machine. [`examples/fragments`](../examples/fragments) is a complete
-set:
+on each machine. A context keys its sections by the aliases your own file
+gives your machines, so it never learns their names.
+[`examples/fragments`](../examples/fragments) is a complete set:
 
 ```yaml
-# config.yaml: names no account and no repo.
+# config.yaml: names no account, no repo and no machine, only aliases.
 base_dir: ~/code
 layout: owner/name
 sync:
@@ -400,10 +434,13 @@ workspaces:
   - name: app
     repos: [github.com/your-login/app]
 machines:
-  desktop:
+  My-Mac-Studio:            # each machine's local host name
+    aliases: [desktop]      # and what the other files call it
     workspaces:
       - name: app
         agents: 4
+  My-MacBook-Air:
+    aliases: [laptop]
 ```
 
 ```yaml
@@ -434,7 +471,10 @@ machines:
 
 On the desktop, acme's repos go to `/Volumes/Bulk/code` and its workspace has
 three agents; on the laptop they go to `~/work`, every workspace with one.
-Neither fragment mentions the other, and the base mentions neither.
+Neither fragment mentions the other, and the base mentions neither. Only
+`personal.yaml` names the machines; the base and `work.yaml` key their
+sections by the aliases it gives them, so the client's dotfiles, on the
+client's own laptop too, hold none of your machines' names.
 
 **Which files.** The fragments are the files in `config.d` beside the config
 file in use -- the default `~/.config/gitstead/config.yaml`, or the one
@@ -465,7 +505,7 @@ file is silently replaced by another.
 | Entries | `repos`, `overrides`, `exclude` | Every file's, in file order: `config.yaml`'s first, then each fragment's. Overrides apply in order, so a later file's override wins for the repos it shares with an earlier one, as a later override does within a file. |
 | Named entries | `accounts`, `providers`, `discovery`, `sets`, `agents`, `workspaces`, `fleets` | Every file's, in file order; a name defined in two files is an error. |
 | Maps | `workspace_defaults.env`, `launchers.plugins` | Name by name; a name in two files is an error. |
-| Machine sections | `machines` | By machine name, ignoring case and spelled as the first file spells it. One machine's sections from several files merge by these same rules: `machines.desktop.base_dir` or `machines.desktop.clone_protocol` in two files is an error, as is one `backup` key, `overrides` and `repos` are added to, and `discovery`, `workspaces` and `fleets` merge by name. The merged section is then laid over the rest as [Per-machine sections](#per-machine-sections) says. |
+| Machine sections | `machines` | By machine name, ignoring case and spelled as the first file spells it; a section keyed by a machine's alias, which any file may declare, is that machine's. One machine's sections from several files -- or its own and its alias's in one -- merge by these same rules: `machines.desktop.base_dir` or `machines.desktop.clone_protocol` in two of them is an error, as is one `backup` key, `overrides` and `repos` are added to, and `discovery`, `workspaces` and `fleets` merge by name. The merged section is then laid over the rest as [Per-machine sections](#per-machine-sections) says. |
 | The machine | `machine` | Only in `config.yaml`. A fragment, which every machine reads, can't choose the machine: use `GITSTEAD_MACHINE` or `--machine`. |
 
 Environment variables and flags still override the merged files, as they
@@ -490,7 +530,7 @@ read, in merge order, before the machine line:
 ```
 $ gitstead --machine desktop config | head -3
 # Files read, in merge order: ~/.config/gitstead/config.yaml, ~/.config/gitstead/config.d/personal.yaml, ~/.config/gitstead/config.d/work.yaml
-# Machine "desktop": its machines: section is applied below (sections: desktop, laptop).
+# Machine "My-Mac-Studio", also desktop: its machines: section is applied below (sections: My-Mac-Studio, My-MacBook-Air).
 base_dir: /Volumes/Fast/code
 ```
 
@@ -506,6 +546,19 @@ base_dir: /Volumes/Fast/code
   file.
 - `"machine" can't be set in a fragment` -- move `machine:` to
   `GITSTEAD_MACHINE` (or `config.yaml`, on a machine whose config is its own).
+- `machines.My-Mac-Studio.base_dir is set in both <file> (as machines.desktop) and
+  <file>` -- a section keyed by the alias `desktop` and the machine's own set
+  one key. Keep it in one of them. In one file it reads `is set twice in
+  <file>, in the machine's section and as machines.desktop, its alias`.
+- `machines.<name>.aliases: "<alias>" is already machines.<other>'s alias` --
+  an alias names one machine: rename one of them.
+- `machines.<name>.aliases: <name> is an alias of machines.<machine>, ... so
+  it can't have aliases of its own` -- list every alias with the machine's own
+  section.
+- A section keyed by an alias seems ignored -- check that the file declaring
+  the alias is read on this machine (`gitstead config | head -2` lists the
+  files, then the machine and its aliases) and that the alias is spelled as
+  declared, ignoring case.
 - `reading config fragments <dir>/config.d: ...` or `reading config
   <dir>/config.d/work.yaml: ... no such file or directory`
   -- a link points at an overlay that isn't there (an unmounted drive, a

@@ -231,6 +231,27 @@ func TestLoad_FragmentConflicts(t *testing.T) {
 			b:    "machines:\n  desktop:\n    workspaces:\n      - {name: app, agents: 6}\n",
 			key:  `machines.desktop.workspaces entry "app"`, first: "config.yaml",
 		},
+		{
+			name: "a machine's setting, in its section and its alias's",
+			a:    "machines:\n  desktop:\n    aliases: [box]\n    base_dir: /a\n", b: "machines:\n  box:\n    base_dir: /b\n",
+			key: "machines.desktop.base_dir", first: "a.yaml",
+		},
+		{
+			name: "a machine's setting, in its alias's section before its own",
+			a:    "machines:\n  box:\n    base_dir: /a\n", b: "machines:\n  desktop:\n    aliases: [box]\n    base_dir: /b\n",
+			key: "machines.desktop.base_dir", first: "a.yaml",
+		},
+		{
+			name: "a machine's named entry, in its alias's section in another case",
+			main: "machines:\n  desktop:\n    aliases: [box]\n    workspaces:\n      - {name: app, path: /app}\n",
+			b:    "machines:\n  BOX:\n    workspaces:\n      - {name: app, agents: 6}\n",
+			key:  `machines.desktop.workspaces entry "app"`, first: "config.yaml",
+		},
+		{
+			name: "a machine's aliases",
+			a:    "machines:\n  desktop:\n    aliases: [box]\n", b: "machines:\n  Desktop:\n    aliases: [box]\n",
+			key: "machines.desktop.aliases", first: "a.yaml",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

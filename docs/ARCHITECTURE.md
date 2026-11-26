@@ -378,7 +378,7 @@ The ones that shape the code most:
 | Package | Owns |
 | --- | --- |
 | `main.go`, `internal/cmd` | The CLI: flags, wiring, output. Commands load config and state, call the packages below, print. |
-| `internal/config` | Loading (on [`github.com/ashtonian/pkg/config`](https://github.com/ashtonian/pkg/tree/main/config)), config fragments in `config.d` (`fragments.go`: finding and checking each file; `merge.go`: the merge rules), defaults, validation, per-repo overrides, per-machine sections (`machines.go`), SSH key and protocol resolution, and editing the config file in place (`edit.go`), refusing what a fragment sets. |
+| `internal/config` | Loading (on [`github.com/ashtonian/pkg/config`](https://github.com/ashtonian/pkg/tree/main/config)), config fragments in `config.d` (`fragments.go`: finding and checking each file; `merge.go`: the merge rules, machine aliases included), defaults, validation, per-repo overrides, per-machine sections (`machines.go`), SSH key and protocol resolution, and editing the config file in place (`edit.go`), refusing what a fragment sets. |
 | `internal/discovery` | Provider clients (GitHub, GitLab, Gitea/Forgejo), rule filtering, stale detection. |
 | `internal/reconcile` | Desired vs recorded vs on-disk for tracked repos, and the plan engine: applies changes, several repos at once, then serial ones. |
 | `internal/state` | The state file: schema, migrations, locking, atomic writes, and `GroupCommit`, which saves concurrent changes in one write. |

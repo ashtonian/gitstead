@@ -85,7 +85,9 @@ Then:
   with none. The name is `GITSTEAD_MACHINE`, else the macOS local host name
   (`scutil --get LocalHostName`), else the host name: rename the section, or
   set `GITSTEAD_MACHINE` in the shell and in the background sync's
-  environment.
+  environment. A section keyed by an alias applies only where a file read on
+  that machine gives the machine that alias (`aliases:` in its own section);
+  `gitstead config` lists the aliases of the machine it applied.
 
 ### Stale repos
 

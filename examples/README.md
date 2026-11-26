@@ -214,19 +214,22 @@ account and no repo, so it can live in public dotfiles.
 [`config.d/personal.yaml`](fragments/config.d/personal.yaml) and
 [`config.d/work.yaml`](fragments/config.d/work.yaml) each add one context's
 accounts, repos and workspaces, with `machines:` sections of their own, and
-would each be linked in from that context's private dotfiles. gitstead merges
-the three:
+would each be linked in from that context's private dotfiles. Only
+`personal.yaml` names the machines, giving each an alias -- `desktop`,
+`laptop` -- that the base and `work.yaml` key their sections by, so neither
+holds your machines' names. gitstead merges the three:
 
 ```
 $ gitstead --machine desktop config | head -3
 # Files read, in merge order: ~/.config/gitstead/config.yaml, ~/.config/gitstead/config.d/personal.yaml, ~/.config/gitstead/config.d/work.yaml
-# Machine "desktop": its machines: section is applied below (sections: desktop, laptop).
+# Machine "My-Mac-Studio", also desktop: its machines: section is applied below (sections: My-Mac-Studio, My-MacBook-Air).
 base_dir: /Volumes/Fast/code
 ```
 
 The desktop's section comes from all three files: its drive from the base,
 the app workspace's agents from `personal.yaml`, and where acme's repos and
-workspace go from `work.yaml`. `gitstead plan` on each machine:
+workspace go from `work.yaml`. `--machine desktop` and `--machine
+My-Mac-Studio` preview the same machine. `gitstead plan` on each machine:
 
 ```
 desktop                                        laptop

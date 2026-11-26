@@ -8,7 +8,8 @@
 # setting, a section's key, or a named entry (accounts, providers, discovery,
 # sets, agents, workspaces, fleets; env and plugin names) is set in one file
 # only, two being an error; repos, overrides and exclude are added to in file
-# order; machines: sections merge by machine name, by the same rules. machine:
+# order; machines: sections merge by machine name, by the same rules, a
+# section keyed by a machine's alias with the machine's. machine:
 # can't be set in a fragment. gitstead writes only this file, never a
 # fragment, and `gitstead config` names every file it read. See
 # docs/CONFIGURATION.md, Config fragments, and examples/fragments.
@@ -754,6 +755,14 @@ launchers:
 # <name> config` shows another machine's.
 #
 # A section sets:
+#   aliases              other names for the machine. A section keyed by one,
+#                        in any file, is the machine's, merged with its own
+#                        by these rules, and machine: may name the machine
+#                        by one (GITSTEAD_MACHINE=laptop). So a file that shouldn't
+#                        know the machine's name -- a client's dotfiles --
+#                        keys its section by the alias. One file sets them;
+#                        an alias names one machine, and isn't its section's
+#                        name, and a section keyed by one has none of its own.
 #   base_dir, clone_protocol
 #                        replace the top-level ones. clone_protocol is the
 #                        transport of discovered repos and repo-key entries
@@ -786,7 +795,8 @@ machines: {}
   #   workspaces:
   #     - name: app
   #       agents: 6
-  # laptop:
+  # My-MacBook-Air:                  # the machine's own name
+  #   aliases: [laptop]               # what other files key its sections by
   #   clone_protocol: https           # no SSH key on the forge from here
   #   workspace_defaults:
   #     agents: 1

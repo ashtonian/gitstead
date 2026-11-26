@@ -1,6 +1,7 @@
 # One client's work, from that client's overlay alone, linked in as
 # ~/.config/gitstead/config.d/work.yaml. Nothing here appears in the other
-# files, and nothing of theirs here.
+# files, and nothing of theirs here: its machines: section is keyed by the
+# alias desktop, not by the machine's name.
 accounts:
   - name: work
     hosts: [github.com]
